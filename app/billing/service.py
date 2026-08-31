@@ -17,7 +17,8 @@ async def get_or_create_plan(
         return plan
     plan = Plan(moduleCode=module_code, code=code, name=name, priceCents=price_cents, currency=currency, periodDays=period_days)
     db.add(plan)
-    await db.flush()
+    await db.commit()
+    await db.refresh(plan)
     return plan
 
 

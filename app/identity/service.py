@@ -1,6 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.billing.permissions import SUBSCRIPTION_MANAGE
 from app.core.errors import AppError
 from app.identity.models import Organization, OrganizationUser, User
 from app.identity.permissions import ORGANIZATION_MANAGE
@@ -8,6 +9,15 @@ from app.identity.schemas import CreateOrganizationRequest
 from app.modules_registry.permissions import MODULE_MANAGE
 from app.rbac.models import Role, RolePermission, UserRole
 from app.rbac.service import get_or_create_permission
+
+# Permissions d'administration du socle accordées automatiquement au rôle
+# owner à la création d'une organisation — jamais les permissions d'un futur
+# module métier, celles-ci restent attribuées explicitement via l'API rbac.
+OWNER_DEFAULT_PERMISSIONS = [
+    (ORGANIZATION_MANAGE, "identity", "Gérer l'organisation (membres, rôles, paramètres)."),
+    (MODULE_MANAGE, "modules_registry", "Activer/désactiver les modules pour l'organisation."),
+    (SUBSCRIPTION_MANAGE, "billing", "Gérer les abonnements de l'organisation."),
+]
 
 
 async def create_organization(db: AsyncSession, owner: User, data: CreateOrganizationRequest) -> Organization:
@@ -27,18 +37,9 @@ async def create_organization(db: AsyncSession, owner: User, data: CreateOrganiz
     db.add(owner_role)
     await db.flush()
 
-    # Le rôle owner reçoit les permissions d'administration de tous les
-    # domaines du socle (identity, modules...) — un futur module métier ne doit
-    # PAS être ajouté ici : ses propres permissions restent à attribuer
-    # explicitement via l'API rbac, jamais accordées automatiquement à owner.
-    org_permission = await get_or_create_permission(
-        db, ORGANIZATION_MANAGE, "identity", "Gérer l'organisation (membres, rôles, paramètres)."
-    )
-    module_permission = await get_or_create_permission(
-        db, MODULE_MANAGE, "modules_registry", "Activer/désactiver les modules pour l'organisation."
-    )
-    db.add(RolePermission(roleId=owner_role.id, permissionId=org_permission.id))
-    db.add(RolePermission(roleId=owner_role.id, permissionId=module_permission.id))
+    for code, module_code, description in OWNER_DEFAULT_PERMISSIONS:
+        permission = await get_or_create_permission(db, code, module_code, description)
+        db.add(RolePermission(roleId=owner_role.id, permissionId=permission.id))
     db.add(UserRole(userId=owner.id, organizationId=organization.id, roleId=owner_role.id))
 
     await db.commit()

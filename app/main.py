@@ -15,6 +15,7 @@ TAGS_METADATA = [
     {"name": "auth", "description": "Authentification globale : register, login, refresh, logout, session courante."},
     {"name": "organizations", "description": "Organisations (tenants) et leurs membres — modèle Organization → User → Role → Permission."},
     {"name": "modules", "description": "Registre des modules et activation par organisation (ex: zylo_liquid)."},
+    {"name": "billing", "description": "Plans, abonnements et facturation par module (aucun prestataire de paiement réel intégré)."},
 ]
 
 app = FastAPI(title=settings.APP_NAME, openapi_tags=TAGS_METADATA)

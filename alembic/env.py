@@ -10,6 +10,13 @@ from alembic import context
 from app.core.config import settings
 from app.core.database import Base
 
+# Chaque module (socle ou futur) doit importer ses modèles ici pour que
+# `alembic revision --autogenerate` les détecte — l'import seul suffit, aucun
+# appel de code n'est nécessaire, l'enregistrement se fait via Base.metadata.
+from app.auth import models as auth_models  # noqa: F401
+from app.identity import models as identity_models  # noqa: F401
+from app.rbac import models as rbac_models  # noqa: F401
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config

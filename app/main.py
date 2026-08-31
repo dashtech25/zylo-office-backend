@@ -6,6 +6,7 @@ from app.core.config import settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import setup_logging
 from app.core.middleware import RequestIdMiddleware
+from app.modules_registry.seed import seed_known_modules
 
 setup_logging()
 
@@ -23,6 +24,11 @@ app.add_middleware(
 register_exception_handlers(app)
 
 app.include_router(api_router, prefix="/api/v1")
+
+
+@app.on_event("startup")
+async def on_startup() -> None:
+    await seed_known_modules()
 
 
 @app.get("/")

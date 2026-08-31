@@ -1,0 +1,94 @@
+import uuid
+from datetime import datetime, timezone
+
+from fastapi import Depends
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.core.errors import AppError
+from app.modules_registry.models import Module, OrganizationModule
+from app.rbac.service import get_current_organization_id
+
+
+async def get_or_create_module(db: AsyncSession, code: str, name: str, description: str, version: str = "0.1.0") -> Module:
+    result = await db.execute(select(Module).where(Module.code == code))
+    module = result.scalar_one_or_none()
+    if module:
+        return module
+    module = Module(code=code, name=name, description=description, version=version)
+    db.add(module)
+    await db.flush()
+    return module
+
+
+async def activate_module(db: AsyncSession, organization_id: uuid.UUID, module_code: str) -> OrganizationModule:
+    result = await db.execute(select(Module).where(Module.code == module_code))
+    if result.scalar_one_or_none() is None:
+        raise AppError(code="module_not_found", message=f"Module inconnu : {module_code}.", status_code=404)
+
+    result = await db.execute(
+        select(OrganizationModule).where(
+            OrganizationModule.organizationId == organization_id, OrganizationModule.moduleCode == module_code
+        )
+    )
+    org_module = result.scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if org_module is None:
+        org_module = OrganizationModule(
+            organizationId=organization_id, moduleCode=module_code, status="active", activatedAt=now
+        )
+        db.add(org_module)
+    else:
+        org_module.status = "active"
+        org_module.activatedAt = now
+        org_module.deactivatedAt = None
+    await db.commit()
+    await db.refresh(org_module)
+    return org_module
+
+
+async def deactivate_module(db: AsyncSession, organization_id: uuid.UUID, module_code: str) -> OrganizationModule:
+    result = await db.execute(
+        select(OrganizationModule).where(
+            OrganizationModule.organizationId == organization_id, OrganizationModule.moduleCode == module_code
+        )
+    )
+    org_module = result.scalar_one_or_none()
+    if org_module is None:
+        raise AppError(code="module_not_activated", message="Ce module n'est pas activé pour cette organisation.", status_code=404)
+    org_module.status = "inactive"
+    org_module.deactivatedAt = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(org_module)
+    return org_module
+
+
+async def is_module_active(db: AsyncSession, organization_id: uuid.UUID, module_code: str) -> bool:
+    result = await db.execute(
+        select(OrganizationModule.status).where(
+            OrganizationModule.organizationId == organization_id,
+            OrganizationModule.moduleCode == module_code,
+        )
+    )
+    status_value = result.scalar_one_or_none()
+    return status_value in ("active", "trial")
+
+
+def require_module_active(module_code: str):
+    """Combinable avec require_permission() sur une même route — un module
+    inactif bloque l'accès même si l'utilisateur a la permission requise
+    (grande_phases.md §9)."""
+
+    async def dependency(
+        organization_id: uuid.UUID = Depends(get_current_organization_id),
+        db: AsyncSession = Depends(get_db),
+    ) -> None:
+        if not await is_module_active(db, organization_id, module_code):
+            raise AppError(
+                code="module_inactive",
+                message=f"Le module '{module_code}' n'est pas actif pour cette organisation.",
+                status_code=403,
+            )
+
+    return dependency

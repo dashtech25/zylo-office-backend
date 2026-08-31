@@ -15,6 +15,7 @@ from app.core.database import Base
 # appel de code n'est nécessaire, l'enregistrement se fait via Base.metadata.
 from app.auth import models as auth_models  # noqa: F401
 from app.identity import models as identity_models  # noqa: F401
+from app.modules_registry import models as modules_registry_models  # noqa: F401
 from app.rbac import models as rbac_models  # noqa: F401
 
 # this is the Alembic Config object, which provides

@@ -5,6 +5,7 @@ from app.core.errors import AppError
 from app.identity.models import Organization, OrganizationUser, User
 from app.identity.permissions import ORGANIZATION_MANAGE
 from app.identity.schemas import CreateOrganizationRequest
+from app.modules_registry.permissions import MODULE_MANAGE
 from app.rbac.models import Role, RolePermission, UserRole
 from app.rbac.service import get_or_create_permission
 
@@ -26,10 +27,18 @@ async def create_organization(db: AsyncSession, owner: User, data: CreateOrganiz
     db.add(owner_role)
     await db.flush()
 
-    permission = await get_or_create_permission(
+    # Le rôle owner reçoit les permissions d'administration de tous les
+    # domaines du socle (identity, modules...) — un futur module métier ne doit
+    # PAS être ajouté ici : ses propres permissions restent à attribuer
+    # explicitement via l'API rbac, jamais accordées automatiquement à owner.
+    org_permission = await get_or_create_permission(
         db, ORGANIZATION_MANAGE, "identity", "Gérer l'organisation (membres, rôles, paramètres)."
     )
-    db.add(RolePermission(roleId=owner_role.id, permissionId=permission.id))
+    module_permission = await get_or_create_permission(
+        db, MODULE_MANAGE, "modules_registry", "Activer/désactiver les modules pour l'organisation."
+    )
+    db.add(RolePermission(roleId=owner_role.id, permissionId=org_permission.id))
+    db.add(RolePermission(roleId=owner_role.id, permissionId=module_permission.id))
     db.add(UserRole(userId=owner.id, organizationId=organization.id, roleId=owner_role.id))
 
     await db.commit()

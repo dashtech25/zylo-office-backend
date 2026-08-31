@@ -22,11 +22,9 @@ async def create_plan(
     _: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Plan:
-    plan = await service.get_or_create_plan(
+    return await service.get_or_create_plan(
         db, data.moduleCode, data.code, data.name, data.priceCents, data.currency, data.periodDays
     )
-    await db.commit()
-    return plan
 
 
 @router.get("/plans", response_model=list[PlanResponse])

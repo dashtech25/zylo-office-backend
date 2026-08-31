@@ -15,9 +15,9 @@ dist/
 .ruff_cache/
 .coverage
 htmlcov/
-# .env
-# .env.*.local
-# !.env.example
+.env
+.env.*.local
+!.env.example
 .DS_Store
 *.log
 .idea/

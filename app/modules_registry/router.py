@@ -11,14 +11,15 @@ from app.modules_registry.models import Module, OrganizationModule
 from app.modules_registry.permissions import MODULE_MANAGE
 from app.modules_registry.schemas import ActivateModuleRequest, ModuleResponse, OrganizationModuleResponse
 from app.rbac.service import require_permission
+from app.shared.pagination import PaginationParams, paginate
+from app.shared.schemas import Page
 
 router = APIRouter()
 
 
-@router.get("", response_model=list[ModuleResponse])
-async def list_modules(db: AsyncSession = Depends(get_db)) -> list[Module]:
-    result = await db.execute(select(Module))
-    return list(result.scalars().all())
+@router.get("", response_model=Page[ModuleResponse])
+async def list_modules(pagination: PaginationParams = Depends(), db: AsyncSession = Depends(get_db)) -> Page:
+    return await paginate(db, select(Module).order_by(Module.code), pagination, ModuleResponse)
 
 
 @router.post(

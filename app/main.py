@@ -10,7 +10,14 @@ from app.modules_registry.seed import seed_known_modules
 
 setup_logging()
 
-app = FastAPI(title=settings.APP_NAME)
+TAGS_METADATA = [
+    {"name": "health", "description": "Vérification de disponibilité du service."},
+    {"name": "auth", "description": "Authentification globale : register, login, refresh, logout, session courante."},
+    {"name": "organizations", "description": "Organisations (tenants) et leurs membres — modèle Organization → User → Role → Permission."},
+    {"name": "modules", "description": "Registre des modules et activation par organisation (ex: zylo_liquid)."},
+]
+
+app = FastAPI(title=settings.APP_NAME, openapi_tags=TAGS_METADATA)
 
 app.add_middleware(RequestIdMiddleware)
 app.add_middleware(

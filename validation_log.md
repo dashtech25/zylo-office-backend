@@ -198,6 +198,35 @@ minimum ci-dessus).
 
 ---
 
+### PUT /api/v1/zylo-liquid/tanks/{id}/calibration-points — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal (remplacement complet) | 200 + points créés triés par hauteur | 200, `pointCount=3`, triés [0,1000,2000] | ✓ |
+| Cuve introuvable | 404 `tank_not_found` | 404 `tank_not_found` | ✓ |
+| Hauteur maximale dépasse la cuve | 422 `calibration_height_exceeds_tank` | 422 `calibration_height_exceeds_tank` | ✓ |
+| Table non monotone (volume qui diminue) | 422 `calibration_table_not_monotonic` | 422 `calibration_table_not_monotonic` | ✓ |
+| Liste vide | 422 (validation) | 422 | ✓ |
+| Module inactif sur une autre organisation | 403 `module_inactive` | 403 `module_inactive` | ✓ |
+
+Cas supplémentaire : un second `PUT` remplace intégralement la table
+précédente, jamais une fusion (`test_replace_calibration_points_is_a_full_replacement`).
+
+Algorithmes validés séparément : N/A (validation de cohérence, pas
+l'algorithme d'interpolation lui-même — celui-ci sera testé à l'endpoint 7).
+Preuve : `tests/test_zylo_liquid_tank_calibration_points.py` (8 cas, pytest
+réel) + suite `curl` réelle contre serveur de développement (4 cas
+minimum ci-dessus).
+
+### GET /api/v1/zylo-liquid/tanks/{id}/calibration-points — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal | 200 + liste triée | 200 | ✓ |
+| Aucune table chargée | 200 + liste vide (jamais une erreur) | 200, `[]` | ✓ |
+
+---
+
 ## Niveau 3 — Tests d'intégration de flux
 
 Aucun scénario métier de bout en bout (livraison, fuite) n'est encore
@@ -217,3 +246,4 @@ mesures réelles dans `TankMeasurement`.
 | 2 | `/stations` (POST/GET/PATCH/deactivate/reactivate) | N/A | ✓ (5 endpoints, tous cas) | N/A | **VALIDÉ** |
 | 3 | `/tanks` (POST/GET/PATCH) | N/A | ✓ (4 endpoints, tous cas) | N/A | **VALIDÉ** |
 | 4 | `/tank-sensor-mappings` (POST/GET/close) | N/A | ✓ (3 endpoints, tous cas) | N/A | **VALIDÉ** |
+| 5 | `/tanks/{id}/calibration-points` (PUT/GET) | N/A | ✓ (2 endpoints, tous cas) | N/A | **VALIDÉ** |

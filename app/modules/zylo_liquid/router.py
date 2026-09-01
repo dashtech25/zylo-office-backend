@@ -12,6 +12,8 @@ from app.modules.zylo_liquid.permissions import (
     FUEL_PRODUCT_READ,
     STATION_MANAGE,
     STATION_READ,
+    TANK_CALIBRATION_MANAGE,
+    TANK_CALIBRATION_READ,
     TANK_MANAGE,
     TANK_READ,
     TANK_SENSOR_MAPPING_MANAGE,
@@ -23,7 +25,10 @@ from app.modules.zylo_liquid.schemas import (
     CreateTankRequest,
     CreateTankSensorMappingRequest,
     FuelProductResponse,
+    ReplaceTankCalibrationPointsRequest,
+    ReplaceTankCalibrationPointsResponse,
     StationResponse,
+    TankCalibrationPointResponse,
     TankResponse,
     TankSensorMappingResponse,
     UpdateFuelProductRequest,
@@ -271,3 +276,35 @@ async def close_tank_sensor_mapping(
     db: AsyncSession = Depends(get_db),
 ) -> TankSensorMapping:
     return await service.close_tank_sensor_mapping(db, organization_id, mapping_id)
+
+
+@router.put(
+    "/tanks/{tank_id}/calibration-points",
+    response_model=ReplaceTankCalibrationPointsResponse,
+    dependencies=[Depends(require_permission(TANK_CALIBRATION_MANAGE))],
+)
+async def replace_tank_calibration_points(
+    tank_id: uuid.UUID,
+    data: ReplaceTankCalibrationPointsRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> ReplaceTankCalibrationPointsResponse:
+    points = await service.replace_tank_calibration_points(db, organization_id, tank_id, data)
+    return ReplaceTankCalibrationPointsResponse(
+        tankId=tank_id,
+        pointCount=len(points),
+        points=[TankCalibrationPointResponse.model_validate(p) for p in points],
+    )
+
+
+@router.get(
+    "/tanks/{tank_id}/calibration-points",
+    response_model=list[TankCalibrationPointResponse],
+    dependencies=[Depends(require_permission(TANK_CALIBRATION_READ))],
+)
+async def list_tank_calibration_points(
+    tank_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list:
+    return await service.list_tank_calibration_points(db, organization_id, tank_id)

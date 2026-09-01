@@ -156,3 +156,27 @@ class TankSensorMappingResponse(BaseModel):
     active: bool
 
     model_config = {"from_attributes": True}
+
+
+class CalibrationPointInput(BaseModel):
+    heightMm: float = Field(ge=0)
+    volumeLiters: float = Field(ge=0)
+
+
+class ReplaceTankCalibrationPointsRequest(BaseModel):
+    points: list[CalibrationPointInput] = Field(min_length=1)
+
+
+class TankCalibrationPointResponse(BaseModel):
+    id: uuid.UUID
+    tankId: uuid.UUID
+    heightMm: float
+    volumeLiters: float
+
+    model_config = {"from_attributes": True}
+
+
+class ReplaceTankCalibrationPointsResponse(BaseModel):
+    tankId: uuid.UUID
+    pointCount: int
+    points: list[TankCalibrationPointResponse]

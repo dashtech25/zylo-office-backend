@@ -17,6 +17,8 @@ TAGS_METADATA = [
     {"name": "organizations", "description": "Organisations (tenants) et leurs membres — modèle Organization → User → Role → Permission."},
     {"name": "modules", "description": "Registre des modules et activation par organisation (ex: zylo_liquid)."},
     {"name": "billing", "description": "Plans, abonnements et facturation par module (aucun prestataire de paiement réel intégré)."},
+    {"name": "currencies", "description": "Référentiel des devises — Core, sans isolation tenant, réutilisable par tout module."},
+    {"name": "exchange-rates", "description": "Taux de change historisés — Core, toujours une insertion, jamais une correction."},
 ]
 
 app = FastAPI(title=settings.APP_NAME, openapi_tags=TAGS_METADATA)

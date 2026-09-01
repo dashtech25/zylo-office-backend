@@ -9,14 +9,24 @@ from app.identity.schemas import CreateOrganizationRequest
 from app.modules_registry.permissions import MODULE_MANAGE
 from app.rbac.models import Role, RolePermission, UserRole
 from app.rbac.service import get_or_create_permission
+from app.shared.permissions import CURRENCY_MANAGE, CURRENCY_READ, EXCHANGE_RATE_MANAGE, EXCHANGE_RATE_READ
 
 # Permissions d'administration du socle accordées automatiquement au rôle
 # owner à la création d'une organisation — jamais les permissions d'un futur
 # module métier, celles-ci restent attribuées explicitement via l'API rbac.
+# Le référentiel devises/taux de change est Core (global, sans isolation
+# tenant, Point 2 §7.1-§7.2) — sans concept de "super-admin plateforme" dans
+# le socle actuel, chaque owner reçoit ces permissions de la même façon que
+# MODULE_MANAGE/SUBSCRIPTION_MANAGE, plutôt que d'inventer un nouveau
+# mécanisme de bootstrap (issue #49).
 OWNER_DEFAULT_PERMISSIONS = [
     (ORGANIZATION_MANAGE, "identity", "Gérer l'organisation (membres, rôles, paramètres)."),
     (MODULE_MANAGE, "modules_registry", "Activer/désactiver les modules pour l'organisation."),
     (SUBSCRIPTION_MANAGE, "billing", "Gérer les abonnements de l'organisation."),
+    (CURRENCY_READ, "shared", "Consulter le référentiel des devises."),
+    (CURRENCY_MANAGE, "shared", "Créer/modifier le référentiel des devises."),
+    (EXCHANGE_RATE_READ, "shared", "Consulter les taux de change."),
+    (EXCHANGE_RATE_MANAGE, "shared", "Enregistrer un nouveau taux de change."),
 ]
 
 

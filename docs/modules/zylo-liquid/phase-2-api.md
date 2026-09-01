@@ -436,6 +436,49 @@ Tests : `tests/test_zylo_liquid_network_snapshot.py` (5 cas). Preuve à 3
 niveaux : `validation_log.md` (aucun nouvel algorithme, réutilisation de
 celui de l'endpoint 7).
 
+### Endpoint 14 — Devises et taux de change (Core, `currencies`/`exchange-rates`)
+
+Contrat : `Point 2 — Architecture API — Zylo Liquid MVP.md`, chapitre
+7.1-7.2. **Premier endpoint Core, pas Zylo Liquid** — routes non préfixées
+`/zylo-liquid`, fichiers dans `app/shared/`.
+
+| Méthode | Route | Permission |
+|---|---|---|
+| GET | `/api/v1/currencies` | `shared.currency.read` |
+| POST | `/api/v1/currencies` | `shared.currency.manage` |
+| PATCH | `/api/v1/currencies/{id}` | `shared.currency.manage` |
+| GET | `/api/v1/exchange-rates` | `shared.exchangeRate.read` |
+| POST | `/api/v1/exchange-rates` | `shared.exchangeRate.manage` |
+
+**Modèles créés** : `Currency`, `ExchangeRate` (`app/shared/currency.py`,
+confirmés Core par `niveau_1_base_de_donnees_et_monetisation.md` §17,
+§25) — aucune isolation tenant, donnée globale au système.
+
+**Décision de bootstrap des permissions (issue #49)** : le socle n'a pas
+de concept de « super-admin plateforme ». Plutôt que d'en inventer un,
+les 4 permissions Core (`shared.currency.*`, `shared.exchangeRate.*`)
+ont été ajoutées à `OWNER_DEFAULT_PERMISSIONS` (`app/identity/service.py`)
+— chaque owner d'organisation peut administrer le référentiel global,
+exactement comme il administre déjà `MODULE_MANAGE`/`SUBSCRIPTION_MANAGE`.
+
+**Règles respectées sans invention** :
+- `Currency.code` immuable après création (`UpdateCurrencyRequest` ne
+  l'expose pas) ; jamais de `DELETE` (référencée potentiellement par un
+  pays ou une future ligne de prix).
+- `ExchangeRate` toujours une insertion, jamais une correction — aucun
+  endpoint `PATCH`/`PUT`, conforme à Point 2 §7.2 (« aucune source n'a
+  identifié ce besoin à ce jour »).
+- Contrainte `sourceCurrencyId != targetCurrencyId` en base (pas
+  seulement en validation applicative).
+
+**Point à valider métier non résolu ici** (`niveau_1_...md` §22, §27,
+rappelé explicitement dans Point 2 §7.2) : quelle règle de sélection pour
+une consolidation historique multi-devises — non tranché, cet endpoint se
+limite à stocker les données nécessaires à chacune des options possibles.
+
+Tests : `tests/test_shared_currency.py` (10 cas). Preuve à 3 niveaux :
+`validation_log.md` (aucun algorithme, référentiel pur).
+
 ## 3. Ce qui a été factorisé dans le Core (correction de portée, pas une extension du périmètre initial)
 
 **`app/modules_registry/service.grant_module_permissions_to_owner`** —
@@ -716,4 +759,22 @@ Liquid, mais découverte et corrigée à l'occasion de ce premier endpoint.
 - Vérification réelle : suite `curl` (mesure la plus proche antérieure
   confirmée, cuve exclue sans mesure antérieure, date future → 422,
   module inactif → 403) contre le serveur de développement.
+- Statut : **TERMINÉ**.
+
+## 21. Rapport final — Endpoint 14
+
+- Fichiers créés : `app/shared/{currency,currency_schemas,currency_service,currency_router,permissions}.py`,
+  `tests/test_shared_currency.py`.
+- Fichiers modifiés : `app/api/v1/router.py` (câblage `/currencies`,
+  `/exchange-rates`), `app/identity/service.py` (`OWNER_DEFAULT_PERMISSIONS`),
+  `app/main.py` (tags OpenAPI), `alembic/env.py` (import du nouveau
+  module pour l'autogénération), cette documentation, `validation_log.md`.
+- Migration : `d631274928c1_currency_exchange_rate.py` (nouvelles tables
+  `currency`, `exchangeRate`).
+- Tests : 136/136 verts (`python -m pytest`), y compris les 126
+  tests préexistants (non-régression) + 10 Niveau 2.
+- Vérification réelle : suite `curl` (création/liste/modification devise,
+  code dupliqué → 409, format invalide → 422, taux de change créé/listé,
+  même devise → 422, doublon → 409, non authentifié → 401) contre le
+  serveur de développement.
 - Statut : **TERMINÉ**.

@@ -12,6 +12,14 @@ from app.rbac.service import require_permission
 router = APIRouter()
 
 
+@router.get("", response_model=list[OrganizationResponse])
+async def list_my_organizations(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[Organization]:
+    return await service.list_user_organizations(db, current_user.id)
+
+
 @router.post("", response_model=OrganizationResponse, status_code=201)
 async def create_organization(
     data: CreateOrganizationRequest,

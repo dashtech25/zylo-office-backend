@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.modules_registry.models import Module, OrganizationModule
+from app.modules_registry.schemas import InstalledModuleResponse
 from app.rbac.models import Permission, Role, RolePermission
 from app.rbac.service import get_current_organization_id
 
@@ -107,6 +108,34 @@ async def is_module_active(db: AsyncSession, organization_id: uuid.UUID, module_
     )
     status_value = result.scalar_one_or_none()
     return status_value in ("active", "trial")
+
+
+async def list_installed_modules(db: AsyncSession, organization_id: uuid.UUID) -> list[InstalledModuleResponse]:
+    """Croise le catalogue complet des modules avec les activations de
+    l'organisation — 'inactive' par défaut si aucune ligne OrganizationModule
+    n'existe pour ce module (jamais activé pour cette organisation)."""
+    modules = (await db.execute(select(Module).order_by(Module.name))).scalars().all()
+    org_modules = (
+        (await db.execute(select(OrganizationModule).where(OrganizationModule.organizationId == organization_id)))
+        .scalars()
+        .all()
+    )
+    org_modules_by_code = {org_module.moduleCode: org_module for org_module in org_modules}
+
+    result: list[InstalledModuleResponse] = []
+    for module in modules:
+        org_module = org_modules_by_code.get(module.code)
+        result.append(
+            InstalledModuleResponse(
+                moduleCode=module.code,
+                name=module.name,
+                description=module.description,
+                version=module.version,
+                status=org_module.status if org_module else "inactive",
+                activatedAt=org_module.activatedAt if org_module else None,
+            )
+        )
+    return result
 
 
 def require_module_active(module_code: str):

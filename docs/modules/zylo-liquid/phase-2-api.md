@@ -249,6 +249,35 @@ Tests : `tests/test_zylo_liquid_tank_measurements.py` (7 cas). Preuve à 3
 niveaux : `validation_log.md` (aucun nouvel algorithme, réutilisation de
 celui de l'endpoint 7).
 
+### Endpoint 9 — Vue réseau complète (`network/summary`)
+
+Contrat : `Point 2 — Architecture API — Zylo Liquid MVP.md`, chapitre 3.2.
+
+| Méthode | Route | Permission |
+|---|---|---|
+| GET | `/api/v1/zylo-liquid/network/summary` | `zyloLiquid.station.read` |
+
+**Contradiction entre sources, résolue explicitement (issue #39)** :
+Point 2 §3.2 mentionne un paramètre de période (`fromDate`/`toDate`,
+« pour n'importe quelle période ») ; Point 3 §11/§12 documente pourtant
+cet endpoint comme dépendant **uniquement** de l'endpoint 7 (état actuel),
+jamais de l'historique des mesures. Décision : seul l'instant présent est
+implémenté (agrégation de l'état actuel de chaque cuve active, réutilisant
+`get_tank_current_state` de l'endpoint 7, jamais réimplémenté) ; si
+`fromDate`/`toDate` sont fournis, l'endpoint retourne explicitement
+`historical_network_summary_not_supported` (422) plutôt que d'inventer une
+résolution rétroactive — cette capacité reviendra, si besoin, avec
+l'endpoint 13 (`network/snapshot`), seul endroit où l'historique est
+spécifié.
+
+**Règle de non-invention (Point 2 §3.2, cohérente avec l'endpoint 7)** :
+une cuve sans volume calculable (pas de capteur configuré, pas de
+calibration) est exclue du total, jamais comptée comme 0. Testé
+explicitement (`test_network_summary_excludes_tank_without_calculable_volume`).
+
+Tests : `tests/test_zylo_liquid_network_summary.py` (5 cas). Preuve à 3
+niveaux : `validation_log.md` (aucun nouvel algorithme).
+
 ## 3. Ce qui a été factorisé dans le Core (correction de portée, pas une extension du périmètre initial)
 
 **`app/modules_registry/service.grant_module_permissions_to_owner`** —
@@ -452,4 +481,17 @@ Liquid, mais découverte et corrigée à l'occasion de ce premier endpoint.
 - Vérification réelle : suite `curl` des 4 cas minimum (historique
   normal avec volume converti, filtre de dates, plage de dates invalide →
   422, cuve introuvable → 404) contre le serveur de développement.
+- Statut : **TERMINÉ**.
+
+## 16. Rapport final — Endpoint 9
+
+- Fichiers créés : `tests/test_zylo_liquid_network_summary.py`.
+- Fichiers modifiés : `app/modules/zylo_liquid/{schemas,service,router}.py`,
+  cette documentation, `validation_log.md`.
+- Migration : aucune.
+- Tests : 88/88 verts (`python -m pytest`), y compris les 83 tests
+  préexistants (non-régression).
+- Vérification réelle : suite `curl` des 4 cas minimum (agrégation
+  normale par produit, cuve non configurée exclue, période demandée → 422,
+  module inactif → 403) contre le serveur de développement.
 - Statut : **TERMINÉ**.

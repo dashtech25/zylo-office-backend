@@ -404,6 +404,38 @@ d'intégration Niveau 3 complet : mesure sous seuil → alerte → lecture API
 → résolution → tentative de double résolution rejetée). Preuve à 3
 niveaux : `validation_log.md`.
 
+### Endpoint 13 — Snapshot réseau à une date donnée (`network/snapshot`)
+
+Contrat : `Point 2 — Architecture API — Zylo Liquid MVP.md`, chapitre 5.4.
+« La fonctionnalité la plus avancée du MVP » — dernier endpoint de lecture
+construit, conforme à l'ordre du §12 de Point 3.
+
+| Méthode | Route | Permission |
+|---|---|---|
+| GET | `/api/v1/zylo-liquid/network/snapshot` | `zyloLiquid.station.read` |
+
+Même structure de réponse que l'endpoint 9 (`network/summary`),
+réutilisée sans duplication (`NetworkSummaryResponse`) — seule la source
+de la mesure change : dernière valeur **connue avant ou égale** à
+l'instant demandé dans `TankMeasurement` (jamais une mesure postérieure),
+au lieu de `HolykellDeviceRegistry.lastValue` (instant présent). Volume
+converti via `interpolate_height_to_volume`, déjà validé à l'endpoint 7.
+
+**Règles de non-invention reprises de l'endpoint 9** : une cuve sans
+mesure antérieure à l'instant demandé est exclue du total, jamais comptée
+comme 0 ; date dans le futur → 422 `snapshot_date_in_future`.
+
+**Point de vigilance technique déjà documenté par le contrat lui-même,
+non traité ici (issue #47)** : la reconstitution interroge l'historique
+complet à chaque appel, potentiellement coûteux sur un grand volume de
+mesures (~590 000 lignes déjà en base de test). Un snapshot pré-calculé
+périodiquement est explicitement laissé à une Phase 2 ultérieure par le
+contrat — pas une omission de cet endpoint.
+
+Tests : `tests/test_zylo_liquid_network_snapshot.py` (5 cas). Preuve à 3
+niveaux : `validation_log.md` (aucun nouvel algorithme, réutilisation de
+celui de l'endpoint 7).
+
 ## 3. Ce qui a été factorisé dans le Core (correction de portée, pas une extension du périmètre initial)
 
 **`app/modules_registry/service.grant_module_permissions_to_owner`** —
@@ -671,4 +703,17 @@ Liquid, mais découverte et corrigée à l'occasion de ce premier endpoint.
 - Vérification réelle : scénario complet rejoué contre le serveur de
   développement (mesure sous seuil → alerte → résolution → tentative de
   double résolution rejetée).
+- Statut : **TERMINÉ**.
+
+## 20. Rapport final — Endpoint 13
+
+- Fichiers créés : `tests/test_zylo_liquid_network_snapshot.py`.
+- Fichiers modifiés : `app/modules/zylo_liquid/{service,router}.py`,
+  cette documentation, `validation_log.md`.
+- Migration : aucune.
+- Tests : 126/126 verts (`python -m pytest`), y compris les 121
+  tests préexistants (non-régression) + 5 Niveau 2.
+- Vérification réelle : suite `curl` (mesure la plus proche antérieure
+  confirmée, cuve exclue sans mesure antérieure, date future → 422,
+  module inactif → 403) contre le serveur de développement.
 - Statut : **TERMINÉ**.

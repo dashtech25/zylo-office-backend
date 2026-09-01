@@ -1112,6 +1112,95 @@ async def resolve_alert(db: AsyncSession, organization_id: uuid.UUID, alert_id: 
     return _alert_to_response(alert, tank)
 
 
+async def _measurement_at_or_before(db: AsyncSession, tank_id: uuid.UUID, measurement_type: str, at) -> float | None:
+    """Dernière mesure connue avant ou égale à l'instant demandé, jamais une
+    mesure postérieure (Point 2 §5.4)."""
+    sensor_ids_result = await db.execute(
+        select(TankSensorMapping.hkSensorId).where(
+            TankSensorMapping.tankId == tank_id, TankSensorMapping.measurementType == measurement_type
+        )
+    )
+    sensor_ids = [row[0] for row in sensor_ids_result.all()]
+    if not sensor_ids:
+        return None
+    result = await db.execute(
+        select(TankMeasurement.rawValue)
+        .where(TankMeasurement.hkSensorId.in_(sensor_ids), TankMeasurement.measuredAt <= at)
+        .order_by(TankMeasurement.measuredAt.desc())
+        .limit(1)
+    )
+    row = result.scalar_one_or_none()
+    return float(row) if row is not None else None
+
+
+async def get_network_snapshot(db: AsyncSession, organization_id: uuid.UUID, at) -> NetworkSummaryResponse:
+    """État reconstitué du réseau à un instant passé (Point 2 §5.4) — même
+    structure de réponse que l'endpoint 9 (network/summary), mais résolue
+    depuis l'historique `TankMeasurement` plutôt que depuis
+    `HolykellDeviceRegistry.lastValue` (instant présent). Réutilise
+    `interpolate_height_to_volume`, déjà validé à l'endpoint 7."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if at > now:
+        raise AppError(code="snapshot_date_in_future", message="La date demandée ne peut pas être dans le futur.", status_code=422)
+
+    stations_result = await db.execute(
+        select(Station).where(Station.organizationId == organization_id, Station.status == "active")
+    )
+    stations = stations_result.scalars().all()
+    station_ids = [s.id for s in stations]
+    if not station_ids:
+        return NetworkSummaryResponse(products=[], totalVolumeLiters=0, totalStationCount=0, totalTankCount=0)
+
+    tanks_result = await db.execute(select(Tank).where(Tank.stationId.in_(station_ids), Tank.active.is_(True)))
+    tanks = tanks_result.scalars().all()
+
+    fuel_products_result = await db.execute(select(FuelProduct).where(FuelProduct.organizationId == organization_id))
+    fuel_products_by_id = {fp.id: fp for fp in fuel_products_result.scalars().all()}
+
+    per_product: dict[uuid.UUID, dict] = {}
+    all_stations_with_data: set[uuid.UUID] = set()
+    for tank in tanks:
+        height = await _measurement_at_or_before(db, tank.id, "product_level", at)
+        if height is None:
+            continue  # aucune mesure avant l'instant demandé -> cuve exclue, jamais un zéro (Point 2 §5.4)
+
+        calibration_result = await db.execute(
+            select(TankCalibrationPoint.heightMm, TankCalibrationPoint.volumeLiters).where(TankCalibrationPoint.tankId == tank.id)
+        )
+        calibration_points = [(float(h), float(v)) for h, v in calibration_result.all()]
+        if not calibration_points:
+            continue  # volume non calculable -> cuve exclue
+
+        volume_brut = interpolate_height_to_volume(calibration_points, height)
+        water_height = await _measurement_at_or_before(db, tank.id, "water_level", at)
+        water_volume = interpolate_height_to_volume(calibration_points, water_height) if water_height is not None else 0.0
+        volume_net = volume_brut - water_volume
+
+        entry = per_product.setdefault(tank.fuelProductId, {"stations": set(), "tanks": 0, "volume": 0.0})
+        entry["stations"].add(tank.stationId)
+        entry["tanks"] += 1
+        entry["volume"] += volume_net
+        all_stations_with_data.add(tank.stationId)
+
+    products = [
+        NetworkSummaryProductLine(
+            fuelProductId=fuel_product_id,
+            fuelProductName=fuel_products_by_id[fuel_product_id].name if fuel_product_id in fuel_products_by_id else "?",
+            totalVolumeLiters=entry["volume"],
+            stationCount=len(entry["stations"]),
+            tankCount=entry["tanks"],
+        )
+        for fuel_product_id, entry in per_product.items()
+    ]
+
+    return NetworkSummaryResponse(
+        products=products,
+        totalVolumeLiters=sum(p.totalVolumeLiters for p in products),
+        totalStationCount=len(all_stations_with_data),
+        totalTankCount=sum(p.tankCount for p in products),
+    )
+
+
 async def get_holykell_account_sync_status(db: AsyncSession, organization_id: uuid.UUID, account_id: uuid.UUID) -> HolykellAccount:
     result = await db.execute(
         select(HolykellAccount).where(HolykellAccount.id == account_id, HolykellAccount.organizationId == organization_id)

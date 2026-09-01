@@ -161,6 +161,43 @@ Preuve : `tests/test_zylo_liquid_tanks.py` (8 cas, pytest réel) + suite
 
 ---
 
+### POST /api/v1/zylo-liquid/tank-sensor-mappings — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal | 201 + association créée | 201 + `{"hkSensorId":999001,"measurementType":"product_level","active":true,...}` | ✓ |
+| Numéro de série inconnu du registre Holykell | 422 `sensor_not_found_in_holykell_registry` | 422 `sensor_not_found_in_holykell_registry` | ✓ |
+| Cuve introuvable | 404 `tank_not_found` | 404 `tank_not_found` | ✓ |
+| Association déjà active pour cette cuve+type | 409 `tank_sensor_mapping_already_active` | 409 `tank_sensor_mapping_already_active` | ✓ |
+| Module inactif sur une autre organisation | 403 `module_inactive` | 403 `module_inactive` | ✓ |
+
+Cas supplémentaire spécifique à cet endpoint : un même numéro de série
+porte plusieurs capteurs logiques (product_level/water_level/temperature)
+— la résolution doit choisir le bon `hkSensorId` selon `measurementType`,
+jamais le premier trouvé. Vérifié (`test_create_tank_sensor_mapping_resolves_correct_channel_by_measurement_type`).
+
+Algorithmes validés séparément : N/A (résolution de référentiel, pas un
+algorithme métier de Point 1-16).
+Preuve : `tests/test_zylo_liquid_tank_sensor_mappings.py` (8 cas, pytest
+réel) + suite `curl` réelle contre serveur de développement (4 cas
+minimum ci-dessus).
+
+### GET /api/v1/zylo-liquid/tank-sensor-mappings — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal (filtre par cuve) | 200 + `{"data","meta"}` | 200, total=1 | ✓ |
+
+### POST /api/v1/zylo-liquid/tank-sensor-mappings/{id}/close — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal | 200, `active`→false, `validUntil` renseigné | 200, conforme | ✓ |
+| Déjà close | 409 `tank_sensor_mapping_already_closed` | 409 `tank_sensor_mapping_already_closed` | ✓ |
+| Introuvable | 404 `tank_sensor_mapping_not_found` | 404 `tank_sensor_mapping_not_found` | ✓ |
+
+---
+
 ## Niveau 3 — Tests d'intégration de flux
 
 Aucun scénario métier de bout en bout (livraison, fuite) n'est encore
@@ -179,3 +216,4 @@ mesures réelles dans `TankMeasurement`.
 | 1 | `/fuel-products` (POST/GET/PATCH) | N/A | ✓ (4 endpoints, tous cas) | N/A | **VALIDÉ** |
 | 2 | `/stations` (POST/GET/PATCH/deactivate/reactivate) | N/A | ✓ (5 endpoints, tous cas) | N/A | **VALIDÉ** |
 | 3 | `/tanks` (POST/GET/PATCH) | N/A | ✓ (4 endpoints, tous cas) | N/A | **VALIDÉ** |
+| 4 | `/tank-sensor-mappings` (POST/GET/close) | N/A | ✓ (3 endpoints, tous cas) | N/A | **VALIDÉ** |

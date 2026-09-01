@@ -10,3 +10,6 @@ STATION_MANAGE = "zyloLiquid.station.manage"
 
 TANK_READ = "zyloLiquid.tank.read"
 TANK_MANAGE = "zyloLiquid.tank.manage"
+
+TANK_SENSOR_MAPPING_READ = "zyloLiquid.tankSensorMapping.read"
+TANK_SENSOR_MAPPING_MANAGE = "zyloLiquid.tankSensorMapping.manage"

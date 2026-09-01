@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.modules.zylo_liquid import service
-from app.modules.zylo_liquid.models import FuelProduct, Station, Tank
+from app.modules.zylo_liquid.models import FuelProduct, Station, Tank, TankSensorMapping
 from app.modules.zylo_liquid.permissions import (
     FUEL_PRODUCT_MANAGE,
     FUEL_PRODUCT_READ,
@@ -14,14 +14,18 @@ from app.modules.zylo_liquid.permissions import (
     STATION_READ,
     TANK_MANAGE,
     TANK_READ,
+    TANK_SENSOR_MAPPING_MANAGE,
+    TANK_SENSOR_MAPPING_READ,
 )
 from app.modules.zylo_liquid.schemas import (
     CreateFuelProductRequest,
     CreateStationRequest,
     CreateTankRequest,
+    CreateTankSensorMappingRequest,
     FuelProductResponse,
     StationResponse,
     TankResponse,
+    TankSensorMappingResponse,
     UpdateFuelProductRequest,
     UpdateStationRequest,
     UpdateTankRequest,
@@ -226,3 +230,44 @@ async def update_tank(
     db: AsyncSession = Depends(get_db),
 ) -> Tank:
     return await service.update_tank(db, organization_id, tank_id, data)
+
+
+@router.post(
+    "/tank-sensor-mappings",
+    response_model=TankSensorMappingResponse,
+    status_code=201,
+    dependencies=[Depends(require_permission(TANK_SENSOR_MAPPING_MANAGE))],
+)
+async def create_tank_sensor_mapping(
+    data: CreateTankSensorMappingRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TankSensorMapping:
+    return await service.create_tank_sensor_mapping(db, organization_id, data)
+
+
+@router.get(
+    "/tank-sensor-mappings",
+    response_model=Page[TankSensorMappingResponse],
+    dependencies=[Depends(require_permission(TANK_SENSOR_MAPPING_READ))],
+)
+async def list_tank_sensor_mappings(
+    pagination: PaginationParams = Depends(),
+    tankId: uuid.UUID | None = None,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    return await service.list_tank_sensor_mappings(db, organization_id, pagination, tankId)
+
+
+@router.post(
+    "/tank-sensor-mappings/{mapping_id}/close",
+    response_model=TankSensorMappingResponse,
+    dependencies=[Depends(require_permission(TANK_SENSOR_MAPPING_MANAGE))],
+)
+async def close_tank_sensor_mapping(
+    mapping_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TankSensorMapping:
+    return await service.close_tank_sensor_mapping(db, organization_id, mapping_id)

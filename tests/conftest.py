@@ -1,5 +1,6 @@
 import os
 import uuid
+from datetime import datetime, timezone
 
 os.environ["DATABASE_URL"] = os.environ.get(
     "TEST_DATABASE_URL", "postgresql+asyncpg://zylo_office:zylo_office_dev@localhost:5432/zylo_office_test"
@@ -105,3 +106,40 @@ async def test_city() -> dict:
         await db.commit()
         await db.refresh(city)
         return {"id": str(city.id)}
+
+
+async def register_holykell_sensor(organization_id: str, serial_number: str, measurement_type: str) -> int:
+    """Aucun endpoint HTTP ne crée un HolykellAccount/HolykellDeviceRegistry —
+    ces lignes n'existent en pratique que via la synchronisation de fond avec
+    h-smartlink.com (hors périmètre API). Insertion directe via le service,
+    comme pour le référentiel géo Core."""
+    import random
+
+    from app.core.database import AsyncSessionLocal
+    from app.modules.zylo_liquid.models import HolykellAccount, HolykellDeviceRegistry
+
+    async with AsyncSessionLocal() as db:
+        account = HolykellAccount(
+            organizationId=uuid.UUID(organization_id),
+            holykellUsername=f"user-{uuid.uuid4().hex[:8]}",
+            holykellPassword="secret",
+        )
+        db.add(account)
+        await db.flush()
+
+        sensor_id = random.randint(100000, 999999)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)  # colonnes TIMESTAMP WITHOUT TIME ZONE
+        registry_entry = HolykellDeviceRegistry(
+            holykellAccountId=account.id,
+            hkGroupId=1,
+            hkGroupName="Groupe Test",
+            hkDeviceId=1,
+            hkSerialNumber=serial_number,
+            hkSensorId=sensor_id,
+            hkSensorName=f"{measurement_type} Cuve Test",
+            syncFrom=now,
+            discoveredAt=now,
+        )
+        db.add(registry_entry)
+        await db.commit()
+        return sensor_id

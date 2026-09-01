@@ -545,6 +545,28 @@ calcul physique).
 Preuve : `tests/test_zylo_liquid_prices.py` (9 cas, pytest réel) + suite
 `curl` réelle contre serveur de développement.
 
+### Extension valeur monétaire (current-state, network/summary, network/snapshot) — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Prix applicable | `monetaryValue` = volume net × prix | 200, `14 600 000` (20000L × 730) confirmé en réel | ✓ |
+| Aucun prix applicable | `monetaryValue: null`, `monetaryValueNotCalculableReason:"no_applicable_price"` (jamais 0) | Confirmé | ✓ |
+| Prix planifié dans le futur | Jamais utilisé pour l'instant présent | Confirmé (prix antérieur retenu, pas le prix futur) | ✓ |
+| `network/summary`, une seule devise | Total monétaire par produit calculé | 200, conforme | ✓ |
+| `network/summary`, une cuve sans prix | `totalMonetaryValue: null`, `monetaryValueNotCalculableReason:"incomplete_pricing"` (jamais une somme partielle) | Confirmé | ✓ |
+| `network/snapshot`, prix applicable à la date | Même règle que `current-state`, à une date passée | Confirmé | ✓ |
+
+Algorithmes validés séparément : réutilisation complète de la résolution
+de prix (`_resolve_applicable_price`) et des volumes déjà validés
+(endpoints 7, 9, 13) — aucun nouveau calcul physique.
+Preuve : `tests/test_zylo_liquid_monetary_value.py` (6 cas, pytest réel)
++ suite `curl` réelle contre serveur de développement.
+
+---
+
+**Les 16 endpoints du Niveau 1 Zylo Liquid sont tous VALIDÉS — voir le
+tableau de suivi global ci-dessous.**
+
 Aucun scénario métier de bout en bout (livraison, fuite) n'est encore
 implémenté à ce stade — les endpoints 1 et 2 sont du référentiel pur, sans
 flux de mesures. Cette section sera complétée à partir des endpoints 10
@@ -573,3 +595,4 @@ mesures réelles dans `TankMeasurement`.
 | 13 | `/network/snapshot` (GET) | ✓ (réutilisé) | ✓ (1 endpoint, tous cas) | N/A | **VALIDÉ** |
 | 14 | `/currencies`, `/exchange-rates` (Core) | N/A | ✓ (5 endpoints, tous cas) | N/A | **VALIDÉ** |
 | 15 | `/zylo-liquid/prices` (POST/GET/PATCH) | N/A | ✓ (4 endpoints, tous cas) | N/A | **VALIDÉ** |
+| 16 | Valeur monétaire (extension 7/9/13) | N/A | ✓ (6 tests, tous cas) | N/A | **VALIDÉ** |

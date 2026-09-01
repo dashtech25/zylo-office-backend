@@ -451,6 +451,34 @@ async def _get_active_registry_entry(db: AsyncSession, tank_id: uuid.UUID, measu
     return result.scalar_one_or_none()
 
 
+async def _resolve_applicable_price(db: AsyncSession, station_id: uuid.UUID, fuel_product_id: uuid.UUID, at) -> PriceHistory | None:
+    """Prix applicable à un instant donné (Point 2 §7.6, niveau_1_...md
+    §16) : la ligne `PriceHistory` dont `effectiveFrom` est la plus récente
+    antérieure ou égale à l'instant demandé — jamais un prix postérieur,
+    jamais le prix courant en cache."""
+    result = await db.execute(
+        select(PriceHistory)
+        .where(PriceHistory.stationId == station_id, PriceHistory.fuelProductId == fuel_product_id, PriceHistory.effectiveFrom <= at)
+        .order_by(PriceHistory.effectiveFrom.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _resolve_tank_monetary_value(
+    db: AsyncSession, tank: Tank, volume_liters: float | None, at
+) -> tuple[float | None, str | None, str | None]:
+    """Retourne (valeur, code devise, motif de non-calcul) — jamais un
+    zéro quand le prix n'est pas connu (Point 2 §7.6)."""
+    if volume_liters is None:
+        return None, None, "volume_not_calculable"
+    price = await _resolve_applicable_price(db, tank.stationId, tank.fuelProductId, at)
+    if price is None:
+        return None, None, "no_applicable_price"
+    currency = await db.get(Currency, price.currencyId)
+    return volume_liters * float(price.priceAmount), currency.code if currency else None, None
+
+
 async def get_tank_current_state(db: AsyncSession, tank: Tank) -> TankCurrentStateResponse:
     """Construit l'état actuel d'une cuve — mesure instantanée lue depuis
     HolykellDeviceRegistry.lastValue/lastValueAt/hkLastStatus (jamais
@@ -470,6 +498,9 @@ async def get_tank_current_state(db: AsyncSession, tank: Tank) -> TankCurrentSta
             volumeLiters=None,
             volumeNotCalculableReason="no_active_sensor",
             volumeLiters15C=None,
+            monetaryValue=None,
+            currencyCode=None,
+            monetaryValueNotCalculableReason="volume_not_calculable",
             waterHeightMm=None,
             waterVolumeLiters=None,
             temperatureC=None,
@@ -510,6 +541,9 @@ async def get_tank_current_state(db: AsyncSession, tank: Tank) -> TankCurrentSta
         if fuel_product.thermalExpansionCoefficient is not None:
             volume_15c = correct_volume_to_reference_temperature(volume_net, temperature_c, float(fuel_product.thermalExpansionCoefficient))
 
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    monetary_value, currency_code, monetary_reason = await _resolve_tank_monetary_value(db, tank, volume_net, now)
+
     return TankCurrentStateResponse(
         tankId=tank.id,
         tankNumber=tank.tankNumber,
@@ -519,6 +553,9 @@ async def get_tank_current_state(db: AsyncSession, tank: Tank) -> TankCurrentSta
         volumeLiters=volume_net,
         volumeNotCalculableReason=volume_not_calculable_reason,
         volumeLiters15C=volume_15c,
+        monetaryValue=monetary_value,
+        currencyCode=currency_code,
+        monetaryValueNotCalculableReason=monetary_reason,
         waterHeightMm=water_height_mm,
         waterVolumeLiters=water_volume,
         temperatureC=temperature_c,
@@ -631,30 +668,20 @@ async def get_network_summary(db: AsyncSession, organization_id: uuid.UUID, from
 
     per_product: dict[uuid.UUID, dict] = {}
     all_stations_with_data: set[uuid.UUID] = set()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     for tank in tanks:
         state = await get_tank_current_state(db, tank)
         if state.volumeLiters is None:
             continue  # cuve sans mesure calculable exclue du total (jamais un zéro, Point 2 §3.2)
 
-        entry = per_product.setdefault(
-            tank.fuelProductId,
-            {"stations": set(), "tanks": 0, "volume": 0.0},
-        )
+        entry = _init_product_entry(per_product, tank.fuelProductId)
         entry["stations"].add(tank.stationId)
         entry["tanks"] += 1
         entry["volume"] += state.volumeLiters
         all_stations_with_data.add(tank.stationId)
+        _accumulate_monetary(entry, state.monetaryValue, state.currencyCode)
 
-    products = [
-        NetworkSummaryProductLine(
-            fuelProductId=fuel_product_id,
-            fuelProductName=fuel_products_by_id[fuel_product_id].name if fuel_product_id in fuel_products_by_id else "?",
-            totalVolumeLiters=entry["volume"],
-            stationCount=len(entry["stations"]),
-            tankCount=entry["tanks"],
-        )
-        for fuel_product_id, entry in per_product.items()
-    ]
+    products = _build_product_lines(per_product, fuel_products_by_id)
 
     return NetworkSummaryResponse(
         products=products,
@@ -662,6 +689,53 @@ async def get_network_summary(db: AsyncSession, organization_id: uuid.UUID, from
         totalStationCount=len(all_stations_with_data),
         totalTankCount=sum(p.tankCount for p in products),
     )
+
+
+def _init_product_entry(per_product: dict, fuel_product_id: uuid.UUID) -> dict:
+    return per_product.setdefault(
+        fuel_product_id, {"stations": set(), "tanks": 0, "volume": 0.0, "monetary": 0.0, "currencies": set(), "incomplete_pricing": False}
+    )
+
+
+def _accumulate_monetary(entry: dict, monetary_value: float | None, currency_code: str | None) -> None:
+    if monetary_value is None:
+        entry["incomplete_pricing"] = True
+        return
+    entry["monetary"] += monetary_value
+    if currency_code is not None:
+        entry["currencies"].add(currency_code)
+
+
+def _build_product_lines(per_product: dict, fuel_products_by_id: dict) -> list[NetworkSummaryProductLine]:
+    """Total monétaire par produit calculé uniquement si toutes les cuves
+    de ce produit ont un prix applicable dans une seule et même devise —
+    sinon la réponse l'indique explicitement, jamais une somme erronée
+    entre devises différentes ou une valeur partielle silencieuse
+    (Point 2 §7.6, niveau_1_...md §20)."""
+    lines = []
+    for fuel_product_id, entry in per_product.items():
+        if entry["incomplete_pricing"]:
+            monetary_value, currency_code, reason = None, None, "incomplete_pricing"
+        elif len(entry["currencies"]) > 1:
+            monetary_value, currency_code, reason = None, None, "mixed_currencies"
+        elif len(entry["currencies"]) == 1:
+            monetary_value, currency_code, reason = entry["monetary"], next(iter(entry["currencies"])), None
+        else:
+            monetary_value, currency_code, reason = None, None, "no_applicable_price"
+
+        lines.append(
+            NetworkSummaryProductLine(
+                fuelProductId=fuel_product_id,
+                fuelProductName=fuel_products_by_id[fuel_product_id].name if fuel_product_id in fuel_products_by_id else "?",
+                totalVolumeLiters=entry["volume"],
+                stationCount=len(entry["stations"]),
+                tankCount=entry["tanks"],
+                totalMonetaryValue=monetary_value,
+                currencyCode=currency_code,
+                monetaryValueNotCalculableReason=reason,
+            )
+        )
+    return lines
 
 
 async def run_delivery_detection_for_tank(db: AsyncSession, tank_id: uuid.UUID) -> list[DeliveryDetected]:
@@ -1181,22 +1255,16 @@ async def get_network_snapshot(db: AsyncSession, organization_id: uuid.UUID, at)
         water_volume = interpolate_height_to_volume(calibration_points, water_height) if water_height is not None else 0.0
         volume_net = volume_brut - water_volume
 
-        entry = per_product.setdefault(tank.fuelProductId, {"stations": set(), "tanks": 0, "volume": 0.0})
+        entry = _init_product_entry(per_product, tank.fuelProductId)
         entry["stations"].add(tank.stationId)
         entry["tanks"] += 1
         entry["volume"] += volume_net
         all_stations_with_data.add(tank.stationId)
 
-    products = [
-        NetworkSummaryProductLine(
-            fuelProductId=fuel_product_id,
-            fuelProductName=fuel_products_by_id[fuel_product_id].name if fuel_product_id in fuel_products_by_id else "?",
-            totalVolumeLiters=entry["volume"],
-            stationCount=len(entry["stations"]),
-            tankCount=entry["tanks"],
-        )
-        for fuel_product_id, entry in per_product.items()
-    ]
+        monetary_value, currency_code, _ = await _resolve_tank_monetary_value(db, tank, volume_net, at)
+        _accumulate_monetary(entry, monetary_value, currency_code)
+
+    products = _build_product_lines(per_product, fuel_products_by_id)
 
     return NetworkSummaryResponse(
         products=products,

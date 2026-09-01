@@ -199,6 +199,9 @@ class TankCurrentStateResponse(BaseModel):
     temperatureC: float | None
     emptyVolumeLiters: float | None
     lastMeasurementAt: datetime | None
+    monetaryValue: float | None = None
+    currencyCode: str | None = None
+    monetaryValueNotCalculableReason: str | None = None
 
 
 class StationCurrentStateResponse(BaseModel):
@@ -223,6 +226,9 @@ class NetworkSummaryProductLine(BaseModel):
     totalVolumeLiters: float
     stationCount: int
     tankCount: int
+    totalMonetaryValue: float | None = None
+    currencyCode: str | None = None
+    monetaryValueNotCalculableReason: str | None = None
 
 
 class NetworkSummaryResponse(BaseModel):

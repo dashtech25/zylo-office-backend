@@ -16,8 +16,10 @@ from app.core.database import Base
 from app.auth import models as auth_models  # noqa: F401
 from app.billing import models as billing_models  # noqa: F401
 from app.identity import models as identity_models  # noqa: F401
+from app.modules.zylo_liquid import models as zylo_liquid_models  # noqa: F401
 from app.modules_registry import models as modules_registry_models  # noqa: F401
 from app.rbac import models as rbac_models  # noqa: F401
+from app.shared import geo as shared_geo_models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

@@ -530,6 +530,44 @@ de devise via la chaîne géographique réelle). Preuve à 3 niveaux :
 `validation_log.md` (aucun algorithme, logique de résolution/contrainte
 pure).
 
+### Endpoint 16 — Valeur monétaire (extension de `current-state`/`network/summary`/`network/snapshot`)
+
+Contrat : `Point 2 — Architecture API — Zylo Liquid MVP.md`, chapitre 7.6.
+**Aucun nouvel endpoint** — dernier item du Niveau 1 (Point 3 §12/§21) :
+champs calculés ajoutés aux réponses des endpoints 7, 9 et 13.
+
+**Résolution du prix** (`_resolve_applicable_price`) : la ligne
+`PriceHistory` dont `effectiveFrom` est la plus récente antérieure ou
+égale à l'instant demandé — jamais un prix postérieur, jamais le prix
+courant en cache pour une date passée. Testé explicitement : un prix
+planifié dans le futur n'est jamais utilisé pour l'instant présent
+(`test_current_state_monetary_value_uses_price_effective_before_now`).
+
+**`current-state` (endpoint 7)** : `monetaryValue` = volume net (déjà
+calculé) × prix applicable, dans la devise de ce prix. Sans prix
+applicable → `monetaryValue: null`, `monetaryValueNotCalculableReason`
+explicite (`no_applicable_price` / `volume_not_calculable`), jamais un 0
+(cohérent avec la règle déjà établie pour le volume, endpoint 7).
+
+**`network/summary` (endpoint 9) et `network/snapshot` (endpoint 13)** :
+total monétaire par produit calculé **uniquement si toutes les cuves de ce
+produit ont un prix applicable dans une seule et même devise** — sinon la
+ligne l'indique explicitement (`mixed_currencies` si plusieurs devises,
+`incomplete_pricing` si au moins une cuve n'a pas de prix, jamais une
+somme partielle silencieuse). Décision documentée : une agrégation
+partiellement calculée serait trompeuse — préférée à une exclusion
+silencieuse des cuves sans prix, qui donnerait un total incomplet sans le
+signaler. Testé explicitement (`test_network_summary_monetary_incomplete_when_one_tank_has_no_price`).
+
+**Consolidation multi-devises** (paramètre de devise de consolidation sur
+`network/summary`/`network/snapshot`) : **non implémentée**, conforme au
+contrat — bloquée tant que la règle de sélection du taux de change
+historique n'est pas tranchée (`niveau_1_...md` §22, §27).
+
+Tests : `tests/test_zylo_liquid_monetary_value.py` (6 cas). Preuve à 3
+niveaux : `validation_log.md` (réutilisation complète de la résolution de
+prix, aucun nouvel algorithme physique).
+
 ## 3. Ce qui a été factorisé dans le Core (correction de portée, pas une extension du périmètre initial)
 
 **`app/modules_registry/service.grant_module_permissions_to_owner`** —
@@ -839,10 +877,31 @@ Liquid, mais découverte et corrigée à l'occasion de ce premier endpoint.
   correction de la contradiction sur la permission de correction), cette
   documentation, `validation_log.md`.
 - Migration : `b41b805c3119_price_history.py` (nouvelle table).
-- Tests : 145/145 verts attendus (`python -m pytest`), y compris les 136
+- Tests : 145/145 verts (`python -m pytest`), y compris les 136
   tests préexistants (non-régression) + 9 Niveau 2.
 - Vérification réelle : suite `curl` (création avec devise explicite,
   résolution automatique via la géographie, conflit de période → 409,
   correction ciblée, introuvable → 404, permission manquante → 403)
   contre le serveur de développement.
 - Statut : **TERMINÉ**.
+
+## 23. Rapport final — Endpoint 16 (dernier endpoint du Niveau 1)
+
+- Fichiers créés : `tests/test_zylo_liquid_monetary_value.py`.
+- Fichiers modifiés : `app/modules/zylo_liquid/{schemas,service}.py`
+  (`monetaryValue`/`currencyCode`/`monetaryValueNotCalculableReason` sur
+  `TankCurrentStateResponse` et `NetworkSummaryProductLine`), cette
+  documentation, `validation_log.md`.
+- Migration : aucune (aucun changement de modèle, uniquement des champs
+  calculés à la lecture).
+- Tests : 151/151 verts (`python -m pytest`), y compris les 145
+  tests préexistants (non-régression) + 6 Niveau 2.
+- Vérification réelle : suite `curl` (valeur monétaire calculée avec prix
+  applicable, non calculable sans prix, prix futur jamais utilisé, total
+  réseau par produit avec devise unique, total marqué incomplet si une
+  cuve n'a pas de prix) contre le serveur de développement.
+- Statut : **TERMINÉ**.
+
+**Avec cet endpoint, les 16 endpoints du Niveau 1 Zylo Liquid (Point 2,
+Point 3 §12) sont tous construits, testés à 3 niveaux et vérifiés en
+réel.**

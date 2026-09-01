@@ -294,6 +294,26 @@ suite `curl` réelle contre serveur de développement (4 cas minimum).
 
 ---
 
+### GET /api/v1/zylo-liquid/tanks/{id}/measurements — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal | 200 + liste triée par `measuredAt` croissant, volume converti | 200, conforme | ✓ |
+| Filtre `fromDate`/`toDate` | 200 + sous-ensemble filtré | 200, conforme | ✓ |
+| Plage de dates invalide (`fromDate > toDate`) | 422 `invalid_date_range` | 422 `invalid_date_range` | ✓ |
+| Aucun capteur jamais associé | 200 + liste vide (jamais une erreur) | 200, `total=0` | ✓ |
+| Remplacement de sonde | L'historique de l'ancienne sonde reste visible | 200, `total=2` (ancienne + nouvelle sonde) | ✓ |
+| Cuve introuvable | 404 `tank_not_found` | 404 `tank_not_found` | ✓ |
+| Module inactif | 403 `module_inactive` | 403 `module_inactive` | ✓ |
+
+Algorithmes validés séparément : réutilisation de
+`interpolate_height_to_volume` (déjà validé, endpoint 7) — aucun nouveau
+test Niveau 1 nécessaire.
+Preuve : `tests/test_zylo_liquid_tank_measurements.py` (7 cas, pytest
+réel) + suite `curl` réelle contre serveur de développement.
+
+---
+
 ## Niveau 3 — Tests d'intégration de flux
 
 Aucun scénario métier de bout en bout (livraison, fuite) n'est encore
@@ -315,3 +335,5 @@ mesures réelles dans `TankMeasurement`.
 | 4 | `/tank-sensor-mappings` (POST/GET/close) | N/A | ✓ (3 endpoints, tous cas) | N/A | **VALIDÉ** |
 | 5 | `/tanks/{id}/calibration-points` (PUT/GET) | N/A | ✓ (2 endpoints, tous cas) | N/A | **VALIDÉ** |
 | 6 | `/holykell-accounts/{id}/sync-status` (GET) | N/A | ✓ (1 endpoint, tous cas) | N/A | **VALIDÉ** |
+| 7 | `/tanks/{id}/current-state`, `/stations/{id}/current-state` (GET) | ✓ (2 algorithmes, 8 tests) | ✓ (2 endpoints, tous cas) | N/A | **VALIDÉ** |
+| 8 | `/tanks/{id}/measurements` (GET) | ✓ (réutilisé) | ✓ (1 endpoint, tous cas) | N/A | **VALIDÉ** |

@@ -219,6 +219,36 @@ calcul complet carburant+eau+correction thermique avec valeurs numériques
 vérifiées). Preuve à 3 niveaux : `validation_log.md` (Niveau 1 : 8 tests
 algorithmiques ; Niveau 2 : contrats des 2 endpoints).
 
+### Endpoint 8 — Historique des mesures d'une cuve (`tanks/{id}/measurements`)
+
+Contrat : `Point 2 — Architecture API — Zylo Liquid MVP.md`, chapitre 5.1.
+
+| Méthode | Route | Permission |
+|---|---|---|
+| GET | `/api/v1/zylo-liquid/tanks/{id}/measurements` | `zyloLiquid.tank.read` |
+
+**Point non tranché par le contrat, résolu ici (issue #37)** : Point 2
+§5.1 note lui-même qu'une valeur par défaut de période (ex. « dernières
+24h ») reste « à confirmer avec le commanditaire ». Décision : aucune
+fenêtre par défaut inventée — sans `fromDate`/`toDate`, la pagination seule
+s'applique sur tout l'historique disponible.
+
+**Décision de conception** : l'historique porte sur tous les capteurs
+`product_level` ayant un jour été associés à cette cuve (mapping actif ou
+clos), pas seulement le mapping courant — un remplacement de sonde
+(endpoint 4) ne doit jamais faire disparaître les mesures déjà collectées
+par l'ancienne sonde. Testé explicitement
+(`test_list_measurements_survives_sensor_replacement`).
+
+Tri par `measuredAt` croissant (jamais `receivedAt`, conforme à Point 2
+§5.1). Volume converti via `interpolate_height_to_volume` (algorithme déjà
+validé à l'endpoint 7, jamais réimplémenté) si une table de calibration
+existe pour la cuve, sinon `null`.
+
+Tests : `tests/test_zylo_liquid_tank_measurements.py` (7 cas). Preuve à 3
+niveaux : `validation_log.md` (aucun nouvel algorithme, réutilisation de
+celui de l'endpoint 7).
+
 ## 3. Ce qui a été factorisé dans le Core (correction de portée, pas une extension du périmètre initial)
 
 **`app/modules_registry/service.grant_module_permissions_to_owner`** —
@@ -408,4 +438,18 @@ Liquid, mais découverte et corrigée à l'occasion de ce premier endpoint.
 - Vérification réelle : suite `curl` des 4 cas minimum (cuve sans capteur
   configuré, calcul complet avec capteur réel, cuve introuvable → 404,
   module inactif → 403) contre le serveur de développement.
+- Statut : **TERMINÉ**.
+
+## 15. Rapport final — Endpoint 8
+
+- Fichiers créés : `tests/test_zylo_liquid_tank_measurements.py`.
+- Fichiers modifiés : `app/modules/zylo_liquid/{schemas,service,router}.py`,
+  cette documentation, `validation_log.md`.
+- Migration : aucune (modèle `TankMeasurement` déjà conforme depuis la
+  Phase 1).
+- Tests : 83/83 verts (`python -m pytest`), y compris les 76 tests
+  préexistants (non-régression).
+- Vérification réelle : suite `curl` des 4 cas minimum (historique
+  normal avec volume converti, filtre de dates, plage de dates invalide →
+  422, cuve introuvable → 404) contre le serveur de développement.
 - Statut : **TERMINÉ**.

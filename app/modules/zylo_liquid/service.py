@@ -13,6 +13,7 @@ from app.modules.zylo_liquid.models import (
     Station,
     Tank,
     TankCalibrationPoint,
+    TankMeasurement,
     TankSensorMapping,
 )
 from app.modules.zylo_liquid.schemas import (
@@ -24,6 +25,7 @@ from app.modules.zylo_liquid.schemas import (
     StationCurrentStateResponse,
     StationResponse,
     TankCurrentStateResponse,
+    TankMeasurementResponse,
     TankResponse,
     TankSensorMappingResponse,
     UpdateFuelProductRequest,
@@ -517,6 +519,64 @@ async def get_station_current_state(db: AsyncSession, organization_id: uuid.UUID
     tanks = result.scalars().all()
     states = [await get_tank_current_state(db, tank) for tank in tanks]
     return StationCurrentStateResponse(stationId=station_id, tanks=states)
+
+
+async def list_tank_measurements(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    tank_id: uuid.UUID,
+    pagination: PaginationParams,
+    from_date,
+    to_date,
+) -> Page:
+    """Historique des mesures d'une cuve (Point 2 §5.1) — inclut les
+    mesures de tout capteur product_level ayant un jour été associé à cette
+    cuve (mapping actif ou clos), pas seulement le capteur actuel : un
+    remplacement de sonde ne doit jamais faire disparaître l'historique
+    déjà collecté (issue #37)."""
+    if from_date is not None and to_date is not None and from_date > to_date:
+        raise AppError(code="invalid_date_range", message="from_date doit être antérieure ou égale à to_date.", status_code=422)
+
+    tank = await get_tank(db, organization_id, tank_id)
+
+    sensor_ids_result = await db.execute(
+        select(TankSensorMapping.hkSensorId).where(
+            TankSensorMapping.tankId == tank_id, TankSensorMapping.measurementType == "product_level"
+        )
+    )
+    sensor_ids = [row[0] for row in sensor_ids_result.all()]
+
+    if not sensor_ids:
+        return Page(data=[], meta=PageMeta(total=0, limit=pagination.limit, offset=pagination.offset))
+
+    stmt = select(TankMeasurement).where(TankMeasurement.hkSensorId.in_(sensor_ids))
+    if from_date is not None:
+        stmt = stmt.where(TankMeasurement.measuredAt >= from_date)
+    if to_date is not None:
+        stmt = stmt.where(TankMeasurement.measuredAt <= to_date)
+    stmt = stmt.order_by(TankMeasurement.measuredAt)
+
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
+    result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
+    measurements = result.scalars().all()
+
+    calibration_result = await db.execute(
+        select(TankCalibrationPoint.heightMm, TankCalibrationPoint.volumeLiters).where(TankCalibrationPoint.tankId == tank.id)
+    )
+    calibration_points = [(float(h), float(v)) for h, v in calibration_result.all()]
+
+    data = [
+        TankMeasurementResponse(
+            id=m.id,
+            measuredAt=m.measuredAt,
+            rawValue=float(m.rawValue),
+            unit=m.hkUnit,
+            volumeLiters=interpolate_height_to_volume(calibration_points, float(m.rawValue)) if calibration_points else None,
+            isCorrection=m.isCorrection,
+        )
+        for m in measurements
+    ]
+    return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
 
 
 async def get_holykell_account_sync_status(db: AsyncSession, organization_id: uuid.UUID, account_id: uuid.UUID) -> HolykellAccount:

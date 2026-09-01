@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -33,6 +34,7 @@ from app.modules.zylo_liquid.schemas import (
     StationResponse,
     TankCalibrationPointResponse,
     TankCurrentStateResponse,
+    TankMeasurementResponse,
     TankResponse,
     TankSensorMappingResponse,
     UpdateFuelProductRequest,
@@ -338,6 +340,22 @@ async def get_station_current_state(
     db: AsyncSession = Depends(get_db),
 ) -> StationCurrentStateResponse:
     return await service.get_station_current_state(db, organization_id, station_id)
+
+
+@router.get(
+    "/tanks/{tank_id}/measurements",
+    response_model=Page[TankMeasurementResponse],
+    dependencies=[Depends(require_permission(TANK_READ))],
+)
+async def list_tank_measurements(
+    tank_id: uuid.UUID,
+    pagination: PaginationParams = Depends(),
+    fromDate: datetime | None = None,
+    toDate: datetime | None = None,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    return await service.list_tank_measurements(db, organization_id, tank_id, pagination, fromDate, toDate)
 
 
 @router.get(

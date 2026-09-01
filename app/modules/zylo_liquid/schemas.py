@@ -217,6 +217,21 @@ class TankMeasurementResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class NetworkSummaryProductLine(BaseModel):
+    fuelProductId: uuid.UUID
+    fuelProductName: str
+    totalVolumeLiters: float
+    stationCount: int
+    tankCount: int
+
+
+class NetworkSummaryResponse(BaseModel):
+    products: list[NetworkSummaryProductLine]
+    totalVolumeLiters: float
+    totalStationCount: int
+    totalTankCount: int
+
+
 class HolykellAccountSyncStatusResponse(BaseModel):
     id: uuid.UUID
     organizationId: uuid.UUID

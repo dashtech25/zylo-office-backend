@@ -314,6 +314,23 @@ réel) + suite `curl` réelle contre serveur de développement.
 
 ---
 
+### GET /api/v1/zylo-liquid/network/summary — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal (2 produits, 2 stations) | 200 + totaux par produit + total général | 200, `totalVolumeLiters=30000` (20000+10000) | ✓ |
+| Cuve sans volume calculable | Exclue du total (jamais 0) | 200, `products=[]`, `totalVolumeLiters=0` | ✓ |
+| Isolation multi-tenant | Totaux limités à l'organisation connectée | 200, conforme | ✓ |
+| Période demandée (`fromDate`/`toDate`) | 422 `historical_network_summary_not_supported` (contradiction de sources documentée, non résolue arbitrairement) | 422 `historical_network_summary_not_supported` | ✓ |
+| Module inactif | 403 `module_inactive` | 403 `module_inactive` | ✓ |
+
+Algorithmes validés séparément : réutilisation de `get_tank_current_state`
+(déjà validé, endpoint 7) — aucun nouveau calcul.
+Preuve : `tests/test_zylo_liquid_network_summary.py` (5 cas, pytest réel) +
+suite `curl` réelle contre serveur de développement.
+
+---
+
 ## Niveau 3 — Tests d'intégration de flux
 
 Aucun scénario métier de bout en bout (livraison, fuite) n'est encore
@@ -337,3 +354,4 @@ mesures réelles dans `TankMeasurement`.
 | 6 | `/holykell-accounts/{id}/sync-status` (GET) | N/A | ✓ (1 endpoint, tous cas) | N/A | **VALIDÉ** |
 | 7 | `/tanks/{id}/current-state`, `/stations/{id}/current-state` (GET) | ✓ (2 algorithmes, 8 tests) | ✓ (2 endpoints, tous cas) | N/A | **VALIDÉ** |
 | 8 | `/tanks/{id}/measurements` (GET) | ✓ (réutilisé) | ✓ (1 endpoint, tous cas) | N/A | **VALIDÉ** |
+| 9 | `/network/summary` (GET) | ✓ (réutilisé) | ✓ (1 endpoint, tous cas) | N/A | **VALIDÉ** |

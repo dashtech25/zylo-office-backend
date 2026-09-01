@@ -21,6 +21,8 @@ from app.modules.zylo_liquid.schemas import (
     CreateStationRequest,
     CreateTankRequest,
     CreateTankSensorMappingRequest,
+    NetworkSummaryProductLine,
+    NetworkSummaryResponse,
     ReplaceTankCalibrationPointsRequest,
     StationCurrentStateResponse,
     StationResponse,
@@ -577,6 +579,70 @@ async def list_tank_measurements(
         for m in measurements
     ]
     return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
+
+
+async def get_network_summary(db: AsyncSession, organization_id: uuid.UUID, from_date, to_date) -> NetworkSummaryResponse:
+    """Totaux réseau par produit (Point 2 §3.2) — agrège l'état actuel de
+    chaque cuve (endpoint 7), jamais réimplémenté. Ne supporte que l'instant
+    présent : Point 3 §11/§12 documente cet endpoint comme dépendant
+    uniquement de l'état actuel, jamais de l'historique — une résolution
+    rétroactive par période n'est pas spécifiée ici (voir issue #39,
+    renvoyée au futur endpoint 13 « network/snapshot »)."""
+    if from_date is not None or to_date is not None:
+        raise AppError(
+            code="historical_network_summary_not_supported",
+            message="Le total réseau à une période passée n'est pas encore disponible à cet endpoint — utiliser network/snapshot (à venir) pour un instant précis dans le passé.",
+            status_code=422,
+        )
+
+    stations_result = await db.execute(
+        select(Station).where(Station.organizationId == organization_id, Station.status == "active")
+    )
+    stations = stations_result.scalars().all()
+    station_ids = [s.id for s in stations]
+
+    if not station_ids:
+        return NetworkSummaryResponse(products=[], totalVolumeLiters=0, totalStationCount=0, totalTankCount=0)
+
+    tanks_result = await db.execute(select(Tank).where(Tank.stationId.in_(station_ids), Tank.active.is_(True)))
+    tanks = tanks_result.scalars().all()
+
+    fuel_products_result = await db.execute(select(FuelProduct).where(FuelProduct.organizationId == organization_id))
+    fuel_products_by_id = {fp.id: fp for fp in fuel_products_result.scalars().all()}
+
+    per_product: dict[uuid.UUID, dict] = {}
+    all_stations_with_data: set[uuid.UUID] = set()
+    for tank in tanks:
+        state = await get_tank_current_state(db, tank)
+        if state.volumeLiters is None:
+            continue  # cuve sans mesure calculable exclue du total (jamais un zéro, Point 2 §3.2)
+
+        entry = per_product.setdefault(
+            tank.fuelProductId,
+            {"stations": set(), "tanks": 0, "volume": 0.0},
+        )
+        entry["stations"].add(tank.stationId)
+        entry["tanks"] += 1
+        entry["volume"] += state.volumeLiters
+        all_stations_with_data.add(tank.stationId)
+
+    products = [
+        NetworkSummaryProductLine(
+            fuelProductId=fuel_product_id,
+            fuelProductName=fuel_products_by_id[fuel_product_id].name if fuel_product_id in fuel_products_by_id else "?",
+            totalVolumeLiters=entry["volume"],
+            stationCount=len(entry["stations"]),
+            tankCount=entry["tanks"],
+        )
+        for fuel_product_id, entry in per_product.items()
+    ]
+
+    return NetworkSummaryResponse(
+        products=products,
+        totalVolumeLiters=sum(p.totalVolumeLiters for p in products),
+        totalStationCount=len(all_stations_with_data),
+        totalTankCount=sum(p.tankCount for p in products),
+    )
 
 
 async def get_holykell_account_sync_status(db: AsyncSession, organization_id: uuid.UUID, account_id: uuid.UUID) -> HolykellAccount:

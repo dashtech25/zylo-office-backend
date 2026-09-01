@@ -28,6 +28,7 @@ from app.modules.zylo_liquid.schemas import (
     CreateTankSensorMappingRequest,
     FuelProductResponse,
     HolykellAccountSyncStatusResponse,
+    NetworkSummaryResponse,
     ReplaceTankCalibrationPointsRequest,
     ReplaceTankCalibrationPointsResponse,
     StationCurrentStateResponse,
@@ -356,6 +357,20 @@ async def list_tank_measurements(
     db: AsyncSession = Depends(get_db),
 ) -> Page:
     return await service.list_tank_measurements(db, organization_id, tank_id, pagination, fromDate, toDate)
+
+
+@router.get(
+    "/network/summary",
+    response_model=NetworkSummaryResponse,
+    dependencies=[Depends(require_permission(STATION_READ))],
+)
+async def get_network_summary(
+    fromDate: datetime | None = None,
+    toDate: datetime | None = None,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> NetworkSummaryResponse:
+    return await service.get_network_summary(db, organization_id, fromDate, toDate)
 
 
 @router.get(

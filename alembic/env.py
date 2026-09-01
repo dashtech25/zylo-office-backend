@@ -20,6 +20,7 @@ from app.modules.zylo_liquid import models as zylo_liquid_models  # noqa: F401
 from app.modules_registry import models as modules_registry_models  # noqa: F401
 from app.rbac import models as rbac_models  # noqa: F401
 from app.shared import geo as shared_geo_models  # noqa: F401
+from app.shared import currency as shared_currency_models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

@@ -502,6 +502,30 @@ calcul.
 Preuve : `tests/test_zylo_liquid_network_snapshot.py` (5 cas, pytest réel)
 + suite `curl` réelle contre serveur de développement.
 
+### POST/GET/PATCH /api/v1/currencies — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal (création/liste) | 201/200 | Confirmé | ✓ |
+| Code dupliqué | 409 `currency_code_already_used` | 409 `currency_code_already_used` | ✓ |
+| Format invalide (pas 3 lettres majuscules) | 422 | 422 | ✓ |
+| Modification (jamais le code) | 200, `code` inchangé | 200, conforme | ✓ |
+| Introuvable | 404 `currency_not_found` | 404 `currency_not_found` | ✓ |
+| Non authentifié | 401 | 401 | ✓ |
+
+### POST/GET /api/v1/exchange-rates — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal (création/liste) | 201/200 | Confirmé | ✓ |
+| Devise source = devise cible | 422 `exchange_rate_same_currency` | 422 `exchange_rate_same_currency` | ✓ |
+| Doublon (même paire, même date) | 409 `exchange_rate_already_exists` | 409 `exchange_rate_already_exists` | ✓ |
+| Taux négatif | 422 (validation) | 422 | ✓ |
+
+Algorithmes validés séparément : N/A (référentiel Core pur, aucun calcul).
+Preuve : `tests/test_shared_currency.py` (10 cas, pytest réel) + suite
+`curl` réelle contre serveur de développement.
+
 Aucun scénario métier de bout en bout (livraison, fuite) n'est encore
 implémenté à ce stade — les endpoints 1 et 2 sont du référentiel pur, sans
 flux de mesures. Cette section sera complétée à partir des endpoints 10
@@ -528,3 +552,4 @@ mesures réelles dans `TankMeasurement`.
 | 11 | `/leak-events` (GET) | ✓ (6 tests) | ✓ (2 endpoints, tous cas) | ✓ (scénario complet) | **VALIDÉ** |
 | 12 | `/alerts` (GET/PATCH) | ✓ (5 tests) | ✓ (3 endpoints, tous cas) | ✓ (scénario complet) | **VALIDÉ** |
 | 13 | `/network/snapshot` (GET) | ✓ (réutilisé) | ✓ (1 endpoint, tous cas) | N/A | **VALIDÉ** |
+| 14 | `/currencies`, `/exchange-rates` (Core) | N/A | ✓ (5 endpoints, tous cas) | N/A | **VALIDÉ** |

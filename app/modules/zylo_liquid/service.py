@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.modules.zylo_liquid.algorithms import correct_volume_to_reference_temperature, interpolate_height_to_volume
 from app.modules.zylo_liquid.models import (
     FuelProduct,
     HolykellAccount,
@@ -20,7 +21,9 @@ from app.modules.zylo_liquid.schemas import (
     CreateTankRequest,
     CreateTankSensorMappingRequest,
     ReplaceTankCalibrationPointsRequest,
+    StationCurrentStateResponse,
     StationResponse,
+    TankCurrentStateResponse,
     TankResponse,
     TankSensorMappingResponse,
     UpdateFuelProductRequest,
@@ -410,6 +413,110 @@ async def list_tank_calibration_points(db: AsyncSession, organization_id: uuid.U
         select(TankCalibrationPoint).where(TankCalibrationPoint.tankId == tank_id).order_by(TankCalibrationPoint.heightMm)
     )
     return list(result.scalars().all())
+
+
+async def _get_active_registry_entry(db: AsyncSession, tank_id: uuid.UUID, measurement_type: str) -> HolykellDeviceRegistry | None:
+    result = await db.execute(
+        select(HolykellDeviceRegistry)
+        .join(TankSensorMapping, TankSensorMapping.hkSensorId == HolykellDeviceRegistry.hkSensorId)
+        .where(
+            TankSensorMapping.tankId == tank_id,
+            TankSensorMapping.measurementType == measurement_type,
+            TankSensorMapping.active.is_(True),
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_tank_current_state(db: AsyncSession, tank: Tank) -> TankCurrentStateResponse:
+    """Construit l'état actuel d'une cuve — mesure instantanée lue depuis
+    HolykellDeviceRegistry.lastValue/lastValueAt/hkLastStatus (jamais
+    TankMeasurement, réservé à l'historique), conforme à
+    nouveau-zylo-liquid/Point 6 §6.4. Algorithmes appelés depuis
+    app.modules.zylo_liquid.algorithms, jamais réimplémentés ici (Point 3
+    §10)."""
+    product_level = await _get_active_registry_entry(db, tank.id, "product_level")
+
+    if product_level is None or product_level.lastValue is None:
+        return TankCurrentStateResponse(
+            tankId=tank.id,
+            tankNumber=tank.tankNumber,
+            displayName=tank.displayName,
+            sensorStatus="not_configured",
+            heightMm=None,
+            volumeLiters=None,
+            volumeNotCalculableReason="no_active_sensor",
+            volumeLiters15C=None,
+            waterHeightMm=None,
+            waterVolumeLiters=None,
+            temperatureC=None,
+            emptyVolumeLiters=None,
+            lastMeasurementAt=None,
+        )
+
+    sensor_status = "online" if product_level.hkLastStatus == 1 else "offline"
+    height_mm = float(product_level.lastValue)
+
+    calibration_result = await db.execute(
+        select(TankCalibrationPoint.heightMm, TankCalibrationPoint.volumeLiters).where(TankCalibrationPoint.tankId == tank.id)
+    )
+    calibration_points = [(float(h), float(v)) for h, v in calibration_result.all()]
+
+    volume_brut = interpolate_height_to_volume(calibration_points, height_mm) if calibration_points else None
+    volume_not_calculable_reason = None if volume_brut is not None else "no_calibration_table"
+
+    water_registry = await _get_active_registry_entry(db, tank.id, "water_level")
+    water_height_mm = float(water_registry.lastValue) if water_registry and water_registry.lastValue is not None else None
+    water_volume = (
+        interpolate_height_to_volume(calibration_points, water_height_mm)
+        if water_height_mm is not None and calibration_points
+        else (0.0 if water_height_mm is None else None)
+    )
+
+    volume_net = (volume_brut - water_volume) if (volume_brut is not None and water_volume is not None) else None
+    empty_volume = (float(tank.capacityLiters) - volume_brut) if volume_brut is not None else None
+
+    temperature_registry = await _get_active_registry_entry(db, tank.id, "temperature")
+    temperature_c = (
+        float(temperature_registry.lastValue) if temperature_registry and temperature_registry.lastValue is not None else None
+    )
+
+    volume_15c = None
+    if volume_net is not None and temperature_c is not None:
+        fuel_product = await db.get(FuelProduct, tank.fuelProductId)
+        if fuel_product.thermalExpansionCoefficient is not None:
+            volume_15c = correct_volume_to_reference_temperature(volume_net, temperature_c, float(fuel_product.thermalExpansionCoefficient))
+
+    return TankCurrentStateResponse(
+        tankId=tank.id,
+        tankNumber=tank.tankNumber,
+        displayName=tank.displayName,
+        sensorStatus=sensor_status,
+        heightMm=height_mm,
+        volumeLiters=volume_net,
+        volumeNotCalculableReason=volume_not_calculable_reason,
+        volumeLiters15C=volume_15c,
+        waterHeightMm=water_height_mm,
+        waterVolumeLiters=water_volume,
+        temperatureC=temperature_c,
+        emptyVolumeLiters=empty_volume,
+        lastMeasurementAt=product_level.lastValueAt,
+    )
+
+
+async def get_tank_current_state_by_id(db: AsyncSession, organization_id: uuid.UUID, tank_id: uuid.UUID) -> TankCurrentStateResponse:
+    tank = await get_tank(db, organization_id, tank_id)
+    return await get_tank_current_state(db, tank)
+
+
+async def get_station_current_state(db: AsyncSession, organization_id: uuid.UUID, station_id: uuid.UUID) -> StationCurrentStateResponse:
+    await get_station(db, organization_id, station_id)  # lève station_not_found si hors périmètre
+    result = await db.execute(
+        select(Tank).where(Tank.stationId == station_id, Tank.active.is_(True)).order_by(Tank.tankNumber)
+    )
+    tanks = result.scalars().all()
+    states = [await get_tank_current_state(db, tank) for tank in tanks]
+    return StationCurrentStateResponse(stationId=station_id, tanks=states)
 
 
 async def get_holykell_account_sync_status(db: AsyncSession, organization_id: uuid.UUID, account_id: uuid.UUID) -> HolykellAccount:

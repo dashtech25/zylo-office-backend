@@ -13,11 +13,33 @@
 
 ## Niveau 1 — Tests unitaires algorithmiques
 
-Aucun algorithme métier (Point 1-16) n'est encore branché à un endpoint à
-ce stade (endpoints 1 et 2 = référentiel pur, pas de calcul). Cette section
-sera complétée à partir de l'endpoint 7 (état actuel d'une cuve —
-interpolation hauteur→volume) puis 10 (livraison), 11 (fuite), qui sont les
-premiers à exercer un algorithme validé (Point 3 §10).
+### interpolate_height_to_volume — VALIDÉ le 2026-09-01
+
+| Cas | Entrée | Attendu | Obtenu | Statut |
+|-----|--------|---------|--------|--------|
+| Cas de référence exact | Table Point 2 §2.4, H=1073mm | 19729 L (±1) | 19729 L | ✓ (PASS) |
+| Point exact de la table | H=1050mm | 19200 L | 19200 L | ✓ |
+| Hors plage, en dessous | H=-50mm | Borné au premier point (0 L) | 0 L | ✓ |
+| Hors plage, au dessus | H=5000mm | Borné au dernier point (40000 L) | 40000 L | ✓ |
+| Aucune calibration | Table vide | `None` (jamais un volume inventé) | `None` | ✓ |
+
+Source exacte : `nouveau-station-simulator/nouveau-zylo-liquid/Point 2 —
+La table de calibration.md` §2.4. Preuve : `tests/test_zylo_liquid_algorithms.py`.
+
+### correct_volume_to_reference_temperature — VALIDÉ le 2026-09-01
+
+| Cas | Entrée | Attendu | Obtenu | Statut |
+|-----|--------|---------|--------|--------|
+| Cas de référence exact | V=19729L, T=35°C, α=0.00085 (Gasoil) | 19394 L (±1) | 19394 L | ✓ (PASS) |
+| À la température de référence | V=19729L, T=15°C | Inchangé (19729 L) — **FAIL si différent** | 19729 L | ✓ |
+| Sous la référence | V=10000L, T=5°C, α=0.00120 | Volume corrigé > volume mesuré (contraction) | Confirmé (10060 L) | ✓ |
+
+Source exacte : `nouveau-station-simulator/nouveau-zylo-liquid/Point 5 —
+Température et densité.md` §5.2. Preuve : `tests/test_zylo_liquid_algorithms.py`.
+
+Aucun autre algorithme métier (Point 1-16) n'est encore branché à un
+endpoint à ce stade. Les prochains à exercer un algorithme validé seront
+les endpoints 10 (livraison) et 11 (fuite).
 
 ---
 
@@ -243,6 +265,32 @@ Point 2 §2.1 affirmait une contrainte d'unicité par organisation qui
 n'existe pas réellement en base — vérifié, non corrigé arbitrairement.
 Preuve : `tests/test_zylo_liquid_holykell_sync_status.py` (5 cas, pytest
 réel) + suite `curl` réelle contre serveur de développement.
+
+---
+
+### GET /api/v1/zylo-liquid/tanks/{id}/current-state — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Aucun capteur configuré | 200, `sensorStatus:"not_configured"`, tous les volumes `null` | 200, conforme | ✓ |
+| Mesure normale (avec calibration) | 200, `volumeLiters` calculé par interpolation | 200, `heightMm=1073`, `volumeLiters≈21460` | ✓ |
+| Eau + correction thermique | `volumeLiters` = brut - eau ; `volumeLiters15C` corrigé | 200, `volumeLiters=20460`, `volumeLiters15C≈20121` | ✓ |
+| Sonde déconnectée (`hkLastStatus=0`) | `sensorStatus:"offline"` | 200, `sensorStatus:"offline"` | ✓ |
+| Sans table de calibration | `volumeLiters:null`, `volumeNotCalculableReason:"no_calibration_table"`, `heightMm` brut renvoyé | 200, conforme | ✓ |
+| Cuve introuvable | 404 `tank_not_found` | 404 `tank_not_found` | ✓ |
+| Module inactif | 403 `module_inactive` | 403 `module_inactive` | ✓ |
+
+Algorithmes validés séparément : voir Niveau 1 ci-dessus
+(`interpolate_height_to_volume`, `correct_volume_to_reference_temperature`).
+Preuve : `tests/test_zylo_liquid_current_state.py` (9 cas, pytest réel) +
+suite `curl` réelle contre serveur de développement (4 cas minimum).
+
+### GET /api/v1/zylo-liquid/stations/{id}/current-state — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal | 200 + liste des cuves actives de la station | 200, conforme | ✓ |
+| Station introuvable | 404 `station_not_found` | 404 `station_not_found` | ✓ |
 
 ---
 

@@ -8,6 +8,7 @@ class CreateFuelProductRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     code: str = Field(min_length=1, max_length=10)
     densityGPerCm3: float | None = None
+    thermalExpansionCoefficient: float | None = None
     currentPriceFcfa: float | None = None
     currentCostFcfa: float | None = None
     displayColor: str | None = Field(default=None, max_length=7)
@@ -16,6 +17,7 @@ class CreateFuelProductRequest(BaseModel):
 class UpdateFuelProductRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     densityGPerCm3: float | None = None
+    thermalExpansionCoefficient: float | None = None
     currentPriceFcfa: float | None = None
     currentCostFcfa: float | None = None
     displayColor: str | None = Field(default=None, max_length=7)
@@ -28,6 +30,7 @@ class FuelProductResponse(BaseModel):
     name: str
     code: str
     densityGPerCm3: float | None
+    thermalExpansionCoefficient: float | None
     currentPriceFcfa: float | None
     currentCostFcfa: float | None
     displayColor: str | None
@@ -180,6 +183,27 @@ class ReplaceTankCalibrationPointsResponse(BaseModel):
     tankId: uuid.UUID
     pointCount: int
     points: list[TankCalibrationPointResponse]
+
+
+class TankCurrentStateResponse(BaseModel):
+    tankId: uuid.UUID
+    tankNumber: int
+    displayName: str
+    sensorStatus: str  # "online" | "offline" | "not_configured"
+    heightMm: float | None
+    volumeLiters: float | None
+    volumeNotCalculableReason: str | None
+    volumeLiters15C: float | None
+    waterHeightMm: float | None
+    waterVolumeLiters: float | None
+    temperatureC: float | None
+    emptyVolumeLiters: float | None
+    lastMeasurementAt: datetime | None
+
+
+class StationCurrentStateResponse(BaseModel):
+    stationId: uuid.UUID
+    tanks: list[TankCurrentStateResponse]
 
 
 class HolykellAccountSyncStatusResponse(BaseModel):

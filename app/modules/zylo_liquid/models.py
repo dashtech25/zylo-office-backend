@@ -198,6 +198,12 @@ class FuelProduct(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     code: Mapped[str] = mapped_column(String(10), nullable=False)
     densityGPerCm3: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    # Coefficient de dilatation thermique (alpha, par °C) — confirmé absent
+    # en Phase 1 (Point 2 §7 "Modèles manquants"), ajouté à la construction
+    # de l'endpoint 7 qui en a besoin pour la correction à 15°C (Point 5
+    # §5.2). Nullable : sans valeur connue, aucune correction n'est
+    # appliquée plutôt que d'inventer un coefficient (endpoint 7, §3.1).
+    thermalExpansionCoefficient: Mapped[float | None] = mapped_column(Numeric(8, 6), nullable=True)
     currentPriceFcfa: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     currentCostFcfa: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     displayColor: Mapped[str | None] = mapped_column(String(7), nullable=True)

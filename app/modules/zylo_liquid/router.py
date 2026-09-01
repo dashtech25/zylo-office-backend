@@ -29,8 +29,10 @@ from app.modules.zylo_liquid.schemas import (
     HolykellAccountSyncStatusResponse,
     ReplaceTankCalibrationPointsRequest,
     ReplaceTankCalibrationPointsResponse,
+    StationCurrentStateResponse,
     StationResponse,
     TankCalibrationPointResponse,
+    TankCurrentStateResponse,
     TankResponse,
     TankSensorMappingResponse,
     UpdateFuelProductRequest,
@@ -310,6 +312,32 @@ async def list_tank_calibration_points(
     db: AsyncSession = Depends(get_db),
 ) -> list:
     return await service.list_tank_calibration_points(db, organization_id, tank_id)
+
+
+@router.get(
+    "/tanks/{tank_id}/current-state",
+    response_model=TankCurrentStateResponse,
+    dependencies=[Depends(require_permission(TANK_READ))],
+)
+async def get_tank_current_state(
+    tank_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TankCurrentStateResponse:
+    return await service.get_tank_current_state_by_id(db, organization_id, tank_id)
+
+
+@router.get(
+    "/stations/{station_id}/current-state",
+    response_model=StationCurrentStateResponse,
+    dependencies=[Depends(require_permission(STATION_READ))],
+)
+async def get_station_current_state(
+    station_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> StationCurrentStateResponse:
+    return await service.get_station_current_state(db, organization_id, station_id)
 
 
 @router.get(

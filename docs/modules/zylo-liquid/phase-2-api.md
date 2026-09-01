@@ -172,6 +172,53 @@ Tests : `tests/test_zylo_liquid_holykell_sync_status.py` (5 cas, incluant
 isolation tenant stricte : compte d'une autre organisation → 404).
 Preuve à 3 niveaux : `validation_log.md`.
 
+### Endpoint 7 — État actuel d'une cuve/station (`current-state`)
+
+**Premier endpoint exerçant un algorithme métier validé** (Point 3 §10).
+Contrat : `Point 2 — Architecture API — Zylo Liquid MVP.md`, chapitre 3.1.
+
+| Méthode | Route | Permission |
+|---|---|---|
+| GET | `/api/v1/zylo-liquid/tanks/{id}/current-state` | `zyloLiquid.tank.read` |
+| GET | `/api/v1/zylo-liquid/stations/{id}/current-state` | `zyloLiquid.station.read` |
+
+**Algorithmes** (`app/modules/zylo_liquid/algorithms.py`, fonctions pures,
+testées seules avant branchement — Niveau 1 de `validation_log.md`) :
+- `interpolate_height_to_volume` — interpolation linéaire entre les deux
+  points de calibration encadrants, bornée (clamp) hors plage. Référence
+  exacte vérifiée : 1073 mm → 19729 L (nouveau-zylo-liquid/Point 2 §2.4).
+- `correct_volume_to_reference_temperature` — `V15 = V × [1 - α×(T-15)]`.
+  Référence exacte vérifiée : V=19729L, T=35°C, α=0.00085 → 19394L
+  (nouveau-zylo-liquid/Point 5 §5.2).
+
+**Extension de modèle** : `FuelProduct.thermalExpansionCoefficient` (α),
+confirmé absent en Phase 1 (Point 2 §7), ajouté ici — nullable : sans
+valeur connue, aucune correction n'est appliquée (`volumeLiters15C: null`),
+jamais un coefficient inventé.
+
+**Décision de conception (issue #35)** : la mesure instantanée est lue
+depuis `HolykellDeviceRegistry.lastValue`/`lastValueAt`/`hkLastStatus` —
+jamais une requête sur `TankMeasurement` (réservé à l'historique, table à
+potentiellement des millions de lignes) — conforme à
+nouveau-zylo-liquid/Point 6 §6.4. Le statut sonde (`online`/`offline`)
+provient directement de `hkLastStatus`, déjà maintenu par la
+synchronisation Holykell — aucun seuil d'ancienneté arbitraire inventé.
+
+**Règles de non-invention respectées** (Point 2 §3.1) :
+- Aucune association capteur active → `sensorStatus: "not_configured"`,
+  tous les champs de volume à `null`, jamais un zéro.
+- Aucune table de calibration → `heightMm` brut renvoyé,
+  `volumeNotCalculableReason: "no_calibration_table"`, jamais un volume
+  inventé.
+- Absence de capteur eau → volume eau traité comme 0 (normal, pas une
+  erreur) ; absence de capteur température → pas de correction 15°C
+  (`volumeLiters15C: null`), jamais une température supposée.
+
+Tests : `tests/test_zylo_liquid_current_state.py` (9 cas, incluant le
+calcul complet carburant+eau+correction thermique avec valeurs numériques
+vérifiées). Preuve à 3 niveaux : `validation_log.md` (Niveau 1 : 8 tests
+algorithmiques ; Niveau 2 : contrats des 2 endpoints).
+
 ## 3. Ce qui a été factorisé dans le Core (correction de portée, pas une extension du périmètre initial)
 
 **`app/modules_registry/service.grant_module_permissions_to_owner`** —
@@ -343,4 +390,22 @@ Liquid, mais découverte et corrigée à l'occasion de ce premier endpoint.
 - Vérification réelle : suite `curl` des 4 cas minimum (statut réussi,
   compte introuvable → 404, isolation tenant → 404, module inactif → 403)
   contre le serveur de développement.
+- Statut : **TERMINÉ**.
+
+## 14. Rapport final — Endpoint 7
+
+- Fichiers créés : `app/modules/zylo_liquid/algorithms.py`,
+  `tests/test_zylo_liquid_algorithms.py` (Niveau 1, 8 cas),
+  `tests/test_zylo_liquid_current_state.py` (Niveau 2, 9 cas).
+- Fichiers modifiés : `app/modules/zylo_liquid/models.py`
+  (`FuelProduct.thermalExpansionCoefficient`), `app/modules/zylo_liquid/{schemas,service,router}.py`,
+  cette documentation, `validation_log.md`.
+- Migration : `fecaf414f49e_fuel_product_thermal_expansion_coefficient.py`
+  (colonne nullable, aucune donnée existante affectée).
+- Tests : 76/76 verts (`python -m pytest`), y compris les 59 tests
+  préexistants (non-régression) + 8 tests Niveau 1 (algorithmes purs) + 9
+  tests Niveau 2 (contrats des 2 endpoints).
+- Vérification réelle : suite `curl` des 4 cas minimum (cuve sans capteur
+  configuré, calcul complet avec capteur réel, cuve introuvable → 404,
+  module inactif → 403) contre le serveur de développement.
 - Statut : **TERMINÉ**.

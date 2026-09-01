@@ -232,6 +232,19 @@ class NetworkSummaryResponse(BaseModel):
     totalTankCount: int
 
 
+class DeliveryDetectedResponse(BaseModel):
+    id: uuid.UUID
+    tankId: uuid.UUID
+    stationId: uuid.UUID
+    startTime: datetime
+    startHeightMm: float
+    endTime: datetime
+    endHeightMm: float
+    volumeLiters: float | None
+
+    model_config = {"from_attributes": True}
+
+
 class HolykellAccountSyncStatusResponse(BaseModel):
     id: uuid.UUID
     organizationId: uuid.UUID

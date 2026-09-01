@@ -1,6 +1,8 @@
 """Algorithmes métier validés (Point 3 §10) — jamais réimplémentés à
 l'intérieur d'un endpoint, toujours appelés depuis ce module unique."""
 
+from datetime import timedelta
+
 
 def interpolate_height_to_volume(calibration_points: list[tuple[float, float]], height_mm: float) -> float | None:
     """Interpolation linéaire hauteur -> volume entre les deux points de la
@@ -26,6 +28,61 @@ def interpolate_height_to_volume(calibration_points: list[tuple[float, float]], 
             return v_bas + (v_haut - v_bas) * ratio
 
     return None  # inatteignable si les bornes ci-dessus sont correctes
+
+
+def detect_deliveries(
+    measurements: list[tuple],
+    rise_threshold_mm: float = 50,
+    stability_delta_mm: float = 5,
+    stabilization_minutes: float = 15,
+) -> list[dict]:
+    """Détection de livraison (Point 8 §8.3, seuils exacts du code Odoo
+    audité cités en Point 3 §10 : hausse ≥ 50mm, stabilité < 5mm,
+    confirmation après 15 min — jamais les valeurs d'exemple génériques de
+    Point 8.6). `measurements` : liste de (measuredAt: datetime, heightMm:
+    float) triée chronologiquement. Retourne une liste de
+    {startTime, startHeightMm, endTime, endHeightMm} — la conversion en
+    volume est faite par l'appelant via `interpolate_height_to_volume`
+    (jamais dupliquée ici)."""
+    if len(measurements) < 2:
+        return []
+
+    events = []
+    baseline_time, baseline_height = measurements[0]
+    in_delivery = False
+    start_time = start_height = None
+    peak_height = None
+    stabilization_start = None
+
+    for i in range(1, len(measurements)):
+        t, h = measurements[i]
+        prev_t, prev_h = measurements[i - 1]
+
+        if not in_delivery:
+            if h - baseline_height >= rise_threshold_mm:
+                in_delivery = True
+                start_time, start_height = baseline_time, baseline_height
+                peak_height = h
+                stabilization_start = None
+            elif h <= baseline_height:
+                baseline_time, baseline_height = t, h
+        else:
+            if h > peak_height:
+                peak_height = h
+                stabilization_start = None
+            elif abs(h - prev_h) < stability_delta_mm:
+                if stabilization_start is None:
+                    stabilization_start = prev_t
+                elif (t - stabilization_start) >= timedelta(minutes=stabilization_minutes):
+                    events.append(
+                        {"startTime": start_time, "startHeightMm": start_height, "endTime": t, "endHeightMm": h}
+                    )
+                    in_delivery = False
+                    baseline_time, baseline_height = t, h
+            else:
+                stabilization_start = None
+
+    return events
 
 
 def correct_volume_to_reference_temperature(

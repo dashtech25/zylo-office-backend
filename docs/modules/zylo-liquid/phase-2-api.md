@@ -278,6 +278,45 @@ explicitement (`test_network_summary_excludes_tank_without_calculable_volume`).
 Tests : `tests/test_zylo_liquid_network_summary.py` (5 cas). Preuve à 3
 niveaux : `validation_log.md` (aucun nouvel algorithme).
 
+### Endpoint 10 — Livraisons détectées (`deliveries`)
+
+Contrat : `Point 2 — Architecture API — Zylo Liquid MVP.md`, chapitre 3.3.
+Premier endpoint avec un test d'intégration Niveau 3 complet (Point 4).
+
+| Méthode | Route | Permission |
+|---|---|---|
+| GET | `/api/v1/zylo-liquid/deliveries` | `zyloLiquid.delivery.read` |
+| GET | `/api/v1/zylo-liquid/deliveries/{id}` | `zyloLiquid.delivery.read` |
+
+**Modèle créé** : `DeliveryDetected` (confirmé absent, Point 2 §7), CRÉER
+justifié — table alimentée uniquement par détection automatique, jamais
+par une saisie manuelle (contrat explicite, cohérent avec l'exclusion MVP
+« pas de bons de livraison manuels »).
+
+**Algorithme** (`detect_deliveries`, `app/modules/zylo_liquid/algorithms.py`) :
+seuils exacts du code Odoo audité cités en Point 3 §10 — hausse ≥ 50mm
+déclenche le suivi, stabilité < 5mm confirmée après 15 min de continuité
+signe la fin. Volume = calibration(fin) - calibration(début), **sans**
+correction des ventes simultanées (Point 8 §8.6 : l'index compteurs
+nécessaire à cette correction est explicitement hors périmètre MVP,
+`fonctionnalite-mvp.md`). Testé avec le scénario numérique exact de Point 8
+§8.5/§8.8 : 445mm→1293mm, volume brut 10875L (Niveau 1,
+`tests/test_zylo_liquid_algorithms.py`).
+
+**Limite de portée documentée (issue #41)** : comme `TankMeasurement` et
+`HolykellDeviceRegistry`, cette table est censée être alimentée par un
+traitement de fond (scan périodique de l'historique des mesures) —
+construire ce scheduler est hors périmètre d'un « endpoint » API (Point 3
+§12 ne liste que des endpoints). La fonction `run_delivery_detection_for_tank`
+existe et est testée directement (idempotente via la contrainte
+`tankId+startTime`), mais n'est appelée par aucune route HTTP, conforme au
+contrat (« aucun endpoint de création manuelle »).
+
+Tests : `tests/test_zylo_liquid_deliveries.py` (6 cas, incluant un
+scénario d'intégration Niveau 3 complet : mesures réelles → détection →
+persistance → lecture API, volume exact 10875L vérifié de bout en bout).
+Preuve à 3 niveaux : `validation_log.md`.
+
 ## 3. Ce qui a été factorisé dans le Core (correction de portée, pas une extension du périmètre initial)
 
 **`app/modules_registry/service.grant_module_permissions_to_owner`** —
@@ -494,4 +533,21 @@ Liquid, mais découverte et corrigée à l'occasion de ce premier endpoint.
 - Vérification réelle : suite `curl` des 4 cas minimum (agrégation
   normale par produit, cuve non configurée exclue, période demandée → 422,
   module inactif → 403) contre le serveur de développement.
+- Statut : **TERMINÉ**.
+
+## 17. Rapport final — Endpoint 10
+
+- Fichiers créés : `tests/test_zylo_liquid_deliveries.py`.
+- Fichiers modifiés : `app/modules/zylo_liquid/models.py` (`DeliveryDetected`,
+  nouveau), `app/modules/zylo_liquid/algorithms.py` (`detect_deliveries`),
+  `tests/test_zylo_liquid_algorithms.py` (Niveau 1, +3 cas),
+  `app/modules/zylo_liquid/{schemas,service,router,permissions,seed}.py`,
+  cette documentation, `validation_log.md`.
+- Migration : `83f1a725f86b_delivery_detected.py` (nouvelle table).
+- Tests : 97/97 verts (`python -m pytest`), y compris les 88 tests
+  préexistants (non-régression) + 3 Niveau 1 + 6 Niveau 2/3.
+- Vérification réelle : scénario complet rejoué contre le serveur de
+  développement (série de mesures réelles → détection → lecture API,
+  volume exact 10875L confirmé), plus cas introuvable/plage invalide/
+  permission manquante.
 - Statut : **TERMINÉ**.

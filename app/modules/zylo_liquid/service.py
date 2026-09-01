@@ -5,8 +5,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
-from app.modules.zylo_liquid.algorithms import correct_volume_to_reference_temperature, interpolate_height_to_volume
+from app.modules.zylo_liquid.algorithms import (
+    correct_volume_to_reference_temperature,
+    detect_deliveries,
+    interpolate_height_to_volume,
+)
 from app.modules.zylo_liquid.models import (
+    DeliveryDetected,
     FuelProduct,
     HolykellAccount,
     HolykellDeviceRegistry,
@@ -21,6 +26,7 @@ from app.modules.zylo_liquid.schemas import (
     CreateStationRequest,
     CreateTankRequest,
     CreateTankSensorMappingRequest,
+    DeliveryDetectedResponse,
     NetworkSummaryProductLine,
     NetworkSummaryResponse,
     ReplaceTankCalibrationPointsRequest,
@@ -643,6 +649,133 @@ async def get_network_summary(db: AsyncSession, organization_id: uuid.UUID, from
         totalStationCount=len(all_stations_with_data),
         totalTankCount=sum(p.tankCount for p in products),
     )
+
+
+async def run_delivery_detection_for_tank(db: AsyncSession, tank_id: uuid.UUID) -> list[DeliveryDetected]:
+    """Exécute l'algorithme de détection de livraison (Point 8 §8.3,
+    `detect_deliveries`, jamais réimplémenté) sur tout l'historique des
+    mesures product_level de la cuve, et persiste les livraisons non encore
+    connues (idempotent via la contrainte d'unicité tankId+startTime).
+
+    Aucun endpoint HTTP n'appelle cette fonction (contrat Point 2 §3.3 :
+    « aucun endpoint de création manuelle ») — elle simule ici le
+    traitement de fond que produirait un scheduler réel, hors périmètre de
+    cette API (même limite déjà actée pour TankMeasurement/HolykellDeviceRegistry,
+    alimentés par la synchronisation Holykell, elle aussi hors périmètre)."""
+    sensor_ids_result = await db.execute(
+        select(TankSensorMapping.hkSensorId).where(
+            TankSensorMapping.tankId == tank_id, TankSensorMapping.measurementType == "product_level"
+        )
+    )
+    sensor_ids = [row[0] for row in sensor_ids_result.all()]
+    if not sensor_ids:
+        return []
+
+    measurements_result = await db.execute(
+        select(TankMeasurement.measuredAt, TankMeasurement.rawValue)
+        .where(TankMeasurement.hkSensorId.in_(sensor_ids))
+        .order_by(TankMeasurement.measuredAt)
+    )
+    measurements = [(measuredAt, float(rawValue)) for measuredAt, rawValue in measurements_result.all()]
+    events = detect_deliveries(measurements)
+    if not events:
+        return []
+
+    calibration_result = await db.execute(
+        select(TankCalibrationPoint.heightMm, TankCalibrationPoint.volumeLiters).where(TankCalibrationPoint.tankId == tank_id)
+    )
+    calibration_points = [(float(h), float(v)) for h, v in calibration_result.all()]
+
+    existing_result = await db.execute(select(DeliveryDetected.startTime).where(DeliveryDetected.tankId == tank_id))
+    existing_start_times = {row[0] for row in existing_result.all()}
+
+    created = []
+    for event in events:
+        if event["startTime"] in existing_start_times:
+            continue
+        start_volume = interpolate_height_to_volume(calibration_points, event["startHeightMm"]) if calibration_points else None
+        end_volume = interpolate_height_to_volume(calibration_points, event["endHeightMm"]) if calibration_points else None
+        volume = (end_volume - start_volume) if (start_volume is not None and end_volume is not None) else None
+        delivery = DeliveryDetected(
+            tankId=tank_id,
+            startTime=event["startTime"],
+            startHeightMm=event["startHeightMm"],
+            startVolumeLiters=start_volume,
+            endTime=event["endTime"],
+            endHeightMm=event["endHeightMm"],
+            endVolumeLiters=end_volume,
+            volumeLiters=volume,
+        )
+        db.add(delivery)
+        created.append(delivery)
+
+    if created:
+        await db.commit()
+        for delivery in created:
+            await db.refresh(delivery)
+    return created
+
+
+def _delivery_to_response(delivery: DeliveryDetected, tank: Tank) -> DeliveryDetectedResponse:
+    return DeliveryDetectedResponse(
+        id=delivery.id,
+        tankId=delivery.tankId,
+        stationId=tank.stationId,
+        startTime=delivery.startTime,
+        startHeightMm=float(delivery.startHeightMm),
+        endTime=delivery.endTime,
+        endHeightMm=float(delivery.endHeightMm),
+        volumeLiters=float(delivery.volumeLiters) if delivery.volumeLiters is not None else None,
+    )
+
+
+async def list_deliveries(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    pagination: PaginationParams,
+    station_id: uuid.UUID | None,
+    tank_id: uuid.UUID | None,
+    from_date,
+    to_date,
+) -> Page:
+    if from_date is not None and to_date is not None and from_date > to_date:
+        raise AppError(code="invalid_date_range", message="from_date doit être antérieure ou égale à to_date.", status_code=422)
+
+    stmt = (
+        select(DeliveryDetected, Tank)
+        .join(Tank, Tank.id == DeliveryDetected.tankId)
+        .join(Station, Station.id == Tank.stationId)
+        .where(Station.organizationId == organization_id)
+    )
+    if station_id is not None:
+        stmt = stmt.where(Tank.stationId == station_id)
+    if tank_id is not None:
+        stmt = stmt.where(DeliveryDetected.tankId == tank_id)
+    if from_date is not None:
+        stmt = stmt.where(DeliveryDetected.startTime >= from_date)
+    if to_date is not None:
+        stmt = stmt.where(DeliveryDetected.startTime <= to_date)
+    stmt = stmt.order_by(DeliveryDetected.startTime.desc())
+
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
+    result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
+    rows = result.all()
+    data = [_delivery_to_response(delivery, tank) for delivery, tank in rows]
+    return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
+
+
+async def get_delivery(db: AsyncSession, organization_id: uuid.UUID, delivery_id: uuid.UUID) -> DeliveryDetectedResponse:
+    result = await db.execute(
+        select(DeliveryDetected, Tank)
+        .join(Tank, Tank.id == DeliveryDetected.tankId)
+        .join(Station, Station.id == Tank.stationId)
+        .where(DeliveryDetected.id == delivery_id, Station.organizationId == organization_id)
+    )
+    row = result.first()
+    if row is None:
+        raise AppError(code="delivery_not_found", message="Livraison introuvable.", status_code=404)
+    delivery, tank = row
+    return _delivery_to_response(delivery, tank)
 
 
 async def get_holykell_account_sync_status(db: AsyncSession, organization_id: uuid.UUID, account_id: uuid.UUID) -> HolykellAccount:

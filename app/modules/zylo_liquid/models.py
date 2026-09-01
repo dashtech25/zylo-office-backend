@@ -371,3 +371,32 @@ class DeliveryDetected(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     endHeightMm: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     endVolumeLiters: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
     volumeLiters: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
+
+
+class LeakageRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Événement de test de fuite statique (Point 2 §3.4, Point 10 §10.3 —
+    version finale corrigée EPA avec soustraction eau + correction
+    thermique). Modèle confirmé absent en Phase 1 (Point 2 §7), créé à la
+    construction de l'endpoint 11 (issue #43). Alimentée par un test
+    explicite (station à l'arrêt) — aucun endpoint de création manuelle."""
+
+    __tablename__ = "zyloLiquidLeakageRecord"
+    __table_args__ = (
+        UniqueConstraint("tankId", "startTime", "endTime", name="uq_zlLeakageRecord_tank_window"),
+        CheckConstraint("result IN ('normal','anomaly')", name="ck_zlLeakageRecord_result"),
+        {"comment": "Résultat d'un test de fuite statique — jamais créé manuellement."},
+    )
+
+    tankId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    startTime: Mapped[datetime] = mapped_column(nullable=False, index=True)
+    startHeightMm: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    startWaterHeightMm: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    startTemperatureC: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    endTime: Mapped[datetime] = mapped_column(nullable=False)
+    endHeightMm: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    endWaterHeightMm: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    endTemperatureC: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    leakRateLph: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    result: Mapped[str] = mapped_column(String(10), nullable=False)

@@ -7,9 +7,12 @@ from datetime import datetime, timedelta
 import pytest
 
 from app.modules.zylo_liquid.algorithms import (
+    compute_leak_rate_lph,
+    compute_net_corrected_volume,
     correct_volume_to_reference_temperature,
     detect_deliveries,
     interpolate_height_to_volume,
+    is_leak_detected,
 )
 
 CALIBRATION_TABLE = [(0, 0), (1000, 18000), (1050, 19200), (1100, 20350), (2000, 40000)]
@@ -109,6 +112,62 @@ def test_detect_deliveries_does_not_close_prematurely_during_brief_plateau():
     assert len(events) == 1
     assert events[0]["endHeightMm"] == 1200
     assert events[0]["endTime"] == base + timedelta(minutes=45)
+
+
+def test_is_leak_detected_threshold():
+    """Seuil EPA 0.38 L/H (Point 10 §10.4), strictement supérieur."""
+    assert is_leak_detected(0.39) is True  # PASS attendu : détecté
+    assert is_leak_detected(0.38) is False  # à l'exact du seuil -> pas de fuite
+    assert is_leak_detected(0.37) is False  # FAIL attendu si détecté à tort
+
+
+def test_compute_leak_rate_lph_reference_example():
+    """taux = (V_début - V_fin) / durée — exemple direct de Point 10 §10.3."""
+    rate = compute_leak_rate_lph(v_start_corrected=10000, v_end_corrected=9990.5, duration_hours=24)
+    assert rate == pytest.approx(0.39583, rel=1e-3)
+    assert is_leak_detected(rate) is True
+
+
+def test_compute_net_corrected_volume_water_subtraction_prevents_false_positive():
+    """Correction 1 de Point 10 (algorithme EPA final) : une variation d'eau
+    normale ne doit jamais fausser le taux de fuite carburant."""
+    calibration = [(0, 0), (2000, 40000)]  # calibration linéaire simple pour l'eau et le carburant
+    v_start = compute_net_corrected_volume(calibration, height_mm=1000, water_height_mm=10, temperature_c=None, thermal_expansion_coefficient=None)
+    v_end = compute_net_corrected_volume(calibration, height_mm=1000, water_height_mm=12, temperature_c=None, thermal_expansion_coefficient=None)
+    # même hauteur carburant totale, seule l'eau a augmenté (condensation normale)
+    # -> le volume net carburant doit légèrement diminuer avec l'eau, pas rester une "fuite" du côté carburant pur
+    assert v_start > v_end
+    assert v_start - v_end == pytest.approx(interpolate_height_to_volume(calibration, 12) - interpolate_height_to_volume(calibration, 10))
+
+
+def test_compute_net_corrected_volume_thermal_correction_prevents_false_positive():
+    """Correction 2 de Point 10 (algorithme EPA final, exemple documenté
+    §« La correction pour le simulateur ») : un refroidissement nocturne
+    normal de 2°C sur une cuve de Gasoil (α=0.00085) fait naturellement
+    baisser la hauteur mesurée de ~31L de contraction physique — sans
+    fuite réelle. La correction thermique doit ramener le taux à ~0,
+    jamais laisser ces 31L apparaître comme une fuite (FAIL attendu sans
+    correction)."""
+    calibration = [(0, 0), (2000, 40000)]  # 20 L/mm, linéaire
+    alpha_gasoil = 0.00085
+    v_brut_start = 18385.0
+    contraction_liters = v_brut_start * alpha_gasoil * 2  # refroidissement de 2°C, formule Point 10
+    v_brut_end = v_brut_start - contraction_liters
+    height_start = v_brut_start / 20
+    height_end = v_brut_end / 20
+
+    v_start_corrected = compute_net_corrected_volume(calibration, height_start, None, 28, alpha_gasoil)
+    v_end_corrected = compute_net_corrected_volume(calibration, height_end, None, 26, alpha_gasoil)
+    rate = compute_leak_rate_lph(v_start_corrected, v_end_corrected, duration_hours=1)
+
+    assert rate == pytest.approx(0, abs=0.5)  # correction thermique neutralise la contraction
+    assert is_leak_detected(rate) is False
+
+    # Sans correction thermique (None), les mêmes hauteurs donneraient un
+    # taux de ~31 L/H, largement au-dessus du seuil — FAIL attendu si la
+    # correction n'était pas appliquée (démontre pourquoi elle est requise).
+    rate_uncorrected = compute_leak_rate_lph(v_brut_start, v_brut_end, duration_hours=1)
+    assert is_leak_detected(rate_uncorrected) is True
 
 
 def test_correct_volume_to_reference_temperature_below_reference_increases_volume():

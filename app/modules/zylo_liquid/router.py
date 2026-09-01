@@ -13,6 +13,7 @@ from app.modules.zylo_liquid.permissions import (
     FUEL_PRODUCT_MANAGE,
     FUEL_PRODUCT_READ,
     HOLYKELL_ACCOUNT_READ,
+    LEAK_EVENT_READ,
     STATION_MANAGE,
     STATION_READ,
     TANK_CALIBRATION_MANAGE,
@@ -29,6 +30,7 @@ from app.modules.zylo_liquid.schemas import (
     CreateTankSensorMappingRequest,
     DeliveryDetectedResponse,
     FuelProductResponse,
+    LeakEventResponse,
     HolykellAccountSyncStatusResponse,
     NetworkSummaryResponse,
     ReplaceTankCalibrationPointsRequest,
@@ -403,6 +405,37 @@ async def get_delivery(
     db: AsyncSession = Depends(get_db),
 ) -> DeliveryDetectedResponse:
     return await service.get_delivery(db, organization_id, delivery_id)
+
+
+@router.get(
+    "/leak-events",
+    response_model=Page[LeakEventResponse],
+    dependencies=[Depends(require_permission(LEAK_EVENT_READ))],
+)
+async def list_leak_events(
+    pagination: PaginationParams = Depends(),
+    stationId: uuid.UUID | None = None,
+    tankId: uuid.UUID | None = None,
+    result: str | None = None,
+    fromDate: datetime | None = None,
+    toDate: datetime | None = None,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    return await service.list_leak_events(db, organization_id, pagination, stationId, tankId, result, fromDate, toDate)
+
+
+@router.get(
+    "/leak-events/{leak_event_id}",
+    response_model=LeakEventResponse,
+    dependencies=[Depends(require_permission(LEAK_EVENT_READ))],
+)
+async def get_leak_event(
+    leak_event_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> LeakEventResponse:
+    return await service.get_leak_event(db, organization_id, leak_event_id)
 
 
 @router.get(

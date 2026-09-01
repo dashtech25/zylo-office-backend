@@ -6,15 +6,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.modules.zylo_liquid.algorithms import (
+    compute_leak_rate_lph,
+    compute_net_corrected_volume,
     correct_volume_to_reference_temperature,
     detect_deliveries,
     interpolate_height_to_volume,
+    is_leak_detected,
 )
 from app.modules.zylo_liquid.models import (
     DeliveryDetected,
     FuelProduct,
     HolykellAccount,
     HolykellDeviceRegistry,
+    LeakageRecord,
     Station,
     Tank,
     TankCalibrationPoint,
@@ -27,6 +31,7 @@ from app.modules.zylo_liquid.schemas import (
     CreateTankRequest,
     CreateTankSensorMappingRequest,
     DeliveryDetectedResponse,
+    LeakEventResponse,
     NetworkSummaryProductLine,
     NetworkSummaryResponse,
     ReplaceTankCalibrationPointsRequest,
@@ -776,6 +781,154 @@ async def get_delivery(db: AsyncSession, organization_id: uuid.UUID, delivery_id
         raise AppError(code="delivery_not_found", message="Livraison introuvable.", status_code=404)
     delivery, tank = row
     return _delivery_to_response(delivery, tank)
+
+
+async def _measurement_height_at(db: AsyncSession, tank_id: uuid.UUID, measurement_type: str, at_time) -> float | None:
+    sensor_ids_result = await db.execute(
+        select(TankSensorMapping.hkSensorId).where(
+            TankSensorMapping.tankId == tank_id, TankSensorMapping.measurementType == measurement_type
+        )
+    )
+    sensor_ids = [row[0] for row in sensor_ids_result.all()]
+    if not sensor_ids:
+        return None
+    result = await db.execute(
+        select(TankMeasurement.rawValue).where(TankMeasurement.hkSensorId.in_(sensor_ids), TankMeasurement.measuredAt == at_time)
+    )
+    row = result.scalar_one_or_none()
+    return float(row) if row is not None else None
+
+
+async def run_leak_test_for_tank(db: AsyncSession, tank_id: uuid.UUID, start_time, end_time) -> LeakageRecord:
+    """Test de fuite statique explicite (Point 10 §10.3, version finale
+    corrigée EPA) — contrairement aux livraisons (scan continu de tout
+    l'historique), un test de fuite porte sur une fenêtre précise choisie
+    (station à l'arrêt), jamais détecté en continu. Idempotent via la
+    contrainte tankId+startTime+endTime."""
+    if start_time >= end_time:
+        raise AppError(code="invalid_test_window", message="startTime doit être strictement antérieure à endTime.", status_code=422)
+
+    existing = await db.execute(
+        select(LeakageRecord).where(
+            LeakageRecord.tankId == tank_id, LeakageRecord.startTime == start_time, LeakageRecord.endTime == end_time
+        )
+    )
+    existing_record = existing.scalar_one_or_none()
+    if existing_record is not None:
+        return existing_record
+
+    start_height = await _measurement_height_at(db, tank_id, "product_level", start_time)
+    end_height = await _measurement_height_at(db, tank_id, "product_level", end_time)
+    if start_height is None or end_height is None:
+        raise AppError(
+            code="measurement_not_found_for_window",
+            message="Aucune mesure product_level exacte trouvée au début ou à la fin de la fenêtre de test.",
+            status_code=422,
+        )
+
+    start_water = await _measurement_height_at(db, tank_id, "water_level", start_time)
+    end_water = await _measurement_height_at(db, tank_id, "water_level", end_time)
+    start_temp = await _measurement_height_at(db, tank_id, "temperature", start_time)
+    end_temp = await _measurement_height_at(db, tank_id, "temperature", end_time)
+
+    calibration_result = await db.execute(
+        select(TankCalibrationPoint.heightMm, TankCalibrationPoint.volumeLiters).where(TankCalibrationPoint.tankId == tank_id)
+    )
+    calibration_points = [(float(h), float(v)) for h, v in calibration_result.all()]
+
+    tank_result = await db.execute(select(Tank).where(Tank.id == tank_id))
+    tank = tank_result.scalar_one()
+    fuel_product = await db.get(FuelProduct, tank.fuelProductId)
+    alpha = float(fuel_product.thermalExpansionCoefficient) if fuel_product.thermalExpansionCoefficient is not None else None
+
+    v_start = compute_net_corrected_volume(calibration_points, start_height, start_water, start_temp, alpha) if calibration_points else None
+    v_end = compute_net_corrected_volume(calibration_points, end_height, end_water, end_temp, alpha) if calibration_points else None
+
+    duration_hours = (end_time - start_time).total_seconds() / 3600
+    leak_rate = compute_leak_rate_lph(v_start, v_end, duration_hours) if (v_start is not None and v_end is not None) else None
+    result_value = "anomaly" if (leak_rate is not None and is_leak_detected(leak_rate)) else "normal"
+
+    record = LeakageRecord(
+        tankId=tank_id,
+        startTime=start_time,
+        startHeightMm=start_height,
+        startWaterHeightMm=start_water,
+        startTemperatureC=start_temp,
+        endTime=end_time,
+        endHeightMm=end_height,
+        endWaterHeightMm=end_water,
+        endTemperatureC=end_temp,
+        leakRateLph=leak_rate,
+        result=result_value,
+    )
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    return record
+
+
+def _leak_event_to_response(record: LeakageRecord, tank: Tank) -> LeakEventResponse:
+    return LeakEventResponse(
+        id=record.id,
+        tankId=record.tankId,
+        stationId=tank.stationId,
+        startTime=record.startTime,
+        endTime=record.endTime,
+        leakRateLph=float(record.leakRateLph) if record.leakRateLph is not None else None,
+        result=record.result,
+    )
+
+
+async def list_leak_events(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    pagination: PaginationParams,
+    station_id: uuid.UUID | None,
+    tank_id: uuid.UUID | None,
+    result_filter: str | None,
+    from_date,
+    to_date,
+) -> Page:
+    if from_date is not None and to_date is not None and from_date > to_date:
+        raise AppError(code="invalid_date_range", message="from_date doit être antérieure ou égale à to_date.", status_code=422)
+
+    stmt = (
+        select(LeakageRecord, Tank)
+        .join(Tank, Tank.id == LeakageRecord.tankId)
+        .join(Station, Station.id == Tank.stationId)
+        .where(Station.organizationId == organization_id)
+    )
+    if station_id is not None:
+        stmt = stmt.where(Tank.stationId == station_id)
+    if tank_id is not None:
+        stmt = stmt.where(LeakageRecord.tankId == tank_id)
+    if result_filter is not None:
+        stmt = stmt.where(LeakageRecord.result == result_filter)
+    if from_date is not None:
+        stmt = stmt.where(LeakageRecord.startTime >= from_date)
+    if to_date is not None:
+        stmt = stmt.where(LeakageRecord.startTime <= to_date)
+    stmt = stmt.order_by(LeakageRecord.startTime.desc())
+
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
+    result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
+    rows = result.all()
+    data = [_leak_event_to_response(record, tank) for record, tank in rows]
+    return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
+
+
+async def get_leak_event(db: AsyncSession, organization_id: uuid.UUID, leak_event_id: uuid.UUID) -> LeakEventResponse:
+    result = await db.execute(
+        select(LeakageRecord, Tank)
+        .join(Tank, Tank.id == LeakageRecord.tankId)
+        .join(Station, Station.id == Tank.stationId)
+        .where(LeakageRecord.id == leak_event_id, Station.organizationId == organization_id)
+    )
+    row = result.first()
+    if row is None:
+        raise AppError(code="leak_event_not_found", message="Événement de fuite introuvable.", status_code=404)
+    record, tank = row
+    return _leak_event_to_response(record, tank)
 
 
 async def get_holykell_account_sync_status(db: AsyncSession, organization_id: uuid.UUID, account_id: uuid.UUID) -> HolykellAccount:

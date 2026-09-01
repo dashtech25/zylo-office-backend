@@ -89,6 +89,39 @@ n'existe que rattachée à une station).
 Tests : `tests/test_zylo_liquid_tanks.py` (8 cas). Preuve à 3 niveaux :
 `validation_log.md`.
 
+### Endpoint 4 — Association capteur-cuve (`tank-sensor-mappings`)
+
+Contrat : `Point 2 — Architecture API — Zylo Liquid MVP.md`, chapitre 1.3.
+
+| Méthode | Route | Permission |
+|---|---|---|
+| POST | `/api/v1/zylo-liquid/tank-sensor-mappings` | `zyloLiquid.tankSensorMapping.manage` |
+| GET | `/api/v1/zylo-liquid/tank-sensor-mappings` | `zyloLiquid.tankSensorMapping.read` |
+| POST | `/api/v1/zylo-liquid/tank-sensor-mappings/{id}/close` | `zyloLiquid.tankSensorMapping.manage` |
+
+**Point à vérifier avant implémentation (§9.3), résolu par inspection réelle
+(issue #29)** : le contrat traduit un `hkSerialNumber` (numéro de série
+physique) + un `measurementType` en `hkSensorId` interne. Or un même
+numéro de série correspond à plusieurs lignes du registre Holykell (une
+par canal : product_level/water_level/temperature). Vérifié sur la base
+réelle `zylo_liquid` : `hk_sensor_name` porte explicitement le type de
+mesure en préfixe (`"product_level Cuve 1"`, `"water_level Cuve 1"`,
+`"temperature Cuve 1"`) pour toutes les lignes inspectées — donnée réelle,
+pas une invention. Résolution implémentée via
+`hkSerialNumber == ... AND hkSensorName ILIKE '<measurementType>%'`.
+
+**Limite héritée du schéma source, non contournée** : la contrainte
+d'unicité `(hkSensorId, measurementType, tankId)` de la table
+`tank_sensor_mapping` (confirmée identique en base réelle) empêche de
+recréer une association avec exactement le même capteur après l'avoir
+close — un remplacement de sonde doit donc toujours porter un `hkSensorId`
+différent (nouvelle sonde physique), jamais la réactivation de l'ancienne
+ligne. Testé explicitement (`test_close_tank_sensor_mapping_then_replace_with_new_sensor`).
+
+Tests : `tests/test_zylo_liquid_tank_sensor_mappings.py` (8 cas, incluant
+la résolution du bon canal parmi plusieurs sur un même numéro de série).
+Preuve à 3 niveaux : `validation_log.md`.
+
 ## 3. Ce qui a été factorisé dans le Core (correction de portée, pas une extension du périmètre initial)
 
 **`app/modules_registry/service.grant_module_permissions_to_owner`** —
@@ -213,4 +246,22 @@ Liquid, mais découverte et corrigée à l'occasion de ce premier endpoint.
   produit créé à la volée, introuvable → 404, sélection produit invalide →
   422, module inactif sur une autre organisation → 403) contre le serveur
   de développement.
+- Statut : **TERMINÉ**.
+
+## 11. Rapport final — Endpoint 4
+
+- Fichiers créés : `tests/test_zylo_liquid_tank_sensor_mappings.py`.
+- Fichiers modifiés : `app/modules/zylo_liquid/{schemas,service,router,permissions,seed}.py`,
+  `tests/conftest.py` (fixture `register_holykell_sensor` — insertion
+  directe, aucun endpoint HTTP ne crée de registre Holykell, alimenté par
+  la synchronisation de fond hors périmètre API), cette documentation,
+  `validation_log.md`.
+- Migration : aucune (modèles `TankSensorMapping`/`HolykellDeviceRegistry`
+  déjà conformes depuis la Phase 1).
+- Tests : 46/46 verts (`python -m pytest`), y compris les 38 tests
+  préexistants (non-régression).
+- Vérification réelle : suite `curl` des 4 cas minimum (création normale,
+  clôture d'une association inexistante → 404, numéro de série inconnu →
+  422, module inactif sur une autre organisation → 403) contre le serveur
+  de développement, avec un capteur Holykell réellement inséré en base.
 - Statut : **TERMINÉ**.

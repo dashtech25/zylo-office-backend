@@ -1,16 +1,19 @@
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
-from app.modules.zylo_liquid.models import FuelProduct, Station, Tank
+from app.modules.zylo_liquid.models import FuelProduct, HolykellDeviceRegistry, Station, Tank, TankSensorMapping
 from app.modules.zylo_liquid.schemas import (
     CreateFuelProductRequest,
     CreateStationRequest,
     CreateTankRequest,
+    CreateTankSensorMappingRequest,
     StationResponse,
     TankResponse,
+    TankSensorMappingResponse,
     UpdateFuelProductRequest,
     UpdateStationRequest,
     UpdateTankRequest,
@@ -261,4 +264,97 @@ async def list_tanks(
     result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
     tanks = result.scalars().all()
     data = [TankResponse.model_validate(tank) for tank in tanks]
+    return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
+
+
+async def create_tank_sensor_mapping(
+    db: AsyncSession, organization_id: uuid.UUID, data: CreateTankSensorMappingRequest
+) -> TankSensorMapping:
+    tank = await get_tank(db, organization_id, data.tankId)
+
+    # hkSerialNumber (numéro de série physique) correspond à plusieurs lignes
+    # du registre Holykell — une par canal de mesure. Résolu via hkSensorName
+    # préfixé par measurementType, confirmé sur la base réelle zylo_liquid
+    # (ex. "product_level Cuve 1", "water_level Cuve 1", "temperature Cuve 1"
+    # — issue #29), jamais une invention.
+    result = await db.execute(
+        select(HolykellDeviceRegistry).where(
+            HolykellDeviceRegistry.hkSerialNumber == data.hkSerialNumber,
+            HolykellDeviceRegistry.hkSensorName.ilike(f"{data.measurementType}%"),
+        )
+    )
+    registry_entry = result.scalars().first()
+    if registry_entry is None:
+        raise AppError(
+            code="sensor_not_found_in_holykell_registry",
+            message="Ce capteur n'a pas encore été vu par Holykell, vérifier qu'il est bien configuré côté plateforme du fabricant.",
+            status_code=422,
+        )
+
+    existing = await db.execute(
+        select(TankSensorMapping).where(
+            TankSensorMapping.tankId == tank.id,
+            TankSensorMapping.measurementType == data.measurementType,
+            TankSensorMapping.active.is_(True),
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise AppError(
+            code="tank_sensor_mapping_already_active",
+            message="Une association active existe déjà pour cette cuve et ce type de mesure — la clore d'abord.",
+            status_code=409,
+        )
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)  # colonnes TIMESTAMP WITHOUT TIME ZONE (Phase 1)
+    mapping = TankSensorMapping(
+        hkSensorId=registry_entry.hkSensorId,
+        tankId=tank.id,
+        measurementType=data.measurementType,
+        validFrom=now,
+        active=True,
+        createdAt=now,
+    )
+    db.add(mapping)
+    await db.commit()
+    await db.refresh(mapping)
+    return mapping
+
+
+async def get_tank_sensor_mapping(db: AsyncSession, organization_id: uuid.UUID, mapping_id: uuid.UUID) -> TankSensorMapping:
+    result = await db.execute(select(TankSensorMapping).where(TankSensorMapping.id == mapping_id))
+    mapping = result.scalar_one_or_none()
+    if mapping is None:
+        raise AppError(code="tank_sensor_mapping_not_found", message="Association introuvable.", status_code=404)
+    await get_tank(db, organization_id, mapping.tankId)  # lève tank_not_found si hors périmètre
+    return mapping
+
+
+async def close_tank_sensor_mapping(db: AsyncSession, organization_id: uuid.UUID, mapping_id: uuid.UUID) -> TankSensorMapping:
+    mapping = await get_tank_sensor_mapping(db, organization_id, mapping_id)
+    if not mapping.active:
+        raise AppError(code="tank_sensor_mapping_already_closed", message="Cette association est déjà close.", status_code=409)
+    mapping.active = False
+    mapping.validUntil = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.commit()
+    await db.refresh(mapping)
+    return mapping
+
+
+async def list_tank_sensor_mappings(
+    db: AsyncSession, organization_id: uuid.UUID, pagination: PaginationParams, tank_id: uuid.UUID | None
+) -> Page:
+    stmt = (
+        select(TankSensorMapping)
+        .join(Tank, Tank.id == TankSensorMapping.tankId)
+        .join(Station, Station.id == Tank.stationId)
+        .where(Station.organizationId == organization_id)
+    )
+    if tank_id is not None:
+        stmt = stmt.where(TankSensorMapping.tankId == tank_id)
+    stmt = stmt.order_by(TankSensorMapping.validFrom.desc())
+
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
+    result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
+    mappings = result.scalars().all()
+    data = [TankSensorMappingResponse.model_validate(mapping) for mapping in mappings]
     return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))

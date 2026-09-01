@@ -6,6 +6,8 @@ from app.modules.zylo_liquid.permissions import (
     STATION_READ,
     TANK_MANAGE,
     TANK_READ,
+    TANK_SENSOR_MAPPING_MANAGE,
+    TANK_SENSOR_MAPPING_READ,
 )
 from app.rbac.service import get_or_create_permission
 
@@ -20,6 +22,8 @@ KNOWN_PERMISSIONS = [
     (STATION_MANAGE, "Créer/modifier/activer/désactiver les stations de l'organisation."),
     (TANK_READ, "Consulter les cuves des stations de l'organisation."),
     (TANK_MANAGE, "Créer/modifier les cuves des stations de l'organisation."),
+    (TANK_SENSOR_MAPPING_READ, "Consulter les associations capteur-cuve."),
+    (TANK_SENSOR_MAPPING_MANAGE, "Créer/clore les associations capteur-cuve."),
 ]
 
 

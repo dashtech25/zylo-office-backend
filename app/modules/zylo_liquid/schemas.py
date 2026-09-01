@@ -1,5 +1,5 @@
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -136,5 +136,23 @@ class TankResponse(BaseModel):
     active: bool
     productSince: date | None
     notes: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class CreateTankSensorMappingRequest(BaseModel):
+    tankId: uuid.UUID
+    hkSerialNumber: str = Field(min_length=1, max_length=100)
+    measurementType: str = Field(pattern="^(product_level|water_level|temperature)$")
+
+
+class TankSensorMappingResponse(BaseModel):
+    id: uuid.UUID
+    hkSensorId: int
+    tankId: uuid.UUID
+    measurementType: str
+    validFrom: datetime
+    validUntil: datetime | None
+    active: bool
 
     model_config = {"from_attributes": True}

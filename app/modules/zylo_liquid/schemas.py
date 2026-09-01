@@ -206,6 +206,17 @@ class StationCurrentStateResponse(BaseModel):
     tanks: list[TankCurrentStateResponse]
 
 
+class TankMeasurementResponse(BaseModel):
+    id: int
+    measuredAt: datetime
+    rawValue: float
+    unit: str | None
+    volumeLiters: float | None
+    isCorrection: bool
+
+    model_config = {"from_attributes": True}
+
+
 class HolykellAccountSyncStatusResponse(BaseModel):
     id: uuid.UUID
     organizationId: uuid.UUID

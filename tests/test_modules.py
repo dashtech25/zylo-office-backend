@@ -1,3 +1,5 @@
+import uuid
+
 from httpx import AsyncClient
 
 
@@ -55,3 +57,37 @@ async def test_list_modules_is_paginated(client: AsyncClient, registered_user: d
     assert "data" in body and "meta" in body
     assert body["meta"]["limit"] == 1
     assert len(body["data"]) <= 1
+
+
+async def test_list_organization_modules_defaults_to_inactive_and_reflects_activation(
+    client: AsyncClient, registered_user: dict, organization: dict
+):
+    headers = await _headers(registered_user, organization)
+    org_id = organization["id"]
+
+    res = await client.get(f"/api/v1/modules/organizations/{org_id}", headers=headers)
+    assert res.status_code == 200
+    body = res.json()
+    assert len(body) > 0
+    zylo_liquid = next(item for item in body if item["moduleCode"] == "zylo_liquid")
+    assert zylo_liquid["status"] == "inactive"
+    assert zylo_liquid["activatedAt"] is None
+
+    await client.post(f"/api/v1/modules/organizations/{org_id}/activate", json={"moduleCode": "zylo_liquid"}, headers=headers)
+
+    res = await client.get(f"/api/v1/modules/organizations/{org_id}", headers=headers)
+    zylo_liquid = next(item for item in res.json() if item["moduleCode"] == "zylo_liquid")
+    assert zylo_liquid["status"] == "active"
+    assert zylo_liquid["activatedAt"] is not None
+
+
+async def test_list_organization_modules_is_forbidden_for_a_non_member(client: AsyncClient, organization: dict):
+    email = f"test-{uuid.uuid4().hex[:12]}@zylo-office-test.example.com"
+    password = "TestPassword123!"
+    await client.post("/api/v1/auth/register", json={"email": email, "password": password, "fullName": "Outsider"})
+    login = await client.post("/api/v1/auth/login", json={"email": email, "password": password})
+    headers = {"Authorization": f"Bearer {login.json()['accessToken']}"}
+
+    res = await client.get(f"/api/v1/modules/organizations/{organization['id']}", headers=headers)
+    assert res.status_code == 403
+    assert res.json()["error"]["code"] == "not_organization_member"

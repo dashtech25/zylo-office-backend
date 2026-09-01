@@ -1,8 +1,13 @@
+import uuid
+
+from fastapi import Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.billing.permissions import SUBSCRIPTION_MANAGE
+from app.core.database import get_db
 from app.core.errors import AppError
+from app.core.security import get_current_user
 from app.identity.models import Organization, OrganizationUser, User
 from app.identity.permissions import ORGANIZATION_MANAGE
 from app.identity.schemas import CreateOrganizationRequest
@@ -55,3 +60,42 @@ async def create_organization(db: AsyncSession, owner: User, data: CreateOrganiz
     await db.commit()
     await db.refresh(organization)
     return organization
+
+
+async def list_user_organizations(db: AsyncSession, user_id: uuid.UUID) -> list[Organization]:
+    """Organisations auxquelles appartient l'utilisateur (Point App Launcher,
+    frontend) — nécessaire pour que le frontend sache dans quelle
+    organisation opérer, aucun endpoint ne l'exposait jusqu'ici."""
+    result = await db.execute(
+        select(Organization)
+        .join(OrganizationUser, OrganizationUser.organizationId == Organization.id)
+        .where(OrganizationUser.userId == user_id)
+        .order_by(Organization.name)
+    )
+    return list(result.scalars().all())
+
+
+async def require_organization_member(
+    organization_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Vérifie seulement l'appartenance à l'organisation — plus permissive
+    que `require_permission()` : voir les modules installés pour son
+    organisation ne doit pas nécessiter une permission d'administration
+    (contrairement à les activer/désactiver, toujours derrière MODULE_MANAGE).
+    `organization_id` est résolu par FastAPI depuis le paramètre de chemin
+    de même nom sur la route appelante — jamais une fabrique à la
+    `require_permission(code)`, la valeur varie par requête, pas au chargement
+    du module."""
+    result = await db.execute(
+        select(OrganizationUser).where(
+            OrganizationUser.organizationId == organization_id, OrganizationUser.userId == current_user.id
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise AppError(
+            code="not_organization_member",
+            message="Vous n'appartenez pas à cette organisation.",
+            status_code=403,
+        )

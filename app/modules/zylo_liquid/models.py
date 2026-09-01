@@ -400,3 +400,32 @@ class LeakageRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     endTemperatureC: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     leakRateLph: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
     result: Mapped[str] = mapped_column(String(10), nullable=False)
+
+
+class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Alerte (Point 2 chapitre 4, Point 13 §13.4) — modèle confirmé absent
+    en Phase 1 (Point 2 §7), créé à la construction de l'endpoint 12
+    (issue #45). 5 déclencheurs distincts (niveau haut/pré-alarme/bas, eau,
+    fuite, sonde déconnectée) partagent cette table unique et son cycle de
+    vie actif/résolue (Point 2 §4.1-4.6)."""
+
+    __tablename__ = "zyloLiquidAlert"
+    __table_args__ = (
+        CheckConstraint(
+            "type IN ('level_high','level_high_pre_alarm','level_low','water','leak','sensor_offline')",
+            name="ck_zlAlert_type",
+        ),
+        CheckConstraint("status IN ('active','resolved')", name="ck_zlAlert_status"),
+        {"comment": "Alerte déclenchée automatiquement — résolution manuelle uniquement (sauf sonde déconnectée, point non tranché, Point 2 §4.6)."},
+    )
+
+    tankId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    type: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="active", index=True)
+    triggeredAt: Mapped[datetime] = mapped_column(nullable=False)
+    triggeredValue: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
+    thresholdValue: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
+    resolvedAt: Mapped[datetime | None] = mapped_column(nullable=True)
+    resolutionNote: Mapped[str | None] = mapped_column(Text, nullable=True)

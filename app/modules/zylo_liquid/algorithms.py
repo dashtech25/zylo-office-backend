@@ -114,6 +114,37 @@ def compute_leak_rate_lph(v_start_corrected: float, v_end_corrected: float, dura
     return (v_start_corrected - v_end_corrected) / duration_hours
 
 
+def evaluate_threshold_alarms(
+    height_mm: float,
+    water_height_mm: float | None,
+    height_alarm_mm: float,
+    height_alert_mm: float,
+    low_alarm_mm: float,
+    water_alarm_mm: float,
+) -> list[str]:
+    """Comparaison aux seuils d'alarme (Point 13 §13.4) :
+    H_net = H_carburant - H_eau, comparé directement aux 4 seuils
+    configurés par cuve, jamais un pourcentage. Retourne les types
+    d'alerte déclenchés parmi 'level_high', 'level_high_pre_alarm',
+    'level_low', 'water' — l'alerte pleine et la pré-alarme de niveau haut
+    sont mutuellement exclusives (escalade), l'eau est indépendante."""
+    h_net = height_mm - (water_height_mm or 0)
+    triggered = []
+
+    if h_net >= height_alarm_mm:
+        triggered.append("level_high")
+    elif h_net >= height_alert_mm:
+        triggered.append("level_high_pre_alarm")
+
+    if h_net <= low_alarm_mm:
+        triggered.append("level_low")
+
+    if (water_height_mm or 0) >= water_alarm_mm:
+        triggered.append("water")
+
+    return triggered
+
+
 def is_leak_detected(rate_lph: float, threshold_lph: float = 0.38) -> bool:
     """Seuil binaire 0.38 L/H (standard EPA, Point 10 §10.4) — strictement
     supérieur, jamais égal (Point 10 §10.3 : « Si Taux_fuite > 0.38 L/H »)."""

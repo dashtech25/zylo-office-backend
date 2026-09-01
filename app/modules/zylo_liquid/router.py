@@ -9,6 +9,8 @@ from app.core.database import get_db
 from app.modules.zylo_liquid import service
 from app.modules.zylo_liquid.models import FuelProduct, HolykellAccount, Station, Tank, TankSensorMapping
 from app.modules.zylo_liquid.permissions import (
+    ALERT_MANAGE,
+    ALERT_READ,
     DELIVERY_READ,
     FUEL_PRODUCT_MANAGE,
     FUEL_PRODUCT_READ,
@@ -28,9 +30,11 @@ from app.modules.zylo_liquid.schemas import (
     CreateStationRequest,
     CreateTankRequest,
     CreateTankSensorMappingRequest,
+    AlertResponse,
     DeliveryDetectedResponse,
     FuelProductResponse,
     LeakEventResponse,
+    ResolveAlertRequest,
     HolykellAccountSyncStatusResponse,
     NetworkSummaryResponse,
     ReplaceTankCalibrationPointsRequest,
@@ -436,6 +440,52 @@ async def get_leak_event(
     db: AsyncSession = Depends(get_db),
 ) -> LeakEventResponse:
     return await service.get_leak_event(db, organization_id, leak_event_id)
+
+
+@router.get(
+    "/alerts",
+    response_model=Page[AlertResponse],
+    dependencies=[Depends(require_permission(ALERT_READ))],
+)
+async def list_alerts(
+    pagination: PaginationParams = Depends(),
+    stationId: uuid.UUID | None = None,
+    tankId: uuid.UUID | None = None,
+    type: str | None = None,
+    status: str | None = None,
+    fromDate: datetime | None = None,
+    toDate: datetime | None = None,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    return await service.list_alerts(db, organization_id, pagination, stationId, tankId, type, status, fromDate, toDate)
+
+
+@router.get(
+    "/alerts/{alert_id}",
+    response_model=AlertResponse,
+    dependencies=[Depends(require_permission(ALERT_READ))],
+)
+async def get_alert(
+    alert_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> AlertResponse:
+    return await service.get_alert(db, organization_id, alert_id)
+
+
+@router.patch(
+    "/alerts/{alert_id}",
+    response_model=AlertResponse,
+    dependencies=[Depends(require_permission(ALERT_MANAGE))],
+)
+async def resolve_alert(
+    alert_id: uuid.UUID,
+    data: ResolveAlertRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> AlertResponse:
+    return await service.resolve_alert(db, organization_id, alert_id, data.resolutionNote)
 
 
 @router.get(

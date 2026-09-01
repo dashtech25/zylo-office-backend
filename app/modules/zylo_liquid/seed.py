@@ -1,5 +1,7 @@
 from app.core.database import AsyncSessionLocal
 from app.modules.zylo_liquid.permissions import (
+    ALERT_MANAGE,
+    ALERT_READ,
     DELIVERY_READ,
     LEAK_EVENT_READ,
     FUEL_PRODUCT_MANAGE,
@@ -34,6 +36,8 @@ KNOWN_PERMISSIONS = [
     (HOLYKELL_ACCOUNT_READ, "Consulter l'état de synchronisation d'un compte Holykell."),
     (DELIVERY_READ, "Consulter les livraisons détectées."),
     (LEAK_EVENT_READ, "Consulter les événements de fuite détectés."),
+    (ALERT_READ, "Consulter les alertes."),
+    (ALERT_MANAGE, "Résoudre une alerte."),
 ]
 
 

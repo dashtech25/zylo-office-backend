@@ -10,10 +10,12 @@ from app.modules.zylo_liquid.algorithms import (
     compute_net_corrected_volume,
     correct_volume_to_reference_temperature,
     detect_deliveries,
+    evaluate_threshold_alarms,
     interpolate_height_to_volume,
     is_leak_detected,
 )
 from app.modules.zylo_liquid.models import (
+    Alert,
     DeliveryDetected,
     FuelProduct,
     HolykellAccount,
@@ -26,6 +28,7 @@ from app.modules.zylo_liquid.models import (
     TankSensorMapping,
 )
 from app.modules.zylo_liquid.schemas import (
+    AlertResponse,
     CreateFuelProductRequest,
     CreateStationRequest,
     CreateTankRequest,
@@ -862,6 +865,13 @@ async def run_leak_test_for_tank(db: AsyncSession, tank_id: uuid.UUID, start_tim
         result=result_value,
     )
     db.add(record)
+    await db.flush()
+
+    if result_value == "anomaly":
+        await _create_alert_if_not_already_active(
+            db, tank_id, "leak", triggered_at=end_time, triggered_value=leak_rate, threshold_value=0.38
+        )
+
     await db.commit()
     await db.refresh(record)
     return record
@@ -929,6 +939,177 @@ async def get_leak_event(db: AsyncSession, organization_id: uuid.UUID, leak_even
         raise AppError(code="leak_event_not_found", message="Événement de fuite introuvable.", status_code=404)
     record, tank = row
     return _leak_event_to_response(record, tank)
+
+
+async def _create_alert_if_not_already_active(
+    db: AsyncSession, tank_id: uuid.UUID, alert_type: str, triggered_at, triggered_value: float | None, threshold_value: float | None
+) -> Alert | None:
+    """N'ouvre jamais une deuxième alerte active du même type pour la même
+    cuve — évite le spam ; la résolution reste manuelle (Point 2 §4.6)."""
+    existing = await db.execute(
+        select(Alert).where(Alert.tankId == tank_id, Alert.type == alert_type, Alert.status == "active")
+    )
+    if existing.scalar_one_or_none() is not None:
+        return None
+    alert = Alert(
+        tankId=tank_id,
+        type=alert_type,
+        status="active",
+        triggeredAt=triggered_at,
+        triggeredValue=triggered_value,
+        thresholdValue=threshold_value,
+    )
+    db.add(alert)
+    await db.flush()
+    return alert
+
+
+async def run_alert_evaluation_for_tank(db: AsyncSession, tank_id: uuid.UUID) -> list[Alert]:
+    """Évalue l'état instantané d'une cuve (mêmes sources que l'endpoint 7 :
+    `HolykellDeviceRegistry.lastValue`/`hkLastStatus`, jamais `TankMeasurement`)
+    contre les 4 seuils déjà saisis sur `Tank` (endpoint 3) — algorithme de
+    Point 13 §13.4, jamais réimplémenté. Sonde déconnectée détectée via
+    `hkLastStatus` déjà maintenu par la synchronisation Holykell, jamais un
+    seuil d'ancienneté inventé (même principe que l'endpoint 7, issue #35)."""
+    tank_result = await db.execute(select(Tank).where(Tank.id == tank_id))
+    tank = tank_result.scalar_one()
+
+    product_registry = await _get_active_registry_entry(db, tank_id, "product_level")
+    created: list[Alert] = []
+
+    if product_registry is None or product_registry.lastValue is None:
+        return created
+
+    if product_registry.hkLastStatus == 0:
+        alert = await _create_alert_if_not_already_active(db, tank_id, "sensor_offline", datetime.now(timezone.utc).replace(tzinfo=None), None, None)
+        if alert:
+            created.append(alert)
+        await db.commit()
+        return created  # sonde déconnectée : aucune mesure fiable, pas de comparaison de seuils
+
+    height = float(product_registry.lastValue)
+    water_registry = await _get_active_registry_entry(db, tank_id, "water_level")
+    water_height = float(water_registry.lastValue) if water_registry and water_registry.lastValue is not None else None
+
+    triggered_types = evaluate_threshold_alarms(
+        height_mm=height,
+        water_height_mm=water_height,
+        height_alarm_mm=float(tank.heightAlarmMm),
+        height_alert_mm=float(tank.heightAlertMm),
+        low_alarm_mm=float(tank.lowAlarmMm),
+        water_alarm_mm=float(tank.alertWaterMaxMm),
+    )
+
+    threshold_by_type = {
+        "level_high": float(tank.heightAlarmMm),
+        "level_high_pre_alarm": float(tank.heightAlertMm),
+        "level_low": float(tank.lowAlarmMm),
+        "water": float(tank.alertWaterMaxMm),
+    }
+    value_by_type = {
+        "level_high": height - (water_height or 0),
+        "level_high_pre_alarm": height - (water_height or 0),
+        "level_low": height - (water_height or 0),
+        "water": water_height,
+    }
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for alert_type in triggered_types:
+        alert = await _create_alert_if_not_already_active(
+            db, tank_id, alert_type, now, value_by_type[alert_type], threshold_by_type[alert_type]
+        )
+        if alert:
+            created.append(alert)
+
+    if created:
+        await db.commit()
+    return created
+
+
+def _alert_to_response(alert: Alert, tank: Tank) -> AlertResponse:
+    return AlertResponse(
+        id=alert.id,
+        tankId=alert.tankId,
+        stationId=tank.stationId,
+        type=alert.type,
+        status=alert.status,
+        triggeredAt=alert.triggeredAt,
+        triggeredValue=float(alert.triggeredValue) if alert.triggeredValue is not None else None,
+        thresholdValue=float(alert.thresholdValue) if alert.thresholdValue is not None else None,
+        resolvedAt=alert.resolvedAt,
+        resolutionNote=alert.resolutionNote,
+    )
+
+
+async def list_alerts(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    pagination: PaginationParams,
+    station_id: uuid.UUID | None,
+    tank_id: uuid.UUID | None,
+    type_filter: str | None,
+    status_filter: str | None,
+    from_date,
+    to_date,
+) -> Page:
+    if from_date is not None and to_date is not None and from_date > to_date:
+        raise AppError(code="invalid_date_range", message="from_date doit être antérieure ou égale à to_date.", status_code=422)
+
+    stmt = (
+        select(Alert, Tank)
+        .join(Tank, Tank.id == Alert.tankId)
+        .join(Station, Station.id == Tank.stationId)
+        .where(Station.organizationId == organization_id)
+    )
+    if station_id is not None:
+        stmt = stmt.where(Tank.stationId == station_id)
+    if tank_id is not None:
+        stmt = stmt.where(Alert.tankId == tank_id)
+    if type_filter is not None:
+        stmt = stmt.where(Alert.type == type_filter)
+    if status_filter is not None:
+        stmt = stmt.where(Alert.status == status_filter)
+    if from_date is not None:
+        stmt = stmt.where(Alert.triggeredAt >= from_date)
+    if to_date is not None:
+        stmt = stmt.where(Alert.triggeredAt <= to_date)
+    stmt = stmt.order_by(Alert.triggeredAt.desc())
+
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
+    result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
+    rows = result.all()
+    data = [_alert_to_response(alert, tank) for alert, tank in rows]
+    return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
+
+
+async def _get_alert_and_tank(db: AsyncSession, organization_id: uuid.UUID, alert_id: uuid.UUID) -> tuple[Alert, Tank]:
+    result = await db.execute(
+        select(Alert, Tank)
+        .join(Tank, Tank.id == Alert.tankId)
+        .join(Station, Station.id == Tank.stationId)
+        .where(Alert.id == alert_id, Station.organizationId == organization_id)
+    )
+    row = result.first()
+    if row is None:
+        raise AppError(code="alert_not_found", message="Alerte introuvable.", status_code=404)
+    return row
+
+
+async def get_alert(db: AsyncSession, organization_id: uuid.UUID, alert_id: uuid.UUID) -> AlertResponse:
+    alert, tank = await _get_alert_and_tank(db, organization_id, alert_id)
+    return _alert_to_response(alert, tank)
+
+
+async def resolve_alert(db: AsyncSession, organization_id: uuid.UUID, alert_id: uuid.UUID, resolution_note: str | None) -> AlertResponse:
+    alert, tank = await _get_alert_and_tank(db, organization_id, alert_id)
+    if alert.status == "resolved":
+        raise AppError(code="alert_already_resolved", message="Cette alerte est déjà résolue.", status_code=409)
+    alert.status = "resolved"
+    alert.resolvedAt = datetime.now(timezone.utc).replace(tzinfo=None)
+    alert.resolutionNote = resolution_note
+    await db.commit()
+    await db.refresh(alert)
+    return _alert_to_response(alert, tank)
 
 
 async def get_holykell_account_sync_status(db: AsyncSession, organization_id: uuid.UUID, account_id: uuid.UUID) -> HolykellAccount:

@@ -257,6 +257,25 @@ class LeakEventResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ResolveAlertRequest(BaseModel):
+    resolutionNote: str | None = None
+
+
+class AlertResponse(BaseModel):
+    id: uuid.UUID
+    tankId: uuid.UUID
+    stationId: uuid.UUID
+    type: str
+    status: str
+    triggeredAt: datetime
+    triggeredValue: float | None
+    thresholdValue: float | None
+    resolvedAt: datetime | None
+    resolutionNote: str | None
+
+    model_config = {"from_attributes": True}
+
+
 class HolykellAccountSyncStatusResponse(BaseModel):
     id: uuid.UUID
     organizationId: uuid.UUID

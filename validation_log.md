@@ -526,6 +526,25 @@ Algorithmes validés séparément : N/A (référentiel Core pur, aucun calcul).
 Preuve : `tests/test_shared_currency.py` (10 cas, pytest réel) + suite
 `curl` réelle contre serveur de développement.
 
+### POST/GET/PATCH /api/v1/zylo-liquid/prices — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Création, devise explicite | 201 + ligne créée | 201, conforme | ✓ |
+| Création, devise résolue automatiquement | 201, `currencyId` = devise du pays de la station | 201, conforme | ✓ |
+| Ville non associée, devise absente | 422 `station_currency_not_resolvable` | 422 `station_currency_not_resolvable` | ✓ |
+| Conflit de période (même station+produit+date) | 409 `price_conflict_same_period` | 409 `price_conflict_same_period` | ✓ |
+| Date future | 201 + `isFuture:true` (jamais rejeté) | 201, `isFuture:true` | ✓ |
+| Correction ciblée (montant/motif) | 200, station/produit/période inchangés | 200, conforme | ✓ |
+| Correction, ligne introuvable | 404 `price_history_not_found` | 404 `price_history_not_found` | ✓ |
+| Liste filtrée par station | 200 + sous-ensemble | 200, conforme | ✓ |
+| Module inactif | 403 `module_inactive` | 403 `module_inactive` | ✓ |
+
+Algorithmes validés séparément : N/A (résolution de référentiel, pas un
+calcul physique).
+Preuve : `tests/test_zylo_liquid_prices.py` (9 cas, pytest réel) + suite
+`curl` réelle contre serveur de développement.
+
 Aucun scénario métier de bout en bout (livraison, fuite) n'est encore
 implémenté à ce stade — les endpoints 1 et 2 sont du référentiel pur, sans
 flux de mesures. Cette section sera complétée à partir des endpoints 10
@@ -553,3 +572,4 @@ mesures réelles dans `TankMeasurement`.
 | 12 | `/alerts` (GET/PATCH) | ✓ (5 tests) | ✓ (3 endpoints, tous cas) | ✓ (scénario complet) | **VALIDÉ** |
 | 13 | `/network/snapshot` (GET) | ✓ (réutilisé) | ✓ (1 endpoint, tous cas) | N/A | **VALIDÉ** |
 | 14 | `/currencies`, `/exchange-rates` (Core) | N/A | ✓ (5 endpoints, tous cas) | N/A | **VALIDÉ** |
+| 15 | `/zylo-liquid/prices` (POST/GET/PATCH) | N/A | ✓ (4 endpoints, tous cas) | N/A | **VALIDÉ** |

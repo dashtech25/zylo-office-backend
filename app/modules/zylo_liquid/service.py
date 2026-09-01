@@ -21,6 +21,7 @@ from app.modules.zylo_liquid.models import (
     HolykellAccount,
     HolykellDeviceRegistry,
     LeakageRecord,
+    PriceHistory,
     Station,
     Tank,
     TankCalibrationPoint,
@@ -30,6 +31,7 @@ from app.modules.zylo_liquid.models import (
 from app.modules.zylo_liquid.schemas import (
     AlertResponse,
     CreateFuelProductRequest,
+    CreatePriceHistoryRequest,
     CreateStationRequest,
     CreateTankRequest,
     CreateTankSensorMappingRequest,
@@ -37,6 +39,7 @@ from app.modules.zylo_liquid.schemas import (
     LeakEventResponse,
     NetworkSummaryProductLine,
     NetworkSummaryResponse,
+    PriceHistoryResponse,
     ReplaceTankCalibrationPointsRequest,
     StationCurrentStateResponse,
     StationResponse,
@@ -45,10 +48,12 @@ from app.modules.zylo_liquid.schemas import (
     TankResponse,
     TankSensorMappingResponse,
     UpdateFuelProductRequest,
+    UpdatePriceHistoryRequest,
     UpdateStationRequest,
     UpdateTankRequest,
 )
-from app.shared.geo import City
+from app.shared.currency import Currency
+from app.shared.geo import City, Country, Region
 from app.shared.pagination import PaginationParams
 from app.shared.schemas import Page, PageMeta
 
@@ -1199,6 +1204,157 @@ async def get_network_snapshot(db: AsyncSession, organization_id: uuid.UUID, at)
         totalStationCount=len(all_stations_with_data),
         totalTankCount=sum(p.tankCount for p in products),
     )
+
+
+async def _resolve_station_default_currency(db: AsyncSession, station: Station) -> Currency:
+    """Devise par défaut d'une station : Station.cityId -> City -> Region ->
+    Country.currencyCode (chaîne déjà existante) -> Currency correspondante
+    (endpoint 14). Jamais une devise inventée si la chaîne est incomplète
+    ou si la Currency n'existe pas encore (Point 2 Chapitre 7 introduction,
+    niveau_1_...md §17-18)."""
+    if station.cityId is None:
+        raise AppError(
+            code="station_currency_not_resolvable",
+            message="Cette station n'a pas de ville associée — impossible de déduire sa devise par défaut ; fournir explicitement currencyId.",
+            status_code=422,
+        )
+    city_result = await db.execute(select(City).where(City.id == station.cityId))
+    city = city_result.scalar_one_or_none()
+    region = (await db.execute(select(Region).where(Region.id == city.regionId))).scalar_one_or_none() if city else None
+    country = (await db.execute(select(Country).where(Country.id == region.countryId))).scalar_one_or_none() if region else None
+    if country is None:
+        raise AppError(
+            code="station_currency_not_resolvable",
+            message="Chaîne géographique incomplète pour cette station — impossible de déduire sa devise par défaut ; fournir explicitement currencyId.",
+            status_code=422,
+        )
+    currency_result = await db.execute(select(Currency).where(Currency.code == country.currencyCode))
+    currency = currency_result.scalar_one_or_none()
+    if currency is None:
+        raise AppError(
+            code="currency_not_found",
+            message=f"La devise par défaut de cette station ('{country.currencyCode}') n'existe pas encore dans le référentiel — la créer via POST /currencies avant d'enregistrer un prix.",
+            status_code=422,
+        )
+    return currency
+
+
+async def create_price_history(
+    db: AsyncSession, organization_id: uuid.UUID, created_by: uuid.UUID, data: CreatePriceHistoryRequest
+) -> PriceHistoryResponse:
+    station = await get_station(db, organization_id, data.stationId)
+    await get_fuel_product(db, organization_id, data.fuelProductId)
+
+    if data.currencyId is not None:
+        currency_result = await db.execute(select(Currency).where(Currency.id == data.currencyId))
+        if currency_result.scalar_one_or_none() is None:
+            raise AppError(code="currency_not_found", message="Devise introuvable.", status_code=404)
+        currency_id = data.currencyId
+    else:
+        currency = await _resolve_station_default_currency(db, station)
+        currency_id = currency.id
+
+    existing = await db.execute(
+        select(PriceHistory).where(
+            PriceHistory.stationId == data.stationId,
+            PriceHistory.fuelProductId == data.fuelProductId,
+            PriceHistory.effectiveFrom == data.effectiveFrom,
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise AppError(
+            code="price_conflict_same_period",
+            message="Une ligne de prix existe déjà pour cette station, ce produit et cette date de début.",
+            status_code=409,
+        )
+
+    price = PriceHistory(
+        stationId=data.stationId,
+        fuelProductId=data.fuelProductId,
+        currencyId=currency_id,
+        priceAmount=data.priceAmount,
+        costAmount=data.costAmount,
+        effectiveFrom=data.effectiveFrom,
+        changeReason=data.changeReason,
+        createdBy=created_by,
+    )
+    db.add(price)
+    await db.commit()
+    await db.refresh(price)
+
+    is_future = price.effectiveFrom > datetime.now(timezone.utc).replace(tzinfo=None)
+    return PriceHistoryResponse.model_validate(price).model_copy(update={"isFuture": is_future})
+
+
+async def _get_price_history_and_station(db: AsyncSession, organization_id: uuid.UUID, price_id: uuid.UUID) -> PriceHistory:
+    result = await db.execute(
+        select(PriceHistory)
+        .join(Station, Station.id == PriceHistory.stationId)
+        .where(PriceHistory.id == price_id, Station.organizationId == organization_id)
+    )
+    price = result.scalar_one_or_none()
+    if price is None:
+        raise AppError(code="price_history_not_found", message="Ligne de prix introuvable.", status_code=404)
+    return price
+
+
+async def update_price_history(
+    db: AsyncSession, organization_id: uuid.UUID, price_id: uuid.UUID, data: UpdatePriceHistoryRequest
+) -> PriceHistoryResponse:
+    """Correction ciblée uniquement — jamais la période, la station ou le
+    produit (Point 2 §7.4) : `UpdatePriceHistoryRequest` ne les expose pas,
+    garantissant par construction qu'aucune autre ligne n'est jamais
+    affectée."""
+    price = await _get_price_history_and_station(db, organization_id, price_id)
+    updates = data.model_dump(exclude_unset=True)
+    if "currencyId" in updates and updates["currencyId"] is not None:
+        currency_result = await db.execute(select(Currency).where(Currency.id == updates["currencyId"]))
+        if currency_result.scalar_one_or_none() is None:
+            raise AppError(code="currency_not_found", message="Devise introuvable.", status_code=404)
+    for field, value in updates.items():
+        setattr(price, field, value)
+    await db.commit()
+    await db.refresh(price)
+    return PriceHistoryResponse.model_validate(price)
+
+
+async def list_price_history(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    pagination: PaginationParams,
+    station_id: uuid.UUID | None,
+    fuel_product_id: uuid.UUID | None,
+    from_date,
+    to_date,
+) -> Page:
+    if from_date is not None and to_date is not None and from_date > to_date:
+        raise AppError(code="invalid_date_range", message="from_date doit être antérieure ou égale à to_date.", status_code=422)
+
+    stmt = (
+        select(PriceHistory)
+        .join(Station, Station.id == PriceHistory.stationId)
+        .where(Station.organizationId == organization_id)
+    )
+    if station_id is not None:
+        stmt = stmt.where(PriceHistory.stationId == station_id)
+    if fuel_product_id is not None:
+        stmt = stmt.where(PriceHistory.fuelProductId == fuel_product_id)
+    if from_date is not None:
+        stmt = stmt.where(PriceHistory.effectiveFrom >= from_date)
+    if to_date is not None:
+        stmt = stmt.where(PriceHistory.effectiveFrom <= to_date)
+    stmt = stmt.order_by(PriceHistory.effectiveFrom.desc())
+
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
+    result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
+    rows = result.scalars().all()
+    data = [PriceHistoryResponse.model_validate(row) for row in rows]
+    return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
+
+
+async def get_price_history(db: AsyncSession, organization_id: uuid.UUID, price_id: uuid.UUID) -> PriceHistoryResponse:
+    price = await _get_price_history_and_station(db, organization_id, price_id)
+    return PriceHistoryResponse.model_validate(price)
 
 
 async def get_holykell_account_sync_status(db: AsyncSession, organization_id: uuid.UUID, account_id: uuid.UUID) -> HolykellAccount:

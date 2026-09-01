@@ -276,6 +276,38 @@ class AlertResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CreatePriceHistoryRequest(BaseModel):
+    stationId: uuid.UUID
+    fuelProductId: uuid.UUID
+    priceAmount: float = Field(gt=0)
+    costAmount: float | None = Field(default=None, ge=0)
+    currencyId: uuid.UUID | None = None
+    effectiveFrom: datetime
+    changeReason: str | None = None
+
+
+class UpdatePriceHistoryRequest(BaseModel):
+    priceAmount: float | None = Field(default=None, gt=0)
+    costAmount: float | None = Field(default=None, ge=0)
+    currencyId: uuid.UUID | None = None
+    changeReason: str | None = None
+
+
+class PriceHistoryResponse(BaseModel):
+    id: uuid.UUID
+    stationId: uuid.UUID
+    fuelProductId: uuid.UUID
+    currencyId: uuid.UUID
+    priceAmount: float
+    costAmount: float | None
+    effectiveFrom: datetime
+    changeReason: str | None
+    createdBy: uuid.UUID
+    isFuture: bool = False
+
+    model_config = {"from_attributes": True}
+
+
 class HolykellAccountSyncStatusResponse(BaseModel):
     id: uuid.UUID
     organizationId: uuid.UUID

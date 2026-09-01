@@ -21,10 +21,14 @@ async def test_create_and_list_currency(client: AsyncClient, registered_user: di
     assert body["code"] == code
     assert body["active"] is True
 
-    list_res = await client.get("/api/v1/currencies", headers=headers)
-    assert list_res.status_code == 200
-    codes = [c["code"] for c in list_res.json()["data"]]
-    assert code in codes
+    # Pas de GET /currencies/{id} unitaire (seule la liste paginée existe,
+    # Point 2 §7.1) — on vérifie la persistance via un PATCH à vide, qui
+    # renvoie la ressource sans dépendre de l'ordre/pagination de la liste
+    # (potentiellement grande, les devises créées par d'autres tests
+    # s'accumulant dans la même base réelle).
+    confirm_res = await client.patch(f"/api/v1/currencies/{body['id']}", json={}, headers=headers)
+    assert confirm_res.status_code == 200
+    assert confirm_res.json()["code"] == code
 
 
 async def test_create_currency_duplicate_code_is_rejected(client: AsyncClient, registered_user: dict, organization: dict):

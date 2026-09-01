@@ -429,3 +429,34 @@ class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     thresholdValue: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
     resolvedAt: Mapped[datetime | None] = mapped_column(nullable=True)
     resolutionNote: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PriceHistory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Historique des prix (Point 2 §7.3-7.5). Extension du modèle du
+    schéma source (table `price_history`, déjà auditée en Phase 1, trigger
+    d'audit confirmé permettant UPDATE — voir
+    niveau_1_base_de_donnees_et_monetisation.md §14) : `price_fcfa`/
+    `cost_fcfa` remplacés par `priceAmount`/`costAmount` + `currencyId`
+    (Core, endpoint 14) pour supporter le multi-devise réel du réseau
+    (§24 de la même étude) — décision prise à la construction de cet
+    endpoint (issue #51)."""
+
+    __tablename__ = "zyloLiquidPriceHistory"
+    __table_args__ = (
+        UniqueConstraint("stationId", "fuelProductId", "effectiveFrom", name="uq_zlPriceHistory_station_product_effectiveFrom"),
+        CheckConstraint('"priceAmount" > 0', name="ck_zlPriceHistory_priceAmount_positive"),
+        {"comment": "Historique des prix — changement réel = insertion, correction = UPDATE ciblé. Source : table 'price_history'."},
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    fuelProductId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidFuelProduct.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    currencyId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("currency.id", ondelete="RESTRICT"), nullable=False)
+    priceAmount: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+    costAmount: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
+    effectiveFrom: Mapped[datetime] = mapped_column(nullable=False, index=True)
+    changeReason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    createdBy: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)

@@ -479,6 +479,57 @@ limite à stocker les données nécessaires à chacune des options possibles.
 Tests : `tests/test_shared_currency.py` (10 cas). Preuve à 3 niveaux :
 `validation_log.md` (aucun algorithme, référentiel pur).
 
+### Endpoint 15 — Prix (`zylo-liquid/prices`)
+
+Contrat : `Point 2 — Architecture API — Zylo Liquid MVP.md`, chapitre
+7.3-7.5.
+
+| Méthode | Route | Permission |
+|---|---|---|
+| POST | `/api/v1/zylo-liquid/prices` | `zyloLiquid.priceHistory.create` |
+| GET | `/api/v1/zylo-liquid/prices` | `zyloLiquid.priceHistory.read` |
+| GET | `/api/v1/zylo-liquid/prices/{id}` | `zyloLiquid.priceHistory.read` |
+| PATCH | `/api/v1/zylo-liquid/prices/{id}` | `zyloLiquid.priceHistory.create` |
+
+**Extension de modèle** (`niveau_1_...md` §24) : `PriceHistory` (schéma
+source `price_history`, déjà audité en Phase 1) étendu — `price_fcfa`/
+`cost_fcfa` remplacés par `priceAmount`/`costAmount` + `currencyId` (Core,
+endpoint 14), pour supporter le multi-devise réel du réseau (4 devises
+déjà observées sur 22 stations, Phase 1). `createdBy` référence
+directement le Core `User` déjà authentifié par JWT — aucune dépendance
+sur la tension `users`/`gérant` de Phase 1, qui concerne un besoin
+différent (contrat Point 2 §7.3, confirmé).
+
+**Résolution de la devise par défaut** (`_resolve_station_default_currency`) :
+`Station.cityId → City → Region → Country.currencyCode` (chaîne déjà
+existante, jamais dupliquée) → `Currency` correspondante. Si la chaîne est
+incomplète (pas de ville) ou si la `Currency` n'existe pas encore →
+erreur explicite (`station_currency_not_resolvable` / `currency_not_found`),
+jamais une devise inventée.
+
+**Distinction changement réel / correction, non négociable (Point 2
+§7.3-7.4)** :
+- `POST /prices` → toujours une insertion. Conflit si une ligne existe
+  déjà pour la même station+produit+période (`price_conflict_same_period`,
+  409). Date future acceptée et signalée (`isFuture: true`), jamais
+  rejetée (prix planifiable à l'avance).
+- `PATCH /prices/{id}` → correction ciblée uniquement ; le schéma
+  `UpdatePriceHistoryRequest` n'expose ni `effectiveFrom`, ni `stationId`,
+  ni `fuelProductId` — aucune autre ligne ne peut jamais être affectée,
+  garanti par construction (pas seulement par validation).
+- **Même permission pour créer et corriger** (`zyloLiquid.priceHistory.create`)
+  — qui a le droit de corriger un prix historique n'est pas tranché
+  (`niveau_1_...md` §27, Point 2 §7.4) ; option la plus restrictive par
+  défaut, jamais un code de permission distinct et potentiellement plus
+  permissif inventé par supposition. Une contradiction sur ce point entre
+  Point 3 §14 (rédigé avant le Chapitre 7) et Point 2 §7.4 (rédigé après)
+  a été identifiée et corrigée dans Point 3 à l'occasion de cet endpoint.
+
+Tests : `tests/test_zylo_liquid_prices.py` (9 cas, incluant la résolution
+de devise via la chaîne géographique réelle). Preuve à 3 niveaux :
+`validation_log.md` (aucun algorithme, logique de résolution/contrainte
+pure).
+
 ## 3. Ce qui a été factorisé dans le Core (correction de portée, pas une extension du périmètre initial)
 
 **`app/modules_registry/service.grant_module_permissions_to_owner`** —
@@ -777,4 +828,21 @@ Liquid, mais découverte et corrigée à l'occasion de ce premier endpoint.
   code dupliqué → 409, format invalide → 422, taux de change créé/listé,
   même devise → 422, doublon → 409, non authentifié → 401) contre le
   serveur de développement.
+- Statut : **TERMINÉ**.
+
+## 22. Rapport final — Endpoint 15
+
+- Fichiers créés : `tests/test_zylo_liquid_prices.py`.
+- Fichiers modifiés : `app/modules/zylo_liquid/models.py` (`PriceHistory`,
+  nouveau), `app/modules/zylo_liquid/{schemas,service,router,permissions,seed}.py`,
+  `nouveau-station-simulator/etude-nouveau-zylo/Point 3 — ...md` (§14,
+  correction de la contradiction sur la permission de correction), cette
+  documentation, `validation_log.md`.
+- Migration : `b41b805c3119_price_history.py` (nouvelle table).
+- Tests : 145/145 verts attendus (`python -m pytest`), y compris les 136
+  tests préexistants (non-régression) + 9 Niveau 2.
+- Vérification réelle : suite `curl` (création avec devise explicite,
+  résolution automatique via la géographie, conflit de période → 409,
+  correction ciblée, introuvable → 404, permission manquante → 403)
+  contre le serveur de développement.
 - Statut : **TERMINÉ**.

@@ -82,3 +82,26 @@ async def zylo_liquid_organization(client: AsyncClient, registered_user: dict, o
     activate_res = await client.post(f"/api/v1/modules/organizations/{organization['id']}/activate", json={"moduleCode": "zylo_liquid"}, headers=headers)
     assert activate_res.status_code == 200, activate_res.text
     return organization
+
+
+@pytest.fixture
+async def test_city() -> dict:
+    """Aucun endpoint HTTP n'existe pour le référentiel géographique Core
+    (Country/Region/City) — insertion directe via le service, comme pour les
+    permissions avant l'existence d'un RBAC HTTP."""
+    from app.core.database import AsyncSessionLocal
+    from app.shared.geo import City, Country, Region
+
+    suffix = uuid.uuid4().hex[:8]
+    async with AsyncSessionLocal() as db:
+        country = Country(isoCode2=suffix[:2].upper(), isoCode3=suffix[:3].upper(), name=f"Testland {suffix}")
+        db.add(country)
+        await db.flush()
+        region = Region(countryId=country.id, name=f"Region {suffix}", code=f"R{suffix}")
+        db.add(region)
+        await db.flush()
+        city = City(regionId=region.id, name=f"City {suffix}")
+        db.add(city)
+        await db.commit()
+        await db.refresh(city)
+        return {"id": str(city.id)}

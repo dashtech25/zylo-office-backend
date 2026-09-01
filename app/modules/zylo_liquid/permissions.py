@@ -4,3 +4,6 @@ reprise de app/identity/permissions.py)."""
 
 FUEL_PRODUCT_READ = "zyloLiquid.fuelProduct.read"
 FUEL_PRODUCT_MANAGE = "zyloLiquid.fuelProduct.manage"
+
+STATION_READ = "zyloLiquid.station.read"
+STATION_MANAGE = "zyloLiquid.station.manage"

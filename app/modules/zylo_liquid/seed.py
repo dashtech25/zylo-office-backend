@@ -1,5 +1,10 @@
 from app.core.database import AsyncSessionLocal
-from app.modules.zylo_liquid.permissions import FUEL_PRODUCT_MANAGE, FUEL_PRODUCT_READ
+from app.modules.zylo_liquid.permissions import (
+    FUEL_PRODUCT_MANAGE,
+    FUEL_PRODUCT_READ,
+    STATION_MANAGE,
+    STATION_READ,
+)
 from app.rbac.service import get_or_create_permission
 
 # Toute nouvelle permission zylo_liquid doit être ajoutée ici pour être
@@ -9,6 +14,8 @@ from app.rbac.service import get_or_create_permission
 KNOWN_PERMISSIONS = [
     (FUEL_PRODUCT_READ, "Consulter le référentiel des produits carburant."),
     (FUEL_PRODUCT_MANAGE, "Créer/modifier le référentiel des produits carburant."),
+    (STATION_READ, "Consulter les stations de l'organisation."),
+    (STATION_MANAGE, "Créer/modifier/activer/désactiver les stations de l'organisation."),
 ]
 
 

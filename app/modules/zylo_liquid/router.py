@@ -382,6 +382,19 @@ async def get_network_summary(
 
 
 @router.get(
+    "/network/snapshot",
+    response_model=NetworkSummaryResponse,
+    dependencies=[Depends(require_permission(STATION_READ))],
+)
+async def get_network_snapshot(
+    at: datetime,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> NetworkSummaryResponse:
+    return await service.get_network_snapshot(db, organization_id, at)
+
+
+@router.get(
     "/deliveries",
     response_model=Page[DeliveryDetectedResponse],
     dependencies=[Depends(require_permission(DELIVERY_READ))],

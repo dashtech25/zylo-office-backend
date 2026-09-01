@@ -486,6 +486,22 @@ RÉSULTAT ATTENDU : ✓ conforme au cycle de vie actif→résolue (Point 2 §4.6
 Preuve : `tests/test_zylo_liquid_alerts.py::test_low_level_alert_full_scenario`
 + rejoué contre serveur de développement réel.
 
+### GET /api/v1/zylo-liquid/network/snapshot — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal | Dernière mesure ≤ instant demandé utilisée, jamais une postérieure | Confirmé (500mm/10000L retenu, pas 1000mm/20000L postérieur) | ✓ |
+| Cuve sans mesure antérieure | Exclue du total (jamais 0) | 200, `products=[]`, `totalVolumeLiters=0` | ✓ |
+| Date future | 422 `snapshot_date_in_future` | 422 `snapshot_date_in_future` | ✓ |
+| Paramètre `at` manquant | 422 (obligatoire, Point 2 §5.4) | 422 | ✓ |
+| Module inactif | 403 `module_inactive` | 403 `module_inactive` | ✓ |
+
+Algorithmes validés séparément : réutilisation de
+`interpolate_height_to_volume` (déjà validé, endpoint 7) — aucun nouveau
+calcul.
+Preuve : `tests/test_zylo_liquid_network_snapshot.py` (5 cas, pytest réel)
++ suite `curl` réelle contre serveur de développement.
+
 Aucun scénario métier de bout en bout (livraison, fuite) n'est encore
 implémenté à ce stade — les endpoints 1 et 2 sont du référentiel pur, sans
 flux de mesures. Cette section sera complétée à partir des endpoints 10
@@ -511,3 +527,4 @@ mesures réelles dans `TankMeasurement`.
 | 10 | `/deliveries` (GET) | ✓ (4 tests) | ✓ (2 endpoints, tous cas) | ✓ (scénario complet) | **VALIDÉ** |
 | 11 | `/leak-events` (GET) | ✓ (6 tests) | ✓ (2 endpoints, tous cas) | ✓ (scénario complet) | **VALIDÉ** |
 | 12 | `/alerts` (GET/PATCH) | ✓ (5 tests) | ✓ (3 endpoints, tous cas) | ✓ (scénario complet) | **VALIDÉ** |
+| 13 | `/network/snapshot` (GET) | ✓ (réutilisé) | ✓ (1 endpoint, tous cas) | N/A | **VALIDÉ** |

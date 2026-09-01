@@ -8,7 +8,40 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.modules_registry.models import Module, OrganizationModule
+from app.rbac.models import Permission, Role, RolePermission
 from app.rbac.service import get_current_organization_id
+
+
+async def grant_module_permissions_to_owner(db: AsyncSession, organization_id: uuid.UUID, module_code: str) -> None:
+    """Sans cet appel, aucune permission déclarée par un module n'est
+    accordable après son activation : aucun endpoint HTTP de gestion des
+    rôles n'existe encore dans le socle (constat fait à la construction de
+    l'endpoint 1 de Zylo Liquid, issue #23) — le owner doit donc recevoir de
+    plein droit les permissions du module qu'il vient d'activer pour son
+    organisation, exactement comme il reçoit déjà celles du socle à la
+    création de l'organisation (OWNER_DEFAULT_PERMISSIONS, identity/service.py)."""
+    result = await db.execute(select(Role).where(Role.organizationId == organization_id, Role.code == "owner"))
+    owner_role = result.scalar_one_or_none()
+    if owner_role is None:
+        return
+
+    permissions = (await db.execute(select(Permission).where(Permission.moduleCode == module_code))).scalars().all()
+    if not permissions:
+        return
+
+    existing = (
+        (
+            await db.execute(
+                select(RolePermission.permissionId).where(RolePermission.roleId == owner_role.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    existing_ids = set(existing)
+    for permission in permissions:
+        if permission.id not in existing_ids:
+            db.add(RolePermission(roleId=owner_role.id, permissionId=permission.id))
 
 
 async def get_or_create_module(db: AsyncSession, code: str, name: str, description: str, version: str = "0.1.0") -> Module:
@@ -43,6 +76,7 @@ async def activate_module(db: AsyncSession, organization_id: uuid.UUID, module_c
         org_module.status = "active"
         org_module.activatedAt = now
         org_module.deactivatedAt = None
+    await grant_module_permissions_to_owner(db, organization_id, module_code)
     await db.commit()
     await db.refresh(org_module)
     return org_module

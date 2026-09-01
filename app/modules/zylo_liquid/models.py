@@ -181,10 +181,22 @@ class TankMeasurement(Base):
 
 class FuelProduct(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "zyloLiquidFuelProduct"
-    __table_args__ = {"comment": "Référentiel des carburants et leurs propriétés physiques/financières. Source : table 'fuel_products'."}
+    __table_args__ = (
+        UniqueConstraint("organizationId", "code", name="uq_zlFuelProduct_org_code"),
+        {
+            "comment": "Référentiel des carburants et leurs propriétés physiques/financières. Source : table 'fuel_products'. "
+            "organizationId ajouté à la construction de l'endpoint 1 (Point 3 §9.3) : absent du schéma source et de la base "
+            "réelle (réseau unique testé), mais requis par cohérence avec l'isolation multi-tenant de toutes les autres tables "
+            "Zylo Liquid (Station, Tank...) — sans cette colonne, une organisation verrait/modifierait le référentiel carburant "
+            "d'une autre. Le code redevient unique par organisation, plus globalement."
+        },
+    )
 
+    organizationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    code: Mapped[str] = mapped_column(String(10), nullable=False, unique=True)
+    code: Mapped[str] = mapped_column(String(10), nullable=False)
     densityGPerCm3: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
     currentPriceFcfa: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     currentCostFcfa: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)

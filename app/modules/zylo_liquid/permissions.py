@@ -22,3 +22,6 @@ HOLYKELL_ACCOUNT_READ = "zyloLiquid.holykellAccount.read"
 DELIVERY_READ = "zyloLiquid.delivery.read"
 
 LEAK_EVENT_READ = "zyloLiquid.leakEvent.read"
+
+ALERT_READ = "zyloLiquid.alert.read"
+ALERT_MANAGE = "zyloLiquid.alert.manage"

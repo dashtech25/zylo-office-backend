@@ -11,6 +11,7 @@ from app.modules.zylo_liquid.algorithms import (
     compute_net_corrected_volume,
     correct_volume_to_reference_temperature,
     detect_deliveries,
+    evaluate_threshold_alarms,
     interpolate_height_to_volume,
     is_leak_detected,
 )
@@ -112,6 +113,46 @@ def test_detect_deliveries_does_not_close_prematurely_during_brief_plateau():
     assert len(events) == 1
     assert events[0]["endHeightMm"] == 1200
     assert events[0]["endTime"] == base + timedelta(minutes=45)
+
+
+def test_evaluate_threshold_alarms_reference_example():
+    """Exemple exact de Point 13 §13.5 : H_carburant=195mm, H_eau=0mm,
+    Low_alarm=200mm -> ALARME NIVEAU BAS."""
+    triggered = evaluate_threshold_alarms(
+        height_mm=195, water_height_mm=0, height_alarm_mm=900, height_alert_mm=800, low_alarm_mm=200, water_alarm_mm=200
+    )
+    assert triggered == ["level_low"]
+
+
+def test_evaluate_threshold_alarms_high_level_supersedes_pre_alarm():
+    triggered = evaluate_threshold_alarms(
+        height_mm=950, water_height_mm=0, height_alarm_mm=900, height_alert_mm=800, low_alarm_mm=200, water_alarm_mm=200
+    )
+    assert triggered == ["level_high"]  # jamais aussi 'level_high_pre_alarm' (escalade, pas cumul)
+
+
+def test_evaluate_threshold_alarms_pre_alarm_only():
+    triggered = evaluate_threshold_alarms(
+        height_mm=850, water_height_mm=0, height_alarm_mm=900, height_alert_mm=800, low_alarm_mm=200, water_alarm_mm=200
+    )
+    assert triggered == ["level_high_pre_alarm"]
+
+
+def test_evaluate_threshold_alarms_water_independent_of_level():
+    """L'eau peut être détectée même si le niveau carburant est normal —
+    les deux alertes sont indépendantes, jamais mutuellement exclusives."""
+    triggered = evaluate_threshold_alarms(
+        height_mm=500, water_height_mm=250, height_alarm_mm=900, height_alert_mm=800, low_alarm_mm=200, water_alarm_mm=200
+    )
+    assert triggered == ["water"]
+
+
+def test_evaluate_threshold_alarms_no_trigger_within_normal_range():
+    """FAIL attendu si une alerte est déclenchée à tort en plage normale."""
+    triggered = evaluate_threshold_alarms(
+        height_mm=500, water_height_mm=0, height_alarm_mm=900, height_alert_mm=800, low_alarm_mm=200, water_alarm_mm=200
+    )
+    assert triggered == []
 
 
 def test_is_leak_detected_threshold():

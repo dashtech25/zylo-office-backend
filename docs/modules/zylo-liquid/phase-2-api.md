@@ -357,6 +357,53 @@ scénario d'intégration Niveau 3 : mesures réelles → test de fuite →
 `result: "anomaly"` avec le taux exact → lecture API). Preuve à 3 niveaux :
 `validation_log.md`.
 
+### Endpoint 12 — Alertes (`alerts`)
+
+Contrat : `Point 2 — Architecture API — Zylo Liquid MVP.md`, chapitre 4
+(4.1-4.6, un seul jeu d'endpoints partagé par les 5 déclencheurs).
+
+| Méthode | Route | Permission |
+|---|---|---|
+| GET | `/api/v1/zylo-liquid/alerts` | `zyloLiquid.alert.read` |
+| GET | `/api/v1/zylo-liquid/alerts/{id}` | `zyloLiquid.alert.read` |
+| PATCH | `/api/v1/zylo-liquid/alerts/{id}` | `zyloLiquid.alert.manage` |
+
+**Modèle créé** : `Alert` (confirmé absent, Point 2 §7), table unique
+partagée par les 6 types (`level_high`, `level_high_pre_alarm`,
+`level_low`, `water`, `leak`, `sensor_offline`) — conforme à Point 2 §4
+(« un seul type d'enregistrement »).
+
+**Algorithme** (`evaluate_threshold_alarms`, testé avec l'exemple exact de
+Point 13 §13.5 : H_carburant=195mm, H_eau=0mm, Low_alarm=200mm → alerte
+niveau bas) : `H_net = H_carburant - H_eau`, comparé aux 4 seuils déjà
+saisis sur `Tank` (endpoint 3), jamais réimplémenté. Alerte pleine et
+pré-alarme de niveau haut mutuellement exclusives (escalade) ; alerte eau
+indépendante.
+
+**Déclencheurs couverts et leur source, chacun sans invention** :
+- Niveau haut/pré-alarme/bas/eau : évaluation à la demande de l'état
+  instantané (`HolykellDeviceRegistry.lastValue`, même source que
+  l'endpoint 7, jamais `TankMeasurement`).
+- Fuite : déclenchée automatiquement par `run_leak_test_for_tank`
+  (endpoint 11) quand `result="anomaly"` — aucune logique dupliquée.
+- Sonde déconnectée : basée sur `hkLastStatus` déjà maintenu par la
+  synchronisation Holykell — **aucun seuil d'ancienneté inventé**, même
+  principe déjà retenu pour l'endpoint 7 (issue #35).
+
+**Anti-spam** : jamais deux alertes actives du même type simultanément
+pour une même cuve — une nouvelle évaluation qui retrouve la même
+condition ne recrée rien tant que l'alerte précédente n'est pas résolue.
+
+**Résolution strictement manuelle** (`PATCH`) : jamais automatique, y
+compris pour « sonde déconnectée » — Point 2 §4.6 laisse ce cas
+explicitement comme « point à confirmer avec le commanditaire, non
+tranché ici » ; non tranché non plus dans cette implémentation.
+
+Tests : `tests/test_zylo_liquid_alerts.py` (8 cas, incluant un scénario
+d'intégration Niveau 3 complet : mesure sous seuil → alerte → lecture API
+→ résolution → tentative de double résolution rejetée). Preuve à 3
+niveaux : `validation_log.md`.
+
 ## 3. Ce qui a été factorisé dans le Core (correction de portée, pas une extension du périmètre initial)
 
 **`app/modules_registry/service.grant_module_permissions_to_owner`** —
@@ -607,4 +654,21 @@ Liquid, mais découverte et corrigée à l'occasion de ce premier endpoint.
 - Vérification réelle : scénario complet rejoué contre le serveur de
   développement (mesures réelles → test de fuite → `result:"anomaly"`,
   taux exact confirmé → lecture API).
+- Statut : **TERMINÉ**.
+
+## 19. Rapport final — Endpoint 12
+
+- Fichiers créés : `tests/test_zylo_liquid_alerts.py`.
+- Fichiers modifiés : `app/modules/zylo_liquid/models.py` (`Alert`,
+  nouveau), `app/modules/zylo_liquid/algorithms.py`
+  (`evaluate_threshold_alarms`), `tests/test_zylo_liquid_algorithms.py`
+  (Niveau 1, +5 cas), `app/modules/zylo_liquid/{schemas,service,router,permissions,seed}.py`
+  (dont un appel dans `run_leak_test_for_tank` pour créer l'alerte fuite),
+  cette documentation, `validation_log.md`.
+- Migration : `fb5b32ada7ce_alert.py` (nouvelle table).
+- Tests : 121/121 verts (`python -m pytest`), y compris les 108
+  tests préexistants (non-régression) + 5 Niveau 1 + 8 Niveau 2/3.
+- Vérification réelle : scénario complet rejoué contre le serveur de
+  développement (mesure sous seuil → alerte → résolution → tentative de
+  double résolution rejetée).
 - Statut : **TERMINÉ**.

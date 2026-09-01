@@ -69,8 +69,21 @@ point 10 » — version EPA corrigée, pas l'algorithme initial simplifié de
 §10.3). Seuil 0.38 L/H confirmé §10.4 (standard EPA). Preuve :
 `tests/test_zylo_liquid_algorithms.py`.
 
-Le prochain algorithme à exercer sera celui de l'endpoint 12 (historique
-des fuites, réutilisation) ou d'un futur endpoint d'alarme.
+### evaluate_threshold_alarms — VALIDÉ le 2026-09-01
+
+| Cas | Entrée | Attendu | Obtenu | Statut |
+|-----|--------|---------|--------|--------|
+| Cas de référence exact | Point 13 §13.5 : H_carburant=195mm, H_eau=0mm, Low_alarm=200mm | `["level_low"]` | Confirmé | ✓ (PASS) |
+| Niveau haut supersede la pré-alarme | H_net=950, alarm=900, alert=800 | `["level_high"]` uniquement | Confirmé (FAIL attendu si les deux) | ✓ |
+| Pré-alarme seule | H_net=850, alarm=900, alert=800 | `["level_high_pre_alarm"]` | Confirmé | ✓ |
+| Eau indépendante du niveau | Niveau normal + eau au-dessus du seuil | `["water"]` uniquement | Confirmé | ✓ |
+| Plage normale | Toutes valeurs sous les seuils | `[]` | Confirmé (FAIL attendu si alerte à tort) | ✓ |
+
+Source exacte : `nouveau-station-simulator/nouveau-zylo-liquid/Point 13 —
+Alarmes.md` §13.4-13.5. Preuve : `tests/test_zylo_liquid_algorithms.py`.
+
+Le prochain algorithme à exercer sera défini au moment de construire
+l'endpoint suivant (snapshot réseau, item 13).
 
 ---
 
@@ -439,6 +452,40 @@ RÉSULTAT ATTENDU : ✓ conforme au calcul exact (0.5 > seuil 0.38 L/H)
 Preuve : `tests/test_zylo_liquid_leak_events.py::test_leak_test_detects_anomaly_full_scenario`
 + rejoué contre serveur de développement réel.
 
+### GET/PATCH /api/v1/zylo-liquid/alerts — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal (alerte niveau bas) | 200 + alerte active | 200, `type:"level_low"`, `status:"active"` | ✓ |
+| Résolution | 200, `status:"resolved"`, `resolvedAt` renseigné | Confirmé | ✓ |
+| Double résolution | 409 `alert_already_resolved` | 409 `alert_already_resolved` | ✓ |
+| Anti-spam (même condition réévaluée) | Aucune nouvelle alerte créée | 0 créée | ✓ |
+| Sonde déconnectée | Alerte `sensor_offline`, pas de comparaison de seuils | Confirmé | ✓ |
+| Déclencheur fuite | Alerte `leak` créée automatiquement par l'endpoint 11 | Confirmé | ✓ |
+| Filtre type/statut | 200 + sous-ensemble filtré | 200, conforme | ✓ |
+| Introuvable | 404 `alert_not_found` | 404 `alert_not_found` | ✓ |
+| Module inactif | 403 `module_inactive` | 403 `module_inactive` | ✓ |
+
+Algorithmes validés séparément : voir Niveau 1 ci-dessus
+(`evaluate_threshold_alarms`).
+Preuve : `tests/test_zylo_liquid_alerts.py` (8 cas, pytest réel) +
+scénario complet rejoué contre serveur de développement.
+
+### Scénario alerte — VALIDÉ le 2026-09-01
+
+```
+SCÉNARIO : Une alerte de niveau bas est détectée et résolue correctement
+ÉTAPE 1 : Mesure sous le seuil bas configuré (195mm < 200mm)
+ÉTAPE 2 : run_alert_evaluation_for_tank crée une alerte active level_low
+ÉTAPE 3 : GET /alerts?tankId=... -> 1 alerte active
+ÉTAPE 4 : PATCH /alerts/{id} -> résolue, resolvedAt renseigné
+ÉTAPE 5 : PATCH à nouveau -> 409 alert_already_resolved
+RÉSULTAT ATTENDU : ✓ conforme au cycle de vie actif→résolue (Point 2 §4.6)
+```
+
+Preuve : `tests/test_zylo_liquid_alerts.py::test_low_level_alert_full_scenario`
++ rejoué contre serveur de développement réel.
+
 Aucun scénario métier de bout en bout (livraison, fuite) n'est encore
 implémenté à ce stade — les endpoints 1 et 2 sont du référentiel pur, sans
 flux de mesures. Cette section sera complétée à partir des endpoints 10
@@ -463,3 +510,4 @@ mesures réelles dans `TankMeasurement`.
 | 9 | `/network/summary` (GET) | ✓ (réutilisé) | ✓ (1 endpoint, tous cas) | N/A | **VALIDÉ** |
 | 10 | `/deliveries` (GET) | ✓ (4 tests) | ✓ (2 endpoints, tous cas) | ✓ (scénario complet) | **VALIDÉ** |
 | 11 | `/leak-events` (GET) | ✓ (6 tests) | ✓ (2 endpoints, tous cas) | ✓ (scénario complet) | **VALIDÉ** |
+| 12 | `/alerts` (GET/PATCH) | ✓ (5 tests) | ✓ (3 endpoints, tous cas) | ✓ (scénario complet) | **VALIDÉ** |

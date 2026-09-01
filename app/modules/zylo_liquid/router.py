@@ -6,15 +6,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.modules.zylo_liquid import service
-from app.modules.zylo_liquid.models import FuelProduct, Station
-from app.modules.zylo_liquid.permissions import FUEL_PRODUCT_MANAGE, FUEL_PRODUCT_READ, STATION_MANAGE, STATION_READ
+from app.modules.zylo_liquid.models import FuelProduct, Station, Tank
+from app.modules.zylo_liquid.permissions import (
+    FUEL_PRODUCT_MANAGE,
+    FUEL_PRODUCT_READ,
+    STATION_MANAGE,
+    STATION_READ,
+    TANK_MANAGE,
+    TANK_READ,
+)
 from app.modules.zylo_liquid.schemas import (
     CreateFuelProductRequest,
     CreateStationRequest,
+    CreateTankRequest,
     FuelProductResponse,
     StationResponse,
+    TankResponse,
     UpdateFuelProductRequest,
     UpdateStationRequest,
+    UpdateTankRequest,
 )
 from app.modules_registry.service import require_module_active
 from app.rbac.service import get_current_organization_id, require_permission
@@ -159,3 +169,60 @@ async def reactivate_station(
     db: AsyncSession = Depends(get_db),
 ) -> Station:
     return await service.reactivate_station(db, organization_id, station_id)
+
+
+@router.post(
+    "/tanks",
+    response_model=TankResponse,
+    status_code=201,
+    dependencies=[Depends(require_permission(TANK_MANAGE))],
+)
+async def create_tank(
+    data: CreateTankRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Tank:
+    return await service.create_tank(db, organization_id, data)
+
+
+@router.get(
+    "/tanks",
+    response_model=Page[TankResponse],
+    dependencies=[Depends(require_permission(TANK_READ))],
+)
+async def list_tanks(
+    pagination: PaginationParams = Depends(),
+    stationId: uuid.UUID | None = None,
+    fuelProductId: uuid.UUID | None = None,
+    active: bool | None = None,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    return await service.list_tanks(db, organization_id, pagination, stationId, fuelProductId, active)
+
+
+@router.get(
+    "/tanks/{tank_id}",
+    response_model=TankResponse,
+    dependencies=[Depends(require_permission(TANK_READ))],
+)
+async def get_tank(
+    tank_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Tank:
+    return await service.get_tank(db, organization_id, tank_id)
+
+
+@router.patch(
+    "/tanks/{tank_id}",
+    response_model=TankResponse,
+    dependencies=[Depends(require_permission(TANK_MANAGE))],
+)
+async def update_tank(
+    tank_id: uuid.UUID,
+    data: UpdateTankRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Tank:
+    return await service.update_tank(db, organization_id, tank_id, data)

@@ -4,6 +4,8 @@ from app.modules.zylo_liquid.permissions import (
     FUEL_PRODUCT_READ,
     STATION_MANAGE,
     STATION_READ,
+    TANK_MANAGE,
+    TANK_READ,
 )
 from app.rbac.service import get_or_create_permission
 
@@ -16,6 +18,8 @@ KNOWN_PERMISSIONS = [
     (FUEL_PRODUCT_MANAGE, "Créer/modifier le référentiel des produits carburant."),
     (STATION_READ, "Consulter les stations de l'organisation."),
     (STATION_MANAGE, "Créer/modifier/activer/désactiver les stations de l'organisation."),
+    (TANK_READ, "Consulter les cuves des stations de l'organisation."),
+    (TANK_MANAGE, "Créer/modifier les cuves des stations de l'organisation."),
 ]
 
 

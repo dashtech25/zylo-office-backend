@@ -65,6 +65,30 @@ accès à une station d'une autre organisation → 404 `station_not_found`
 (jamais 403, pour ne rien révéler de l'existence des données d'un autre
 tenant, conforme à Point 2 §1.1). Preuve à 3 niveaux : `validation_log.md`.
 
+### Endpoint 3 — Cuves (`tanks`)
+
+Contrat : `Point 2 — Architecture API — Zylo Liquid MVP.md`, chapitre 1.2.
+
+| Méthode | Route | Permission |
+|---|---|---|
+| POST | `/api/v1/zylo-liquid/tanks` | `zyloLiquid.tank.manage` |
+| GET | `/api/v1/zylo-liquid/tanks` | `zyloLiquid.tank.read` |
+| GET | `/api/v1/zylo-liquid/tanks/{id}` | `zyloLiquid.tank.read` |
+| PATCH | `/api/v1/zylo-liquid/tanks/{id}` | `zyloLiquid.tank.manage` |
+
+`POST /tanks` accepte soit `fuelProductId` (produit déjà connu), soit
+`newFuelProductName` + `newFuelProductCode` (création du produit dans le
+même geste, conforme à Point 2 §1.2 "sans changer d'écran") — exactement
+l'un des deux, jamais les deux ni aucun des deux
+(`fuel_product_selection_invalid`, 422). Numéro de cuve unique par station
+(`tank_number_already_used`, 409). Isolation tenant vérifiée en traversant
+`Tank.stationId → Station.organizationId` (`Tank` lui-même n'a pas
+d'`organizationId` propre, cohérent avec le schéma source où une cuve
+n'existe que rattachée à une station).
+
+Tests : `tests/test_zylo_liquid_tanks.py` (8 cas). Preuve à 3 niveaux :
+`validation_log.md`.
+
 ## 3. Ce qui a été factorisé dans le Core (correction de portée, pas une extension du périmètre initial)
 
 **`app/modules_registry/service.grant_module_permissions_to_owner`** —
@@ -116,6 +140,18 @@ de Point 3 (vérification du modèle avant tout endpoint), pas une
 alternative business — c'est une exigence d'isolation déjà actée pour
 toutes les tables sœurs.
 
+**`Tank` : 3 champs pourcentage remplacés par 3 champs millimètres
+(ÉTENDRE)** — `alertLowPercent`/`alertCriticalPercent`/`alertHighPercent`
+(Phase 1) remplacés par `heightAlarmMm`/`heightAlertMm`/`lowAlarmMm`.
+`fonctionnalite-mvp.md` §1.2 et Point 2 §1.2 exigent explicitement des
+seuils en millimètres, saisis par cuve — cohérent avec l'algorithme
+d'alarme du Point 13 qui compare `H_net` directement à des seuils en mm,
+jamais à un pourcentage de capacité. Les champs pourcentage n'avaient
+jamais été exposés par aucun endpoint (`tanks` est le premier endpoint à
+toucher ce modèle) et la table était vide en développement — remplacement
+sans donnée perdue, migration `82fd37bd908f_tank_mm_alarm_thresholds.py`.
+`alertWaterMaxMm` déjà conforme (mm), conservé sans changement.
+
 **Permissions de module accordées automatiquement au owner à l'activation**
 — voir §3 ci-dessus. Décision structurelle du socle, pas spécifique à Zylo
 Liquid, mais découverte et corrigée à l'occasion de ce premier endpoint.
@@ -161,4 +197,20 @@ Liquid, mais découverte et corrigée à l'occasion de ce premier endpoint.
 - Vérification réelle : suite `curl` complète des 4 cas minimum imposés par
   la méthodologie de validation (normal, introuvable, donnée invalide,
   autre tenant) contre le serveur de développement.
+- Statut : **TERMINÉ**.
+
+## 10. Rapport final — Endpoint 3
+
+- Fichiers créés : `tests/test_zylo_liquid_tanks.py`.
+- Fichiers modifiés : `app/modules/zylo_liquid/models.py` (3 champs mm
+  remplaçant 3 champs pourcentage sur `Tank`), `app/modules/zylo_liquid/{schemas,service,router,permissions,seed}.py`,
+  cette documentation, `validation_log.md`.
+- Migration : `82fd37bd908f_tank_mm_alarm_thresholds.py`, appliquée en
+  développement (table vide, aucune donnée perdue).
+- Tests : 38/38 verts (`python -m pytest`), y compris les 30 tests
+  préexistants (non-régression).
+- Vérification réelle : suite `curl` des 4 cas minimum (création avec
+  produit créé à la volée, introuvable → 404, sélection produit invalide →
+  422, module inactif sur une autre organisation → 403) contre le serveur
+  de développement.
 - Statut : **TERMINÉ**.

@@ -85,6 +85,41 @@ def detect_deliveries(
     return events
 
 
+def compute_net_corrected_volume(
+    calibration_points: list[tuple[float, float]],
+    height_mm: float,
+    water_height_mm: float | None,
+    temperature_c: float | None,
+    thermal_expansion_coefficient: float | None,
+) -> float | None:
+    """Volume carburant net, corrigé à 15°C (Point 10, correction EPA
+    finale) : soustraction de l'eau AVANT le calcul du taux de fuite —
+    sinon une variation d'eau normale (condensation) crée un faux positif
+    — puis correction thermique — sinon un refroidissement nocturne normal
+    crée aussi un faux positif (exemple documenté : 31 L de « fuite »
+    fictive sur une cuve de 18385L de Gasoil pour 2°C de refroidissement)."""
+    v_brut = interpolate_height_to_volume(calibration_points, height_mm)
+    if v_brut is None:
+        return None
+    v_eau = interpolate_height_to_volume(calibration_points, water_height_mm) if water_height_mm is not None else 0.0
+    v_net = v_brut - (v_eau or 0.0)
+    if temperature_c is not None and thermal_expansion_coefficient is not None:
+        return correct_volume_to_reference_temperature(v_net, temperature_c, thermal_expansion_coefficient)
+    return v_net
+
+
+def compute_leak_rate_lph(v_start_corrected: float, v_end_corrected: float, duration_hours: float) -> float:
+    """Taux de fuite en litres/heure (Point 10, algorithme EPA final) :
+    (V_corrigé_début - V_corrigé_fin) / durée."""
+    return (v_start_corrected - v_end_corrected) / duration_hours
+
+
+def is_leak_detected(rate_lph: float, threshold_lph: float = 0.38) -> bool:
+    """Seuil binaire 0.38 L/H (standard EPA, Point 10 §10.4) — strictement
+    supérieur, jamais égal (Point 10 §10.3 : « Si Taux_fuite > 0.38 L/H »)."""
+    return rate_lph > threshold_lph
+
+
 def correct_volume_to_reference_temperature(
     measured_volume_liters: float, measured_temperature_c: float, thermal_expansion_coefficient: float
 ) -> float:

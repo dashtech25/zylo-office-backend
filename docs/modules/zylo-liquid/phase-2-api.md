@@ -317,6 +317,46 @@ scénario d'intégration Niveau 3 complet : mesures réelles → détection →
 persistance → lecture API, volume exact 10875L vérifié de bout en bout).
 Preuve à 3 niveaux : `validation_log.md`.
 
+### Endpoint 11 — Événements de fuite détectés (`leak-events`)
+
+Contrat : `Point 2 — Architecture API — Zylo Liquid MVP.md`, chapitre 3.4.
+
+| Méthode | Route | Permission |
+|---|---|---|
+| GET | `/api/v1/zylo-liquid/leak-events` | `zyloLiquid.leakEvent.read` |
+| GET | `/api/v1/zylo-liquid/leak-events/{id}` | `zyloLiquid.leakEvent.read` |
+
+**Modèle créé** : `LeakageRecord` (confirmé absent, Point 2 §7).
+
+**Algorithme, version finale corrigée EPA** (`compute_net_corrected_volume`,
+`compute_leak_rate_lph`, `is_leak_detected` — `app/modules/zylo_liquid/algorithms.py`) :
+contrairement à la version initiale simplifiée de Point 10 §10.3
+(`Volume perdu = Start Volume - End Volume` brut), la version finale
+(Point 10, correction post-§10.3) exige deux garde-fous, testés
+individuellement (Niveau 1) pour prouver qu'ils préviennent des faux
+positifs documentés :
+- **Soustraction de l'eau avant le calcul** — sinon une variation d'eau
+  normale (condensation) fausse le taux de fuite carburant.
+- **Correction thermique à 15°C** — sinon un refroidissement nocturne
+  normal de 2°C sur une cuve de Gasoil (α=0.00085) produit ~31L de « fuite »
+  fictive (exemple documenté, reproduit exactement dans
+  `test_compute_net_corrected_volume_thermal_correction_prevents_false_positive`).
+
+Seuil 0.38 L/H strictement supérieur (standard EPA, Point 10 §10.4).
+
+**Portée volontairement limitée (issue #43)** : seule la détection
+**statique** (Point 10 §10.3) est implémentée — la détection dynamique par
+tendance sur 7 jours (Point 10 §10.6) est explicitement exclue « pour le
+moment » par la source elle-même, pas une omission. Un test de fuite porte
+sur une fenêtre explicite (`startTime`/`endTime`), contrairement aux
+livraisons qui scannent tout l'historique en continu — cohérent avec la
+réalité opérationnelle (« station à l'arrêt », un test à la fois).
+
+Tests : `tests/test_zylo_liquid_leak_events.py` (7 cas, incluant un
+scénario d'intégration Niveau 3 : mesures réelles → test de fuite →
+`result: "anomaly"` avec le taux exact → lecture API). Preuve à 3 niveaux :
+`validation_log.md`.
+
 ## 3. Ce qui a été factorisé dans le Core (correction de portée, pas une extension du périmètre initial)
 
 **`app/modules_registry/service.grant_module_permissions_to_owner`** —
@@ -550,4 +590,21 @@ Liquid, mais découverte et corrigée à l'occasion de ce premier endpoint.
   développement (série de mesures réelles → détection → lecture API,
   volume exact 10875L confirmé), plus cas introuvable/plage invalide/
   permission manquante.
+- Statut : **TERMINÉ**.
+
+## 18. Rapport final — Endpoint 11
+
+- Fichiers créés : `tests/test_zylo_liquid_leak_events.py`.
+- Fichiers modifiés : `app/modules/zylo_liquid/models.py` (`LeakageRecord`,
+  nouveau), `app/modules/zylo_liquid/algorithms.py`
+  (`compute_net_corrected_volume`, `compute_leak_rate_lph`,
+  `is_leak_detected`), `tests/test_zylo_liquid_algorithms.py` (Niveau 1,
+  +4 cas), `app/modules/zylo_liquid/{schemas,service,router,permissions,seed}.py`,
+  cette documentation, `validation_log.md`.
+- Migration : `f049b4c60e80_leakage_record.py` (nouvelle table).
+- Tests : 108/108 verts (`python -m pytest`), y compris les 97
+  tests préexistants (non-régression) + 4 Niveau 1 + 7 Niveau 2/3.
+- Vérification réelle : scénario complet rejoué contre le serveur de
+  développement (mesures réelles → test de fuite → `result:"anomaly"`,
+  taux exact confirmé → lecture API).
 - Statut : **TERMINÉ**.

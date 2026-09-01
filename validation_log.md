@@ -52,7 +52,25 @@ Détection de livraison (version corrigée et complète).md` §8.3, §8.5, §8.6
 stabilité <5mm, confirmation 15min — jamais les valeurs d'exemple
 génériques 500L/30min de §8.6). Preuve : `tests/test_zylo_liquid_algorithms.py`.
 
-Le prochain algorithme à exercer sera celui de l'endpoint 11 (fuite).
+### compute_net_corrected_volume / compute_leak_rate_lph / is_leak_detected — VALIDÉ le 2026-09-01
+
+| Cas | Entrée | Attendu | Obtenu | Statut |
+|-----|--------|---------|--------|--------|
+| Seuil EPA (frontière) | 0.38 exactement | Pas de fuite (strictement supérieur requis) | Confirmé | ✓ |
+| Seuil EPA (au-dessus) | 0.39 | Fuite détectée | Confirmé (PASS) | ✓ |
+| Seuil EPA (en dessous) | 0.37 | Pas de fuite | Confirmé (FAIL attendu si détectée à tort) | ✓ |
+| Taux direct (exemple Point 10 §10.3) | ΔV=9.5L/24h | ≈0.396 L/H, fuite détectée | Confirmé | ✓ |
+| Faux positif eau (condensation) | Eau +2mm entre début et fin | Volume net carburant diminue en cohérence avec l'eau, pas une fuite fictive isolée | Confirmé | ✓ |
+| Faux positif thermique (exemple documenté) | Refroidissement 2°C, cuve 18385L Gasoil α=0.00085 | Sans correction : ~31L/H « fuite » fictive détectée (FAIL) ; avec correction : ≈0, pas de fuite (PASS) | Confirmé (les deux résultats) | ✓ |
+
+Source exacte : `nouveau-station-simulator/nouveau-zylo-liquid/Point 10 —
+Détection de fuite.md`, section finale (« Correction de l'algorithme du
+point 10 » — version EPA corrigée, pas l'algorithme initial simplifié de
+§10.3). Seuil 0.38 L/H confirmé §10.4 (standard EPA). Preuve :
+`tests/test_zylo_liquid_algorithms.py`.
+
+Le prochain algorithme à exercer sera celui de l'endpoint 12 (historique
+des fuites, réutilisation) ou d'un futur endpoint d'alarme.
 
 ---
 
@@ -384,6 +402,43 @@ RÉSULTAT ATTENDU : ✓ conforme au calcul exact de Point 8 §8.6
 Preuve : `tests/test_zylo_liquid_deliveries.py::test_delivery_detection_and_read_full_scenario`
 + rejoué contre serveur de développement réel (curl, endpoint 10).
 
+### GET /api/v1/zylo-liquid/leak-events — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal (fuite réelle) | 200 + `result:"anomaly"`, taux exact | 200, `leakRateLph=0.5` | ✓ |
+| En dessous du seuil | `result:"normal"` | Confirmé | ✓ |
+| Filtre par résultat | 200 + sous-ensemble filtré | 200, conforme | ✓ |
+| Module inactif | 403 `module_inactive` | 403 `module_inactive` | ✓ |
+
+### GET /api/v1/zylo-liquid/leak-events/{id} — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal | 200 + détail complet | 200, conforme | ✓ |
+| Introuvable | 404 `leak_event_not_found` | 404 `leak_event_not_found` | ✓ |
+
+Algorithmes validés séparément : voir Niveau 1 ci-dessus.
+Preuve : `tests/test_zylo_liquid_leak_events.py` (7 cas, pytest réel) +
+scénario complet rejoué contre serveur de développement.
+
+### Scénario fuite — VALIDÉ le 2026-09-01
+
+```
+SCÉNARIO : Une fuite est détectée et classée correctement
+ÉTAPE 1 : Insertion de deux mesures (début/fin d'une fenêtre de 8h,
+          perte de 4L -> 0.5 L/H, sans variation eau/température)
+ÉTAPE 2 : run_leak_test_for_tank (fonction testée directement, aucun
+          endpoint HTTP ne la déclenche — station à l'arrêt, Point 10 §10.3)
+ÉTAPE 3 : GET /leak-events?tankId=... -> 1 événement, result="anomaly",
+          leakRateLph=0.5
+ÉTAPE 4 : GET /leak-events/{id} -> détail identique
+RÉSULTAT ATTENDU : ✓ conforme au calcul exact (0.5 > seuil 0.38 L/H)
+```
+
+Preuve : `tests/test_zylo_liquid_leak_events.py::test_leak_test_detects_anomaly_full_scenario`
++ rejoué contre serveur de développement réel.
+
 Aucun scénario métier de bout en bout (livraison, fuite) n'est encore
 implémenté à ce stade — les endpoints 1 et 2 sont du référentiel pur, sans
 flux de mesures. Cette section sera complétée à partir des endpoints 10
@@ -407,3 +462,4 @@ mesures réelles dans `TankMeasurement`.
 | 8 | `/tanks/{id}/measurements` (GET) | ✓ (réutilisé) | ✓ (1 endpoint, tous cas) | N/A | **VALIDÉ** |
 | 9 | `/network/summary` (GET) | ✓ (réutilisé) | ✓ (1 endpoint, tous cas) | N/A | **VALIDÉ** |
 | 10 | `/deliveries` (GET) | ✓ (4 tests) | ✓ (2 endpoints, tous cas) | ✓ (scénario complet) | **VALIDÉ** |
+| 11 | `/leak-events` (GET) | ✓ (6 tests) | ✓ (2 endpoints, tous cas) | ✓ (scénario complet) | **VALIDÉ** |

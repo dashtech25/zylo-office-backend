@@ -245,6 +245,18 @@ class DeliveryDetectedResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class LeakEventResponse(BaseModel):
+    id: uuid.UUID
+    tankId: uuid.UUID
+    stationId: uuid.UUID
+    startTime: datetime
+    endTime: datetime
+    leakRateLph: float | None
+    result: str
+
+    model_config = {"from_attributes": True}
+
+
 class HolykellAccountSyncStatusResponse(BaseModel):
     id: uuid.UUID
     organizationId: uuid.UUID

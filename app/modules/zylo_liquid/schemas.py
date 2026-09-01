@@ -180,3 +180,14 @@ class ReplaceTankCalibrationPointsResponse(BaseModel):
     tankId: uuid.UUID
     pointCount: int
     points: list[TankCalibrationPointResponse]
+
+
+class HolykellAccountSyncStatusResponse(BaseModel):
+    id: uuid.UUID
+    organizationId: uuid.UUID
+    lastSyncAt: datetime | None
+    lastSyncStatus: str | None
+    lastSyncError: str | None
+    syncEnabled: bool
+
+    model_config = {"from_attributes": True}

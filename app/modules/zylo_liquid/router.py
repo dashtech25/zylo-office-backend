@@ -6,10 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.modules.zylo_liquid import service
-from app.modules.zylo_liquid.models import FuelProduct, Station, Tank, TankSensorMapping
+from app.modules.zylo_liquid.models import FuelProduct, HolykellAccount, Station, Tank, TankSensorMapping
 from app.modules.zylo_liquid.permissions import (
     FUEL_PRODUCT_MANAGE,
     FUEL_PRODUCT_READ,
+    HOLYKELL_ACCOUNT_READ,
     STATION_MANAGE,
     STATION_READ,
     TANK_CALIBRATION_MANAGE,
@@ -25,6 +26,7 @@ from app.modules.zylo_liquid.schemas import (
     CreateTankRequest,
     CreateTankSensorMappingRequest,
     FuelProductResponse,
+    HolykellAccountSyncStatusResponse,
     ReplaceTankCalibrationPointsRequest,
     ReplaceTankCalibrationPointsResponse,
     StationResponse,
@@ -308,3 +310,16 @@ async def list_tank_calibration_points(
     db: AsyncSession = Depends(get_db),
 ) -> list:
     return await service.list_tank_calibration_points(db, organization_id, tank_id)
+
+
+@router.get(
+    "/holykell-accounts/{account_id}/sync-status",
+    response_model=HolykellAccountSyncStatusResponse,
+    dependencies=[Depends(require_permission(HOLYKELL_ACCOUNT_READ))],
+)
+async def get_holykell_account_sync_status(
+    account_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> HolykellAccount:
+    return await service.get_holykell_account_sync_status(db, organization_id, account_id)

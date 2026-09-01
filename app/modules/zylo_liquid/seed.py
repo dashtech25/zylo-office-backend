@@ -6,6 +6,7 @@ from app.modules.zylo_liquid.permissions import (
     STATION_READ,
     TANK_MANAGE,
     TANK_READ,
+    HOLYKELL_ACCOUNT_READ,
     TANK_CALIBRATION_MANAGE,
     TANK_CALIBRATION_READ,
     TANK_SENSOR_MAPPING_MANAGE,
@@ -28,6 +29,7 @@ KNOWN_PERMISSIONS = [
     (TANK_SENSOR_MAPPING_MANAGE, "Créer/clore les associations capteur-cuve."),
     (TANK_CALIBRATION_READ, "Consulter la table de calibration d'une cuve."),
     (TANK_CALIBRATION_MANAGE, "Charger (remplacer) la table de calibration d'une cuve."),
+    (HOLYKELL_ACCOUNT_READ, "Consulter l'état de synchronisation d'un compte Holykell."),
 ]
 
 

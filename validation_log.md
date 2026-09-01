@@ -227,6 +227,25 @@ minimum ci-dessus).
 
 ---
 
+### GET /api/v1/zylo-liquid/holykell-accounts/{id}/sync-status — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal (statut réussi) | 200 + `lastSyncStatus:"success"` | 200, conforme | ✓ |
+| Statut échoué avec message | 200 + `lastSyncError` renseigné | 200, conforme | ✓ |
+| Compte introuvable | 404 `holykell_account_not_found` | 404 `holykell_account_not_found` | ✓ |
+| Compte d'une autre organisation | 404 (isolation stricte) | 404 `holykell_account_not_found` | ✓ |
+| Module inactif | 403 `module_inactive` | 403 `module_inactive` | ✓ |
+
+Algorithmes validés séparément : N/A (lecture pure).
+Écart de contrat documenté (`docs/modules/zylo-liquid/phase-2-api.md` §Endpoint 6) :
+Point 2 §2.1 affirmait une contrainte d'unicité par organisation qui
+n'existe pas réellement en base — vérifié, non corrigé arbitrairement.
+Preuve : `tests/test_zylo_liquid_holykell_sync_status.py` (5 cas, pytest
+réel) + suite `curl` réelle contre serveur de développement.
+
+---
+
 ## Niveau 3 — Tests d'intégration de flux
 
 Aucun scénario métier de bout en bout (livraison, fuite) n'est encore
@@ -247,3 +266,4 @@ mesures réelles dans `TankMeasurement`.
 | 3 | `/tanks` (POST/GET/PATCH) | N/A | ✓ (4 endpoints, tous cas) | N/A | **VALIDÉ** |
 | 4 | `/tank-sensor-mappings` (POST/GET/close) | N/A | ✓ (3 endpoints, tous cas) | N/A | **VALIDÉ** |
 | 5 | `/tanks/{id}/calibration-points` (PUT/GET) | N/A | ✓ (2 endpoints, tous cas) | N/A | **VALIDÉ** |
+| 6 | `/holykell-accounts/{id}/sync-status` (GET) | N/A | ✓ (1 endpoint, tous cas) | N/A | **VALIDÉ** |

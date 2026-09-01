@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError
 from app.modules.zylo_liquid.models import (
     FuelProduct,
+    HolykellAccount,
     HolykellDeviceRegistry,
     Station,
     Tank,
@@ -409,3 +410,13 @@ async def list_tank_calibration_points(db: AsyncSession, organization_id: uuid.U
         select(TankCalibrationPoint).where(TankCalibrationPoint.tankId == tank_id).order_by(TankCalibrationPoint.heightMm)
     )
     return list(result.scalars().all())
+
+
+async def get_holykell_account_sync_status(db: AsyncSession, organization_id: uuid.UUID, account_id: uuid.UUID) -> HolykellAccount:
+    result = await db.execute(
+        select(HolykellAccount).where(HolykellAccount.id == account_id, HolykellAccount.organizationId == organization_id)
+    )
+    account = result.scalar_one_or_none()
+    if account is None:
+        raise AppError(code="holykell_account_not_found", message="Compte Holykell introuvable.", status_code=404)
+    return account

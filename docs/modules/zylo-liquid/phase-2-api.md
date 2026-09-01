@@ -150,6 +150,28 @@ nouvellement créée, conforme à Point 2 §1.4).
 Tests : `tests/test_zylo_liquid_tank_calibration_points.py` (8 cas).
 Preuve à 3 niveaux : `validation_log.md`.
 
+### Endpoint 6 — État de synchronisation Holykell (`holykell-accounts/{id}/sync-status`)
+
+Contrat : `Point 2 — Architecture API — Zylo Liquid MVP.md`, chapitre 2.1.
+
+| Méthode | Route | Permission |
+|---|---|---|
+| GET | `/api/v1/zylo-liquid/holykell-accounts/{id}/sync-status` | `zyloLiquid.holykellAccount.read` |
+
+**Écart documenté entre le contrat et le modèle réel (§9.3, issue #33)** :
+Point 2 §2.1 affirme « chaque organisation a exactement un compte Holykell
+(contrainte déjà en base) » — vérifié faux : aucune `UniqueConstraint` sur
+`HolykellAccount.organizationId`. L'endpoint reste correct malgré tout
+(adressé par son identifiant explicite dans le chemin, pas déduit de
+l'organisation courante), mais l'affirmation du contrat est erronée et
+n'a pas été corrigée arbitrairement — si un jour une organisation doit
+strictement n'avoir qu'un compte, la contrainte devra être ajoutée après
+validation métier explicite, pas devinée ici.
+
+Tests : `tests/test_zylo_liquid_holykell_sync_status.py` (5 cas, incluant
+isolation tenant stricte : compte d'une autre organisation → 404).
+Preuve à 3 niveaux : `validation_log.md`.
+
 ## 3. Ce qui a été factorisé dans le Core (correction de portée, pas une extension du périmètre initial)
 
 **`app/modules_registry/service.grant_module_permissions_to_owner`** —
@@ -306,4 +328,19 @@ Liquid, mais découverte et corrigée à l'occasion de ce premier endpoint.
 - Vérification réelle : suite `curl` des 4 cas minimum (remplacement
   normal, hauteur dépassant la cuve → 422, table non monotone → 422, cuve
   introuvable → 404) contre le serveur de développement.
+- Statut : **TERMINÉ**.
+
+## 13. Rapport final — Endpoint 6
+
+- Fichiers créés : `tests/test_zylo_liquid_holykell_sync_status.py`.
+- Fichiers modifiés : `app/modules/zylo_liquid/{schemas,service,router,permissions,seed}.py`,
+  cette documentation, `validation_log.md`.
+- Migration : aucune (modèle `HolykellAccount` déjà conforme depuis la
+  Phase 1 ; écart de contrat documenté ci-dessus, non corrigé sans
+  validation métier).
+- Tests : 59/59 verts (`python -m pytest`), y compris les 54 tests
+  préexistants (non-régression).
+- Vérification réelle : suite `curl` des 4 cas minimum (statut réussi,
+  compte introuvable → 404, isolation tenant → 404, module inactif → 403)
+  contre le serveur de développement.
 - Statut : **TERMINÉ**.

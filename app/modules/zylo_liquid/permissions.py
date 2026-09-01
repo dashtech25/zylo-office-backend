@@ -13,3 +13,6 @@ TANK_MANAGE = "zyloLiquid.tank.manage"
 
 TANK_SENSOR_MAPPING_READ = "zyloLiquid.tankSensorMapping.read"
 TANK_SENSOR_MAPPING_MANAGE = "zyloLiquid.tankSensorMapping.manage"
+
+TANK_CALIBRATION_READ = "zyloLiquid.tankCalibration.read"
+TANK_CALIBRATION_MANAGE = "zyloLiquid.tankCalibration.manage"

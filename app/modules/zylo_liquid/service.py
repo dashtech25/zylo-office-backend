@@ -5,12 +5,20 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
-from app.modules.zylo_liquid.models import FuelProduct, HolykellDeviceRegistry, Station, Tank, TankSensorMapping
+from app.modules.zylo_liquid.models import (
+    FuelProduct,
+    HolykellDeviceRegistry,
+    Station,
+    Tank,
+    TankCalibrationPoint,
+    TankSensorMapping,
+)
 from app.modules.zylo_liquid.schemas import (
     CreateFuelProductRequest,
     CreateStationRequest,
     CreateTankRequest,
     CreateTankSensorMappingRequest,
+    ReplaceTankCalibrationPointsRequest,
     StationResponse,
     TankResponse,
     TankSensorMappingResponse,
@@ -358,3 +366,46 @@ async def list_tank_sensor_mappings(
     mappings = result.scalars().all()
     data = [TankSensorMappingResponse.model_validate(mapping) for mapping in mappings]
     return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
+
+
+async def replace_tank_calibration_points(
+    db: AsyncSession, organization_id: uuid.UUID, tank_id: uuid.UUID, data: ReplaceTankCalibrationPointsRequest
+) -> list[TankCalibrationPoint]:
+    tank = await get_tank(db, organization_id, tank_id)
+
+    sorted_points = sorted(data.points, key=lambda p: p.heightMm)
+    max_height = sorted_points[-1].heightMm
+    if tank.tankHeightMm is not None and max_height > tank.tankHeightMm:
+        raise AppError(
+            code="calibration_height_exceeds_tank",
+            message=f"La hauteur maximale de la table ({max_height} mm) dépasse la hauteur physique déclarée de la cuve ({tank.tankHeightMm} mm).",
+            status_code=422,
+        )
+
+    for previous, current in zip(sorted_points, sorted_points[1:]):
+        if current.volumeLiters < previous.volumeLiters:
+            raise AppError(
+                code="calibration_table_not_monotonic",
+                message="Le volume ne doit jamais diminuer alors que la hauteur augmente — table de calibration incohérente.",
+                status_code=422,
+            )
+
+    # Remplacement intégral, jamais une fusion partielle (Point 2 §1.4).
+    await db.execute(TankCalibrationPoint.__table__.delete().where(TankCalibrationPoint.tankId == tank_id))
+    new_points = [
+        TankCalibrationPoint(tankId=tank_id, heightMm=point.heightMm, volumeLiters=point.volumeLiters)
+        for point in sorted_points
+    ]
+    db.add_all(new_points)
+    await db.commit()
+    for point in new_points:
+        await db.refresh(point)
+    return new_points
+
+
+async def list_tank_calibration_points(db: AsyncSession, organization_id: uuid.UUID, tank_id: uuid.UUID) -> list[TankCalibrationPoint]:
+    await get_tank(db, organization_id, tank_id)  # lève tank_not_found si hors périmètre
+    result = await db.execute(
+        select(TankCalibrationPoint).where(TankCalibrationPoint.tankId == tank_id).order_by(TankCalibrationPoint.heightMm)
+    )
+    return list(result.scalars().all())

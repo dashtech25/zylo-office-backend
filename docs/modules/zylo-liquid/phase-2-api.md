@@ -122,6 +122,34 @@ Tests : `tests/test_zylo_liquid_tank_sensor_mappings.py` (8 cas, incluant
 la résolution du bon canal parmi plusieurs sur un même numéro de série).
 Preuve à 3 niveaux : `validation_log.md`.
 
+### Endpoint 5 — Table de calibration d'une cuve (`tanks/{id}/calibration-points`)
+
+> Note d'ordre : cet endpoint correspond à l'item 4 de la liste de
+> construction (§12 de Point 3), sauté par erreur avant l'endpoint 4
+> (tank-sensor-mappings, item 5) — corrigé ici pour respecter l'ordre de
+> dépendances réel (cette table doit exister avant l'endpoint 7, état
+> actuel d'une cuve, qui l'utilise pour tout calcul de volume).
+
+Contrat : `Point 2 — Architecture API — Zylo Liquid MVP.md`, chapitre 1.4.
+
+| Méthode | Route | Permission |
+|---|---|---|
+| PUT | `/api/v1/zylo-liquid/tanks/{id}/calibration-points` | `zyloLiquid.tankCalibration.manage` |
+| GET | `/api/v1/zylo-liquid/tanks/{id}/calibration-points` | `zyloLiquid.tankCalibration.read` |
+
+`PUT` remplace intégralement la table (jamais une fusion partielle,
+conforme à Point 2 §1.4) : suppression de tous les points existants puis
+insertion de la nouvelle liste, dans la même transaction. Deux validations
+bloquantes : la hauteur maximale de la table ne doit jamais dépasser
+`Tank.tankHeightMm` (`calibration_height_exceeds_tank`, 422) ; le volume ne
+doit jamais diminuer quand la hauteur augmente
+(`calibration_table_not_monotonic`, 422). `GET` sur une cuve sans aucune
+table renvoie une liste vide, jamais une erreur (état normal d'une cuve
+nouvellement créée, conforme à Point 2 §1.4).
+
+Tests : `tests/test_zylo_liquid_tank_calibration_points.py` (8 cas).
+Preuve à 3 niveaux : `validation_log.md`.
+
 ## 3. Ce qui a été factorisé dans le Core (correction de portée, pas une extension du périmètre initial)
 
 **`app/modules_registry/service.grant_module_permissions_to_owner`** —
@@ -264,4 +292,18 @@ Liquid, mais découverte et corrigée à l'occasion de ce premier endpoint.
   clôture d'une association inexistante → 404, numéro de série inconnu →
   422, module inactif sur une autre organisation → 403) contre le serveur
   de développement, avec un capteur Holykell réellement inséré en base.
+- Statut : **TERMINÉ**.
+
+## 12. Rapport final — Endpoint 5
+
+- Fichiers créés : `tests/test_zylo_liquid_tank_calibration_points.py`.
+- Fichiers modifiés : `app/modules/zylo_liquid/{schemas,service,router,permissions,seed}.py`,
+  cette documentation, `validation_log.md`.
+- Migration : aucune (modèle `TankCalibrationPoint` déjà conforme depuis la
+  Phase 1).
+- Tests : 54/54 verts (`python -m pytest`), y compris les 46 tests
+  préexistants (non-régression).
+- Vérification réelle : suite `curl` des 4 cas minimum (remplacement
+  normal, hauteur dépassant la cuve → 422, table non monotone → 422, cuve
+  introuvable → 404) contre le serveur de développement.
 - Statut : **TERMINÉ**.

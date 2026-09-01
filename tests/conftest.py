@@ -26,6 +26,7 @@ def apply_migrations():
 async def client():
     from app.core.database import engine
     from app.main import app
+    from app.modules.zylo_liquid.seed import seed_known_permissions
     from app.modules_registry.seed import seed_known_modules
 
     # pytest-asyncio donne à chaque test sa propre boucle d'événements, mais
@@ -38,9 +39,11 @@ async def client():
 
     # httpx.ASGITransport ne déclenche pas les événements "startup" de FastAPI
     # (contrairement à un vrai serveur uvicorn) — le seed des modules connus
-    # doit donc être rejoué explicitement ici, sinon "zylo_liquid" n'existe
-    # jamais dans la base de test et toute FK vers module.code échoue.
+    # et des permissions déclarées doit donc être rejoué explicitement ici,
+    # sinon "zylo_liquid" et ses permissions n'existent jamais dans la base de
+    # test et toute FK vers module.code/permission.code échoue.
     await seed_known_modules()
+    await seed_known_permissions()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -66,3 +69,16 @@ async def organization(client: AsyncClient, registered_user: dict):
     headers = {"Authorization": f"Bearer {registered_user['accessToken']}"}
     res = await client.post("/api/v1/organizations", json={"name": "Test Org", "slug": f"test-org-{uuid.uuid4().hex[:8]}"}, headers=headers)
     return res.json()
+
+
+@pytest.fixture
+async def zylo_liquid_organization(client: AsyncClient, registered_user: dict, organization: dict):
+    """Organisation avec le module zylo_liquid activé — l'activation accorde
+    désormais automatiquement au owner toutes les permissions déclarées par ce
+    module (app.modules_registry.service.grant_module_permissions_to_owner),
+    fixture réutilisable par tous les futurs tests d'endpoints Zylo Liquid
+    (Point 3 §20)."""
+    headers = {"Authorization": f"Bearer {registered_user['accessToken']}", "X-Organization-Id": organization["id"]}
+    activate_res = await client.post(f"/api/v1/modules/organizations/{organization['id']}/activate", json={"moduleCode": "zylo_liquid"}, headers=headers)
+    assert activate_res.status_code == 200, activate_res.text
+    return organization

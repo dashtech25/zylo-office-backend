@@ -57,3 +57,4 @@ pour rester comparable d'un module à l'autre :
 
 - [`core/phase12-offline-readiness-audit.md`](core/phase12-offline-readiness-audit.md) — audit de conformité offline/synchronisation du socle (Phase 12 du plan `grande_phases.md`).
 - [`modules/zylo-liquid/phase-1-database.md`](modules/zylo-liquid/phase-1-database.md) — base de données du module Zylo Liquid (résumé ; le document de référence complet est `phase_1_database.md` à la racine du dépôt, conservé pour respecter le nom de livrable exact demandé par `instruction_2_base_donnees_phase_1.md`).
+- [`modules/zylo-liquid/phase-2-api.md`](modules/zylo-liquid/phase-2-api.md) — API du module Zylo Liquid, document vivant complété endpoint par endpoint (procédure : `Point 3 — Définir la procédure de développement endpoint par endpoint.md`).

@@ -1,0 +1,72 @@
+import uuid
+
+from fastapi import APIRouter, Depends
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.modules.zylo_liquid import service
+from app.modules.zylo_liquid.models import FuelProduct
+from app.modules.zylo_liquid.permissions import FUEL_PRODUCT_MANAGE, FUEL_PRODUCT_READ
+from app.modules.zylo_liquid.schemas import CreateFuelProductRequest, FuelProductResponse, UpdateFuelProductRequest
+from app.modules_registry.service import require_module_active
+from app.rbac.service import get_current_organization_id, require_permission
+from app.shared.pagination import PaginationParams, paginate
+from app.shared.schemas import Page
+
+router = APIRouter(dependencies=[Depends(require_module_active("zylo_liquid"))])
+
+
+@router.post(
+    "/fuel-products",
+    response_model=FuelProductResponse,
+    status_code=201,
+    dependencies=[Depends(require_permission(FUEL_PRODUCT_MANAGE))],
+)
+async def create_fuel_product(
+    data: CreateFuelProductRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> FuelProduct:
+    return await service.create_fuel_product(db, organization_id, data)
+
+
+@router.get(
+    "/fuel-products",
+    response_model=Page[FuelProductResponse],
+    dependencies=[Depends(require_permission(FUEL_PRODUCT_READ))],
+)
+async def list_fuel_products(
+    pagination: PaginationParams = Depends(),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    stmt = select(FuelProduct).where(FuelProduct.organizationId == organization_id).order_by(FuelProduct.name)
+    return await paginate(db, stmt, pagination, FuelProductResponse)
+
+
+@router.get(
+    "/fuel-products/{fuel_product_id}",
+    response_model=FuelProductResponse,
+    dependencies=[Depends(require_permission(FUEL_PRODUCT_READ))],
+)
+async def get_fuel_product(
+    fuel_product_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> FuelProduct:
+    return await service.get_fuel_product(db, organization_id, fuel_product_id)
+
+
+@router.patch(
+    "/fuel-products/{fuel_product_id}",
+    response_model=FuelProductResponse,
+    dependencies=[Depends(require_permission(FUEL_PRODUCT_MANAGE))],
+)
+async def update_fuel_product(
+    fuel_product_id: uuid.UUID,
+    data: UpdateFuelProductRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> FuelProduct:
+    return await service.update_fuel_product(db, organization_id, fuel_product_id, data)

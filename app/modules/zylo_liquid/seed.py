@@ -1,5 +1,6 @@
 from app.core.database import AsyncSessionLocal
 from app.modules.zylo_liquid.permissions import (
+    DELIVERY_READ,
     FUEL_PRODUCT_MANAGE,
     FUEL_PRODUCT_READ,
     STATION_MANAGE,
@@ -30,6 +31,7 @@ KNOWN_PERMISSIONS = [
     (TANK_CALIBRATION_READ, "Consulter la table de calibration d'une cuve."),
     (TANK_CALIBRATION_MANAGE, "Charger (remplacer) la table de calibration d'une cuve."),
     (HOLYKELL_ACCOUNT_READ, "Consulter l'état de synchronisation d'un compte Holykell."),
+    (DELIVERY_READ, "Consulter les livraisons détectées."),
 ]
 
 

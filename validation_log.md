@@ -37,9 +37,22 @@ La table de calibration.md` §2.4. Preuve : `tests/test_zylo_liquid_algorithms.p
 Source exacte : `nouveau-station-simulator/nouveau-zylo-liquid/Point 5 —
 Température et densité.md` §5.2. Preuve : `tests/test_zylo_liquid_algorithms.py`.
 
-Aucun autre algorithme métier (Point 1-16) n'est encore branché à un
-endpoint à ce stade. Les prochains à exercer un algorithme validé seront
-les endpoints 10 (livraison) et 11 (fuite).
+### detect_deliveries — VALIDÉ le 2026-09-01
+
+| Cas | Entrée | Attendu | Obtenu | Statut |
+|-----|--------|---------|--------|--------|
+| Cas de référence exact | Scénario Point 8 §8.5/§8.8 (445→1298→stable 1293) | 1 livraison, start=445mm, end=1293mm | Confirmé | ✓ (PASS) |
+| Volume brut combiné à l'interpolation | calibration(1293)-calibration(445) | 10875 L (Point 8.6, sans correction ventes) | 10875 L | ✓ |
+| Oscillation sous le seuil (50mm) | Hausse de 20mm | Aucune livraison détectée | `[]` | ✓ (FAIL attendu si détectée à tort) |
+| Plateau bref pendant la hausse (<15min) | Hausse→plateau 5min→reprise→fin réelle | 1 seule livraison, sur la vraie fin | Confirmé | ✓ |
+
+Source exacte : `nouveau-station-simulator/nouveau-zylo-liquid/Point 8 —
+Détection de livraison (version corrigée et complète).md` §8.3, §8.5, §8.6,
+§8.8. Seuils confirmés par Point 3 §10 (code Odoo audité : hausse ≥50mm,
+stabilité <5mm, confirmation 15min — jamais les valeurs d'exemple
+génériques 500L/30min de §8.6). Preuve : `tests/test_zylo_liquid_algorithms.py`.
+
+Le prochain algorithme à exercer sera celui de l'endpoint 11 (fuite).
 
 ---
 
@@ -331,7 +344,45 @@ suite `curl` réelle contre serveur de développement.
 
 ---
 
+### GET /api/v1/zylo-liquid/deliveries — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal (après détection) | 200 + livraison avec volume exact | 200, `volumeLiters=10875` | ✓ |
+| Filtre par cuve/date | 200 + sous-ensemble filtré | 200, conforme | ✓ |
+| Plage de dates invalide | 422 `invalid_date_range` | 422 `invalid_date_range` | ✓ |
+| Module inactif | 403 `module_inactive` | 403 `module_inactive` | ✓ |
+
+### GET /api/v1/zylo-liquid/deliveries/{id} — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal | 200 + détail complet | 200, conforme | ✓ |
+| Introuvable | 404 `delivery_not_found` | 404 `delivery_not_found` | ✓ |
+
+Algorithmes validés séparément : voir Niveau 1 ci-dessus (`detect_deliveries`
++ `interpolate_height_to_volume`, déjà validé endpoint 7).
+Preuve : `tests/test_zylo_liquid_deliveries.py` (6 cas, pytest réel) +
+scénario complet rejoué contre serveur de développement.
+
+---
+
 ## Niveau 3 — Tests d'intégration de flux
+
+### Scénario livraison — VALIDÉ le 2026-09-01
+
+```
+SCÉNARIO : Une livraison est détectée correctement de bout en bout
+ÉTAPE 1 : Insertion d'une série de mesures réelles (445mm → 1298mm → stable 1293mm)
+ÉTAPE 2 : Exécution de run_delivery_detection_for_tank (fonction testée
+          directement, aucun endpoint HTTP ne la déclenche — Point 2 §3.3)
+ÉTAPE 3 : GET /deliveries?tankId=... → 1 livraison, volumeLiters=10875
+ÉTAPE 4 : GET /deliveries/{id} → détail identique
+RÉSULTAT ATTENDU : ✓ conforme au calcul exact de Point 8 §8.6
+```
+
+Preuve : `tests/test_zylo_liquid_deliveries.py::test_delivery_detection_and_read_full_scenario`
++ rejoué contre serveur de développement réel (curl, endpoint 10).
 
 Aucun scénario métier de bout en bout (livraison, fuite) n'est encore
 implémenté à ce stade — les endpoints 1 et 2 sont du référentiel pur, sans
@@ -355,3 +406,4 @@ mesures réelles dans `TankMeasurement`.
 | 7 | `/tanks/{id}/current-state`, `/stations/{id}/current-state` (GET) | ✓ (2 algorithmes, 8 tests) | ✓ (2 endpoints, tous cas) | N/A | **VALIDÉ** |
 | 8 | `/tanks/{id}/measurements` (GET) | ✓ (réutilisé) | ✓ (1 endpoint, tous cas) | N/A | **VALIDÉ** |
 | 9 | `/network/summary` (GET) | ✓ (réutilisé) | ✓ (1 endpoint, tous cas) | N/A | **VALIDÉ** |
+| 10 | `/deliveries` (GET) | ✓ (4 tests) | ✓ (2 endpoints, tous cas) | ✓ (scénario complet) | **VALIDÉ** |

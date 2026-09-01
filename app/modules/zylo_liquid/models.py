@@ -346,3 +346,28 @@ class TankCalibrationPoint(UUIDPrimaryKeyMixin, Base):
     )
     heightMm: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     volumeLiters: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
+
+
+class DeliveryDetected(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Livraison détectée automatiquement (Point 2 §3.3, Point 8 §8.3) —
+    modèle confirmé absent en Phase 1 (Point 2 §7 "Modèles manquants"),
+    créé à la construction de l'endpoint 10 (issue #41). Alimentée par un
+    traitement de fond (détection sur l'historique des mesures) — aucun
+    endpoint de création manuelle n'existe (contrat explicite)."""
+
+    __tablename__ = "zyloLiquidDeliveryDetected"
+    __table_args__ = (
+        UniqueConstraint("tankId", "startTime", name="uq_zlDeliveryDetected_tank_start"),
+        {"comment": "Livraison détectée automatiquement par l'algorithme de Point 8 §8.3 — jamais créée manuellement."},
+    )
+
+    tankId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    startTime: Mapped[datetime] = mapped_column(nullable=False, index=True)
+    startHeightMm: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    startVolumeLiters: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
+    endTime: Mapped[datetime] = mapped_column(nullable=False)
+    endHeightMm: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    endVolumeLiters: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
+    volumeLiters: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)

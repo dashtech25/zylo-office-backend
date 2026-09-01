@@ -18,3 +18,5 @@ TANK_CALIBRATION_READ = "zyloLiquid.tankCalibration.read"
 TANK_CALIBRATION_MANAGE = "zyloLiquid.tankCalibration.manage"
 
 HOLYKELL_ACCOUNT_READ = "zyloLiquid.holykellAccount.read"
+
+DELIVERY_READ = "zyloLiquid.delivery.read"

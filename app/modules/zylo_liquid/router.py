@@ -9,6 +9,7 @@ from app.core.database import get_db
 from app.modules.zylo_liquid import service
 from app.modules.zylo_liquid.models import FuelProduct, HolykellAccount, Station, Tank, TankSensorMapping
 from app.modules.zylo_liquid.permissions import (
+    DELIVERY_READ,
     FUEL_PRODUCT_MANAGE,
     FUEL_PRODUCT_READ,
     HOLYKELL_ACCOUNT_READ,
@@ -26,6 +27,7 @@ from app.modules.zylo_liquid.schemas import (
     CreateStationRequest,
     CreateTankRequest,
     CreateTankSensorMappingRequest,
+    DeliveryDetectedResponse,
     FuelProductResponse,
     HolykellAccountSyncStatusResponse,
     NetworkSummaryResponse,
@@ -371,6 +373,36 @@ async def get_network_summary(
     db: AsyncSession = Depends(get_db),
 ) -> NetworkSummaryResponse:
     return await service.get_network_summary(db, organization_id, fromDate, toDate)
+
+
+@router.get(
+    "/deliveries",
+    response_model=Page[DeliveryDetectedResponse],
+    dependencies=[Depends(require_permission(DELIVERY_READ))],
+)
+async def list_deliveries(
+    pagination: PaginationParams = Depends(),
+    stationId: uuid.UUID | None = None,
+    tankId: uuid.UUID | None = None,
+    fromDate: datetime | None = None,
+    toDate: datetime | None = None,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    return await service.list_deliveries(db, organization_id, pagination, stationId, tankId, fromDate, toDate)
+
+
+@router.get(
+    "/deliveries/{delivery_id}",
+    response_model=DeliveryDetectedResponse,
+    dependencies=[Depends(require_permission(DELIVERY_READ))],
+)
+async def get_delivery(
+    delivery_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> DeliveryDetectedResponse:
+    return await service.get_delivery(db, organization_id, delivery_id)
 
 
 @router.get(

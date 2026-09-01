@@ -4,6 +4,8 @@ from app.modules.zylo_liquid.permissions import (
     ALERT_READ,
     DELIVERY_READ,
     LEAK_EVENT_READ,
+    PRICE_HISTORY_CREATE,
+    PRICE_HISTORY_READ,
     FUEL_PRODUCT_MANAGE,
     FUEL_PRODUCT_READ,
     STATION_MANAGE,
@@ -38,6 +40,8 @@ KNOWN_PERMISSIONS = [
     (LEAK_EVENT_READ, "Consulter les événements de fuite détectés."),
     (ALERT_READ, "Consulter les alertes."),
     (ALERT_MANAGE, "Résoudre une alerte."),
+    (PRICE_HISTORY_READ, "Consulter l'historique des prix."),
+    (PRICE_HISTORY_CREATE, "Enregistrer un changement réel de prix ou corriger un prix historique."),
 ]
 
 

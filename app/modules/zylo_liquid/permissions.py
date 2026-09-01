@@ -25,3 +25,11 @@ LEAK_EVENT_READ = "zyloLiquid.leakEvent.read"
 
 ALERT_READ = "zyloLiquid.alert.read"
 ALERT_MANAGE = "zyloLiquid.alert.manage"
+
+PRICE_HISTORY_READ = "zyloLiquid.priceHistory.read"
+# La correction (PATCH) exige la même permission que la création (POST) —
+# qui peut corriger un prix historique déjà écoulé n'est pas tranché
+# (niveau_1_base_de_donnees_et_monetisation.md §27, Point 2 §7.4) ; en
+# attendant, option la plus restrictive par défaut, jamais une permission
+# distincte plus permissive par supposition.
+PRICE_HISTORY_CREATE = "zyloLiquid.priceHistory.create"

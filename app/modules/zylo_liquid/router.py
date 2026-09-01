@@ -6,6 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.security import get_current_user
+from app.identity.models import User
 from app.modules.zylo_liquid import service
 from app.modules.zylo_liquid.models import FuelProduct, HolykellAccount, Station, Tank, TankSensorMapping
 from app.modules.zylo_liquid.permissions import (
@@ -16,6 +18,8 @@ from app.modules.zylo_liquid.permissions import (
     FUEL_PRODUCT_READ,
     HOLYKELL_ACCOUNT_READ,
     LEAK_EVENT_READ,
+    PRICE_HISTORY_CREATE,
+    PRICE_HISTORY_READ,
     STATION_MANAGE,
     STATION_READ,
     TANK_CALIBRATION_MANAGE,
@@ -31,10 +35,13 @@ from app.modules.zylo_liquid.schemas import (
     CreateTankRequest,
     CreateTankSensorMappingRequest,
     AlertResponse,
+    CreatePriceHistoryRequest,
     DeliveryDetectedResponse,
     FuelProductResponse,
     LeakEventResponse,
+    PriceHistoryResponse,
     ResolveAlertRequest,
+    UpdatePriceHistoryRequest,
     HolykellAccountSyncStatusResponse,
     NetworkSummaryResponse,
     ReplaceTankCalibrationPointsRequest,
@@ -499,6 +506,65 @@ async def resolve_alert(
     db: AsyncSession = Depends(get_db),
 ) -> AlertResponse:
     return await service.resolve_alert(db, organization_id, alert_id, data.resolutionNote)
+
+
+@router.post(
+    "/prices",
+    response_model=PriceHistoryResponse,
+    status_code=201,
+    dependencies=[Depends(require_permission(PRICE_HISTORY_CREATE))],
+)
+async def create_price_history(
+    data: CreatePriceHistoryRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> PriceHistoryResponse:
+    return await service.create_price_history(db, organization_id, current_user.id, data)
+
+
+@router.get(
+    "/prices",
+    response_model=Page[PriceHistoryResponse],
+    dependencies=[Depends(require_permission(PRICE_HISTORY_READ))],
+)
+async def list_price_history(
+    pagination: PaginationParams = Depends(),
+    stationId: uuid.UUID | None = None,
+    fuelProductId: uuid.UUID | None = None,
+    fromDate: datetime | None = None,
+    toDate: datetime | None = None,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    return await service.list_price_history(db, organization_id, pagination, stationId, fuelProductId, fromDate, toDate)
+
+
+@router.get(
+    "/prices/{price_id}",
+    response_model=PriceHistoryResponse,
+    dependencies=[Depends(require_permission(PRICE_HISTORY_READ))],
+)
+async def get_price_history(
+    price_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> PriceHistoryResponse:
+    return await service.get_price_history(db, organization_id, price_id)
+
+
+@router.patch(
+    "/prices/{price_id}",
+    response_model=PriceHistoryResponse,
+    dependencies=[Depends(require_permission(PRICE_HISTORY_CREATE))],
+)
+async def update_price_history(
+    price_id: uuid.UUID,
+    data: UpdatePriceHistoryRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> PriceHistoryResponse:
+    return await service.update_price_history(db, organization_id, price_id, data)
 
 
 @router.get(

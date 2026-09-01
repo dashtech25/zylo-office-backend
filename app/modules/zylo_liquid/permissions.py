@@ -7,3 +7,6 @@ FUEL_PRODUCT_MANAGE = "zyloLiquid.fuelProduct.manage"
 
 STATION_READ = "zyloLiquid.station.read"
 STATION_MANAGE = "zyloLiquid.station.manage"
+
+TANK_READ = "zyloLiquid.tank.read"
+TANK_MANAGE = "zyloLiquid.tank.manage"

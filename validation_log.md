@@ -123,6 +123,44 @@ CAS 4 — autre tenant      → HTTP 404 station_not_found (jamais 403 — isola
 
 ---
 
+### POST /api/v1/zylo-liquid/tanks — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal (produit existant) | 201 + cuve créée | 201 + `{"fuelProductId":...,"heightAlarmMm":2800,...}` | ✓ |
+| Cas normal (produit créé à la volée) | 201 + cuve créée + nouveau `fuelProductId` | 201, produit confirmé existant ensuite via `GET /fuel-products/{id}` | ✓ |
+| Station introuvable | 404 `station_not_found` | 404 `station_not_found` | ✓ |
+| Sélection produit invalide (ni l'un ni l'autre, ou les deux) | 422 `fuel_product_selection_invalid` | 422 `fuel_product_selection_invalid` | ✓ |
+| Numéro de cuve déjà utilisé dans la station | 409 `tank_number_already_used` | 409 `tank_number_already_used` | ✓ |
+| Module inactif sur une autre organisation | 403 `module_inactive` | 403 `module_inactive` | ✓ |
+
+Algorithmes validés séparément : N/A (aucun calcul à ce stade — la
+conversion mm→litres n'intervient qu'à partir de l'endpoint 7).
+Preuve : `tests/test_zylo_liquid_tanks.py` (8 cas, pytest réel) + suite
+`curl` réelle contre serveur de développement (4 cas minimum ci-dessus).
+
+### GET /api/v1/zylo-liquid/tanks/{id} — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal | 200 + cuve | 200 + cuve | ✓ |
+| Introuvable | 404 `tank_not_found` | 404 `tank_not_found` | ✓ |
+| Autre tenant (cuve rattachée à une station d'une autre organisation) | 404 (jamais 403) | 404 `tank_not_found` | ✓ |
+
+### GET /api/v1/zylo-liquid/tanks — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal (filtre par station, pagination) | 200 + `{"data","meta"}` | 200, total=1 | ✓ |
+
+### PATCH /api/v1/zylo-liquid/tanks/{id} — VALIDÉ le 2026-09-01
+
+| Cas | Attendu | Obtenu | Statut |
+|-----|---------|--------|--------|
+| Cas normal (modification d'un seuil) | 200 + seuil modifié | 200, `heightAlarmMm` modifié | ✓ |
+
+---
+
 ## Niveau 3 — Tests d'intégration de flux
 
 Aucun scénario métier de bout en bout (livraison, fuite) n'est encore
@@ -140,3 +178,4 @@ mesures réelles dans `TankMeasurement`.
 |---|---|---|---|---|---|
 | 1 | `/fuel-products` (POST/GET/PATCH) | N/A | ✓ (4 endpoints, tous cas) | N/A | **VALIDÉ** |
 | 2 | `/stations` (POST/GET/PATCH/deactivate/reactivate) | N/A | ✓ (5 endpoints, tous cas) | N/A | **VALIDÉ** |
+| 3 | `/tanks` (POST/GET/PATCH) | N/A | ✓ (4 endpoints, tous cas) | N/A | **VALIDÉ** |

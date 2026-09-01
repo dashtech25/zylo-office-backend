@@ -282,9 +282,15 @@ class Tank(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     tankHeightMm: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     dataSourceType: Mapped[str] = mapped_column(String(10), nullable=False, default="console")
 
-    alertLowPercent: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=20.00)
-    alertCriticalPercent: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=10.00)
-    alertHighPercent: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=95.00)
+    # Seuils en millimètres, saisis par cuve — jamais une constante globale
+    # (exigence explicite de fonctionnalite-mvp.md §1.2, cohérente avec la
+    # comparaison H_net aux seuils du Point 13). Remplacent les 3 champs
+    # pourcentage (alertLowPercent/alertCriticalPercent/alertHighPercent) de
+    # la Phase 1, jamais exposés par aucun endpoint et incompatibles avec cet
+    # algorithme — constat fait à la construction de l'endpoint 3 (issue #27).
+    heightAlarmMm: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    heightAlertMm: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    lowAlarmMm: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     alertWaterMaxMm: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False, default=25.00)
 
     active: Mapped[bool] = mapped_column(nullable=False, default=True)

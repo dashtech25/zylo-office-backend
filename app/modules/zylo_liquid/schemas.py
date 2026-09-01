@@ -88,3 +88,53 @@ class StationResponse(BaseModel):
     activeTankCount: int = 0
 
     model_config = {"from_attributes": True}
+
+
+class CreateTankRequest(BaseModel):
+    stationId: uuid.UUID
+    tankNumber: int = Field(gt=0)
+    displayName: str = Field(min_length=1, max_length=100)
+    capacityLiters: float = Field(gt=0)
+    tankHeightMm: float = Field(gt=0)
+    fuelProductId: uuid.UUID | None = None
+    newFuelProductName: str | None = Field(default=None, min_length=1, max_length=100)
+    newFuelProductCode: str | None = Field(default=None, min_length=1, max_length=10)
+    heightAlarmMm: float = Field(gt=0)
+    heightAlertMm: float = Field(gt=0)
+    lowAlarmMm: float = Field(gt=0)
+    alertWaterMaxMm: float = 25.00
+    dataSourceType: str = "console"
+
+
+class UpdateTankRequest(BaseModel):
+    displayName: str | None = Field(default=None, min_length=1, max_length=100)
+    capacityLiters: float | None = Field(default=None, gt=0)
+    calibratedCapacityLiters: float | None = None
+    tankHeightMm: float | None = Field(default=None, gt=0)
+    heightAlarmMm: float | None = None
+    heightAlertMm: float | None = None
+    lowAlarmMm: float | None = None
+    alertWaterMaxMm: float | None = None
+    active: bool | None = None
+    notes: str | None = None
+
+
+class TankResponse(BaseModel):
+    id: uuid.UUID
+    stationId: uuid.UUID
+    fuelProductId: uuid.UUID
+    tankNumber: int
+    displayName: str
+    capacityLiters: float
+    calibratedCapacityLiters: float | None
+    tankHeightMm: float | None
+    dataSourceType: str
+    heightAlarmMm: float
+    heightAlertMm: float
+    lowAlarmMm: float
+    alertWaterMaxMm: float
+    active: bool
+    productSince: date | None
+    notes: str | None
+
+    model_config = {"from_attributes": True}

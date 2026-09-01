@@ -37,7 +37,33 @@ câblage dans `app/api/v1/router.py` (préfixe `/zylo-liquid`).
 Tests : `tests/test_zylo_liquid_fuel_products.py` (8 cas : création/lecture,
 pagination + isolation multi-tenant, code dupliqué → 409, modification,
 404, permission manquante → 403, en-tête organisation manquant → 422, non
-authentifié → 401).
+authentifié → 401). Preuve à 3 niveaux : `validation_log.md`.
+
+### Endpoint 2 — Stations (`stations`)
+
+Contrat : `Point 2 — Architecture API — Zylo Liquid MVP.md`, chapitre 1.1.
+
+| Méthode | Route | Permission |
+|---|---|---|
+| POST | `/api/v1/zylo-liquid/stations` | `zyloLiquid.station.manage` |
+| GET | `/api/v1/zylo-liquid/stations` | `zyloLiquid.station.read` |
+| GET | `/api/v1/zylo-liquid/stations/{id}` | `zyloLiquid.station.read` |
+| PATCH | `/api/v1/zylo-liquid/stations/{id}` | `zyloLiquid.station.manage` |
+| POST | `/api/v1/zylo-liquid/stations/{id}/deactivate` | `zyloLiquid.station.manage` |
+| POST | `/api/v1/zylo-liquid/stations/{id}/reactivate` | `zyloLiquid.station.manage` |
+
+Modèle `Station` déjà existant (Phase 1), déjà `organizationId`-scopé —
+aucune extension de modèle nécessaire (§9.3 confirmé : réutiliser tel quel).
+`GET /stations` inclut `activeTankCount` par station (compté via jointure
+sur `Tank.active`, conforme au contrat Point 2 §1.1 "nombre de cuves
+actives"). Statut modifiable uniquement via `deactivate`/`reactivate`,
+jamais via `PATCH` (garde-fou de transition d'état, Point 2 §1.1).
+
+Tests : `tests/test_zylo_liquid_stations.py` (8 cas). Ville inconnue du
+référentiel géo Core → `city_not_found` (422). Isolation tenant stricte :
+accès à une station d'une autre organisation → 404 `station_not_found`
+(jamais 403, pour ne rien révéler de l'existence des données d'un autre
+tenant, conforme à Point 2 §1.1). Preuve à 3 niveaux : `validation_log.md`.
 
 ## 3. Ce qui a été factorisé dans le Core (correction de portée, pas une extension du périmètre initial)
 
@@ -119,4 +145,20 @@ Liquid, mais découverte et corrigée à l'occasion de ce premier endpoint.
   code dupliqué → 409, introuvable → 404, permission manquante → 403 avant
   correction RBAC puis 201 après) contre le serveur de développement
   (`uvicorn`, base `zylo_office`).
+- Statut : **TERMINÉ**.
+
+## 9. Rapport final — Endpoint 2
+
+- Fichiers créés : `tests/test_zylo_liquid_stations.py`.
+- Fichiers modifiés : `app/modules/zylo_liquid/{schemas,service,router,permissions,seed}.py`,
+  `tests/conftest.py` (fixture `test_city`), cette documentation,
+  `validation_log.md` (à la racine du dépôt, nouveau — journal de preuve à 3
+  niveaux, méthodologie adoptée à cet endpoint et appliquée
+  rétroactivement à l'endpoint 1).
+- Migration : aucune (modèle `Station` déjà conforme depuis la Phase 1).
+- Tests : 30/30 verts (`python -m pytest`), y compris les 22 tests
+  préexistants (non-régression).
+- Vérification réelle : suite `curl` complète des 4 cas minimum imposés par
+  la méthodologie de validation (normal, introuvable, donnée invalide,
+  autre tenant) contre le serveur de développement.
 - Statut : **TERMINÉ**.

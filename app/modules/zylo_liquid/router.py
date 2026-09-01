@@ -6,9 +6,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.modules.zylo_liquid import service
-from app.modules.zylo_liquid.models import FuelProduct
-from app.modules.zylo_liquid.permissions import FUEL_PRODUCT_MANAGE, FUEL_PRODUCT_READ
-from app.modules.zylo_liquid.schemas import CreateFuelProductRequest, FuelProductResponse, UpdateFuelProductRequest
+from app.modules.zylo_liquid.models import FuelProduct, Station
+from app.modules.zylo_liquid.permissions import FUEL_PRODUCT_MANAGE, FUEL_PRODUCT_READ, STATION_MANAGE, STATION_READ
+from app.modules.zylo_liquid.schemas import (
+    CreateFuelProductRequest,
+    CreateStationRequest,
+    FuelProductResponse,
+    StationResponse,
+    UpdateFuelProductRequest,
+    UpdateStationRequest,
+)
 from app.modules_registry.service import require_module_active
 from app.rbac.service import get_current_organization_id, require_permission
 from app.shared.pagination import PaginationParams, paginate
@@ -70,3 +77,85 @@ async def update_fuel_product(
     db: AsyncSession = Depends(get_db),
 ) -> FuelProduct:
     return await service.update_fuel_product(db, organization_id, fuel_product_id, data)
+
+
+@router.post(
+    "/stations",
+    response_model=StationResponse,
+    status_code=201,
+    dependencies=[Depends(require_permission(STATION_MANAGE))],
+)
+async def create_station(
+    data: CreateStationRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Station:
+    return await service.create_station(db, organization_id, data)
+
+
+@router.get(
+    "/stations",
+    response_model=Page[StationResponse],
+    dependencies=[Depends(require_permission(STATION_READ))],
+)
+async def list_stations(
+    pagination: PaginationParams = Depends(),
+    cityId: uuid.UUID | None = None,
+    status: str | None = None,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    return await service.list_stations(db, organization_id, pagination, cityId, status)
+
+
+@router.get(
+    "/stations/{station_id}",
+    response_model=StationResponse,
+    dependencies=[Depends(require_permission(STATION_READ))],
+)
+async def get_station(
+    station_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Station:
+    return await service.get_station(db, organization_id, station_id)
+
+
+@router.patch(
+    "/stations/{station_id}",
+    response_model=StationResponse,
+    dependencies=[Depends(require_permission(STATION_MANAGE))],
+)
+async def update_station(
+    station_id: uuid.UUID,
+    data: UpdateStationRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Station:
+    return await service.update_station(db, organization_id, station_id, data)
+
+
+@router.post(
+    "/stations/{station_id}/deactivate",
+    response_model=StationResponse,
+    dependencies=[Depends(require_permission(STATION_MANAGE))],
+)
+async def deactivate_station(
+    station_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Station:
+    return await service.deactivate_station(db, organization_id, station_id)
+
+
+@router.post(
+    "/stations/{station_id}/reactivate",
+    response_model=StationResponse,
+    dependencies=[Depends(require_permission(STATION_MANAGE))],
+)
+async def reactivate_station(
+    station_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Station:
+    return await service.reactivate_station(db, organization_id, station_id)

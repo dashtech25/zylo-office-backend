@@ -1218,6 +1218,14 @@ async def get_network_snapshot(db: AsyncSession, organization_id: uuid.UUID, at)
     depuis l'historique `TankMeasurement` plutôt que depuis
     `HolykellDeviceRegistry.lastValue` (instant présent). Réutilise
     `interpolate_height_to_volume`, déjà validé à l'endpoint 7."""
+    # `at` peut arriver "aware" (ex. suffixe Z, ISO 8601 UTC standard envoyé
+    # par le frontend) alors que le reste du module compare uniquement des
+    # datetimes naïves en UTC (convention déjà établie, cf. `now` ci-dessous)
+    # — sans cette normalisation, la comparaison suivante lève TypeError
+    # dès qu'un client envoie un datetime avec fuseau explicite (bug réel,
+    # pas une adaptation de contrat : Point 2 §5.4 exige déjà l'UTC ISO 8601).
+    if at.tzinfo is not None:
+        at = at.astimezone(timezone.utc).replace(tzinfo=None)
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     if at > now:
         raise AppError(code="snapshot_date_in_future", message="La date demandée ne peut pas être dans le futur.", status_code=422)

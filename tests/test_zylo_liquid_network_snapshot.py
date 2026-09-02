@@ -95,6 +95,22 @@ async def test_snapshot_excludes_tank_without_measurement_before_date(
     assert body["totalVolumeLiters"] == 0  # jamais un zéro comptabilisé -> totaux vides
 
 
+async def test_snapshot_accepts_timezone_aware_iso8601_timestamp(
+    client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict
+):
+    """Un client standard envoie un instant UTC avec suffixe Z (ISO 8601,
+    exigé par Point 2 §5.4) — l'endpoint ne doit jamais planter en comparant
+    ce datetime "aware" au datetime naïf `now` interne (bug réel constaté :
+    TypeError: can't compare offset-naive and offset-aware datetimes)."""
+    headers = _headers(registered_user, zylo_liquid_organization)
+    _, tank_id, sensor_id = await _create_tank_with_sensor(client, headers, zylo_liquid_organization["id"], "SNAP-03")
+    await _insert_measurement(sensor_id, datetime(2026, 1, 1, 8, 0, 0), 500)  # -> 10000 L
+
+    res = await client.get("/api/v1/zylo-liquid/network/snapshot?at=2026-03-01T00:00:00Z", headers=headers)
+    assert res.status_code == 200, res.text
+    assert res.json()["totalVolumeLiters"] == 10000
+
+
 async def test_snapshot_future_date_is_rejected(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
     headers = _headers(registered_user, zylo_liquid_organization)
     future = (datetime.utcnow() + timedelta(days=365)).isoformat()

@@ -1330,11 +1330,21 @@ async def create_price_history(
         currency = await _resolve_station_default_currency(db, station)
         currency_id = currency.id
 
+    # `effectiveFrom` est une colonne TIMESTAMP WITHOUT TIME ZONE (comme le
+    # reste du schéma télémétrie/référentiel) — un datetime timezone-aware
+    # envoyé par un client réel (ISO 8601 avec "Z"/offset, cas normal de
+    # tout appelant HTTP) fait échouer la comparaison SQL avec asyncpg
+    # ("can't subtract offset-naive and offset-aware datetimes"). Normalisé
+    # en UTC naïf, même pattern déjà appliqué à `is_future` plus bas.
+    effective_from = data.effectiveFrom
+    if effective_from.tzinfo is not None:
+        effective_from = effective_from.astimezone(timezone.utc).replace(tzinfo=None)
+
     existing = await db.execute(
         select(PriceHistory).where(
             PriceHistory.stationId == data.stationId,
             PriceHistory.fuelProductId == data.fuelProductId,
-            PriceHistory.effectiveFrom == data.effectiveFrom,
+            PriceHistory.effectiveFrom == effective_from,
         )
     )
     if existing.scalar_one_or_none() is not None:
@@ -1350,7 +1360,7 @@ async def create_price_history(
         currencyId=currency_id,
         priceAmount=data.priceAmount,
         costAmount=data.costAmount,
-        effectiveFrom=data.effectiveFrom,
+        effectiveFrom=effective_from,
         changeReason=data.changeReason,
         createdBy=created_by,
     )

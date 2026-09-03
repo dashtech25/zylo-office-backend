@@ -89,6 +89,7 @@ class StationResponse(BaseModel):
     integrationDate: date | None
     notes: str | None
     activeTankCount: int = 0
+    exploitationType: str
 
     model_config = {"from_attributes": True}
 

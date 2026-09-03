@@ -6,3 +6,5 @@ CURRENCY_MANAGE = "shared.currency.manage"
 
 EXCHANGE_RATE_READ = "shared.exchangeRate.read"
 EXCHANGE_RATE_MANAGE = "shared.exchangeRate.manage"
+
+GEO_READ = "shared.geo.read"

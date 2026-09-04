@@ -1,11 +1,16 @@
 # Zylo Office — Backend
 
 Socle backend de Zylo Office, une plateforme ERP/CRM modulaire inspirée
-d'Odoo/Dolibarr. Cette première phase construit uniquement le **socle**
-(identité, organisations, rôles, permissions, modules, abonnements) — aucun
-module métier (CRM, Stock, zylo_liquid...) n'est encore implémenté. Voir
-`grande_phases.md` (racine du projet, hors ce dépôt) pour l'architecture
-complète et le détail des 15 phases.
+d'Odoo/Dolibarr : le **socle** (identité, organisations, rôles,
+permissions, registre de modules, abonnements) est complété par un premier
+**module métier complet, `zylo_liquid`**, qui sert de patron pour les
+futurs modules (CRM, Stock, Comptabilité, RH, POS). Voir `grande_phases.md`
+(racine du projet, hors ce dépôt) pour l'architecture complète et le détail
+des phases.
+
+> **⚠️ Avant toute modification de ce dépôt, lire `/CLAUDE.md`** (directive
+> d'architecture — core/shared jamais dépendants d'un module, convention
+> stricte de dossier pour tout module métier). C'est la règle qui prime.
 
 ## Stack
 
@@ -50,22 +55,31 @@ psql -d zylo_office_test -c "GRANT ALL ON SCHEMA public TO zylo_office;"
 
 ## Architecture
 
+Chaque dossier structurant a son propre `CLAUDE.md` avec la règle précise à
+respecter en y travaillant — cette section n'en est qu'un résumé.
+
 ```text
 app/
-├── core/              # config, DB engine, sécurité (JWT), logging, erreurs
-├── shared/            # pagination, schémas génériques, mixins de modèles
-├── auth/              # login/register/refresh/logout
-├── identity/          # Organization, User, OrganizationUser
-├── rbac/              # Role, Permission, require_permission()
-├── modules_registry/  # registre de modules + activation par organisation
-├── billing/           # plan/subscription/invoice (pas de paiement réel)
-└── api/v1/            # agrégation des routers
+├── core/                    # config, DB engine, sécurité (JWT), logging, erreurs — jamais spécifique à un module
+├── shared/                  # pagination, schémas génériques, devises, géo — réutilisable par tous les modules
+├── auth/                    # login/register/refresh/logout
+├── identity/                # Organization, User, OrganizationUser
+├── rbac/                    # Role, Permission, require_permission()
+├── modules_registry/        # registre de modules + activation par organisation
+├── billing/                 # plan/subscription/invoice (pas de paiement réel)
+├── modules/
+│   └── zylo_liquid/         # premier module métier complet — patron pour les futurs modules
+│       ├── models.py, schemas.py, service.py, router.py, permissions.py
+│       └── algorithms.py, seed.py, dev_seed.py
+└── api/v1/                  # agrégation des routers, versionnage REST
 ```
 
-Chaque domaine du socle suit la même convention interne :
-`models.py`, `schemas.py`, `service.py`, `router.py`, `permissions.py` — un
-futur module métier (ex: `zylo_liquid`) reprendra exactement cette structure
-sous `app/modules/`.
+Chaque domaine (socle ou module métier) suit la même convention interne :
+`models.py`, `schemas.py`, `service.py`, `router.py`, `permissions.py`. Un
+futur module métier (CRM, Stock...) reprend cette structure à l'identique
+sous `app/modules/<domaine>/` — voir `app/modules/CLAUDE.md`.
+`core/`/`shared/` ne dépendent jamais d'un module métier (sens unique :
+modules → shared/core, jamais l'inverse).
 
 ## Sauvegarde
 

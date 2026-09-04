@@ -14,7 +14,7 @@ from app.identity.schemas import CreateOrganizationRequest
 from app.modules_registry.permissions import MODULE_MANAGE
 from app.rbac.models import Role, RolePermission, UserRole
 from app.rbac.service import get_or_create_permission
-from app.shared.permissions import CURRENCY_MANAGE, CURRENCY_READ, EXCHANGE_RATE_MANAGE, EXCHANGE_RATE_READ
+from app.shared.permissions import CURRENCY_MANAGE, CURRENCY_READ, EXCHANGE_RATE_MANAGE, EXCHANGE_RATE_READ, GEO_READ
 
 # Permissions d'administration du socle accordées automatiquement au rôle
 # owner à la création d'une organisation — jamais les permissions d'un futur
@@ -32,6 +32,7 @@ OWNER_DEFAULT_PERMISSIONS = [
     (CURRENCY_MANAGE, "shared", "Créer/modifier le référentiel des devises."),
     (EXCHANGE_RATE_READ, "shared", "Consulter les taux de change."),
     (EXCHANGE_RATE_MANAGE, "shared", "Enregistrer un nouveau taux de change."),
+    (GEO_READ, "shared", "Consulter le référentiel géographique (pays/régions/villes)."),
 ]
 
 

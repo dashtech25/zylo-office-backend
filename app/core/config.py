@@ -6,11 +6,16 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "Zylo Office Backend"
     ENVIRONMENT: str = "development"
-    PORT: int = 3007
+    PORT: int = 3002
     CORS_ORIGINS: list[str] = [
-        "http://localhost:3006",
-        "http://127.0.0.1:3006",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
     ]
+
+    DATABASE_URL: str = "postgresql+asyncpg://zylo_office:changeme@localhost:5432/zylo_office"
+    JWT_SECRET: str = "changeme-generate-a-real-random-secret"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
 
 settings = Settings()

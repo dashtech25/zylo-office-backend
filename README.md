@@ -31,11 +31,11 @@ cp .env.example .env   # puis renseigner DATABASE_URL et JWT_SECRET réels
 
 .venv/bin/alembic upgrade head
 
-.venv/bin/uvicorn app.main:app --reload --port 3007
+.venv/bin/uvicorn app.main:app --reload --port 3002
 ```
 
-Le serveur écoute sur `http://localhost:3007`. Documentation interactive :
-`http://localhost:3007/docs`.
+Le serveur écoute sur `http://localhost:3002`. Documentation interactive :
+`http://localhost:3002/docs`.
 
 ### Base de données locale
 

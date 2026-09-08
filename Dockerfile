@@ -10,6 +10,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
-EXPOSE 3007
+EXPOSE 3002
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3007"]
+HEALTHCHECK \
+    --interval=30s \
+    --timeout=5s \
+    --start-period=10s \
+    --retries=5 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:3002/api/v1/health')" || exit 1
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3002"]

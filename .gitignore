@@ -16,6 +16,7 @@ dist/
 .coverage
 htmlcov/
 .env
+.env.production
 .env.*.local
 !.env.example
 .DS_Store

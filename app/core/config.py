@@ -22,5 +22,19 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
+    # Stockage documentaire (mission « vente-maintenant-reglementation »,
+    # Phase 5 §2 : MinIO/S3-compatible retenu en cible ; "local" par défaut
+    # en développement — même contrat d'interface (app/shared/storage.py),
+    # jamais d'accès direct dispersé dans les modules métier.
+    STORAGE_BACKEND: str = "local"
+    STORAGE_LOCAL_ROOT: str = "./var/storage"
+    STORAGE_SIGNED_URL_SECRET: str = "changeme-generate-a-real-random-secret"
+    STORAGE_SIGNED_URL_TTL_SECONDS: int = 900
+    STORAGE_S3_ENDPOINT_URL: str | None = None
+    STORAGE_S3_BUCKET: str = "zylo-office-documents"
+    STORAGE_S3_ACCESS_KEY: str | None = None
+    STORAGE_S3_SECRET_KEY: str | None = None
+    STORAGE_S3_REGION: str = "us-east-1"
+
 
 settings = Settings()

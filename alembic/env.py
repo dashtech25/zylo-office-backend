@@ -13,6 +13,7 @@ from app.core.database import Base
 # Chaque module (socle ou futur) doit importer ses modèles ici pour que
 # `alembic revision --autogenerate` les détecte — l'import seul suffit, aucun
 # appel de code n'est nécessaire, l'enregistrement se fait via Base.metadata.
+from app.audit import models as audit_models  # noqa: F401
 from app.auth import models as auth_models  # noqa: F401
 from app.billing import models as billing_models  # noqa: F401
 from app.identity import models as identity_models  # noqa: F401

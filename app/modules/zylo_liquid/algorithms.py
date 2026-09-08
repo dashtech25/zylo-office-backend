@@ -3,6 +3,39 @@ l'intérieur d'un endpoint, toujours appelés depuis ce module unique."""
 
 from datetime import timedelta
 
+# Constantes métier nommées (au lieu de littéraux répétés en valeur par
+# défaut) — permet à un endpoint de lecture seule (GET /system-defaults) de
+# les exposer au frontend sans les retaper, donc sans risque de divergence
+# entre ce qui est affiché et ce qui est réellement appliqué par ces
+# fonctions. Aucune de ces valeurs n'est configurable par organisation
+# aujourd'hui (Point 3 §10 : constantes validées, pas des réglages).
+LEAK_THRESHOLD_LPH = 0.38
+DELIVERY_RISE_THRESHOLD_MM = 50.0
+DELIVERY_STABILITY_DELTA_MM = 5.0
+DELIVERY_STABILIZATION_MINUTES = 15.0
+
+# Seuils du moteur de caisse (page_caisse.md §D.1/§K, cas C/D/E/F) — à la
+# différence des seuils de livraison ci-dessus, ceux-ci ne proviennent
+# d'aucun algorithme métier déjà validé en production : ce sont des valeurs
+# de démarrage prudentes, explicitement signalées comme à calibrer avec le
+# métier une fois de vraies données de vente observées (page_caisse.md,
+# priorité P1 « détection anomalie propre à la caisse »).
+CASH_NOISE_FLOOR_LITERS = 3.0
+CASH_MAX_PLAUSIBLE_RATE_LPH = 6000.0
+
+# Tolérances de rapprochement (processus-double-sources-verite, Phase 6 §6,
+# Phase 7 addendum §1) — défauts réseau, dérogeables par station via
+# `StationReconciliationSettings` (Phase 7 §1). Les valeurs par défaut
+# reprennent les tolérances du prototype validé par le commanditaire
+# (contrôle contradictoire ± 0,5 % du volume déclaré, fenêtre ± 2 h) —
+# décision actée avant la fusion de la page #/livraisons ; elles restent à
+# confirmer sur données réelles (même réserve que CASH_NOISE_FLOOR_LITERS).
+RECONCILIATION_DELIVERY_WINDOW_HOURS_DEFAULT = 2.0
+RECONCILIATION_DELIVERY_VOLUME_TOLERANCE_FIXED_LITERS_DEFAULT = 50.0
+RECONCILIATION_DELIVERY_VOLUME_TOLERANCE_PERCENT_DEFAULT = 0.5
+RECONCILIATION_GAUGING_HEIGHT_TOLERANCE_MM_DEFAULT = 10.0
+RECONCILIATION_QUALITY_CHECK_WINDOW_HOURS_DEFAULT = 1.0
+
 
 def interpolate_height_to_volume(calibration_points: list[tuple[float, float]], height_mm: float) -> float | None:
     """Interpolation linéaire hauteur -> volume entre les deux points de la
@@ -30,24 +63,24 @@ def interpolate_height_to_volume(calibration_points: list[tuple[float, float]], 
     return None  # inatteignable si les bornes ci-dessus sont correctes
 
 
-def detect_deliveries(
+def _scan_deliveries(
     measurements: list[tuple],
-    rise_threshold_mm: float = 50,
-    stability_delta_mm: float = 5,
-    stabilization_minutes: float = 15,
-) -> list[dict]:
-    """Détection de livraison (Point 8 §8.3, seuils exacts du code Odoo
-    audité cités en Point 3 §10 : hausse ≥ 50mm, stabilité < 5mm,
-    confirmation après 15 min — jamais les valeurs d'exemple génériques de
-    Point 8.6). `measurements` : liste de (measuredAt: datetime, heightMm:
-    float) triée chronologiquement. Retourne une liste de
-    {startTime, startHeightMm, endTime, endHeightMm} — la conversion en
-    volume est faite par l'appelant via `interpolate_height_to_volume`
-    (jamais dupliquée ici)."""
+    rise_threshold_mm: float,
+    stability_delta_mm: float,
+    stabilization_minutes: float,
+) -> tuple[list[dict], dict | None]:
+    """Cœur de l'algorithme de détection de livraison (Point 8 §8.3, seuils
+    exacts du code Odoo audité cités en Point 3 §10 : hausse ≥ 50mm,
+    stabilité < 5mm, confirmation après 15 min). Factorisé une seule fois
+    et réutilisé par `detect_deliveries` (livraisons confirmées) et
+    `detect_delivery_in_progress` (montée en cours, pas encore stabilisée)
+    — même état, même seuils, jamais deux implémentations qui pourraient
+    diverger. Retourne (événements confirmés, candidat encore ouvert à la
+    fin de la fenêtre ou None)."""
     if len(measurements) < 2:
-        return []
+        return [], None
 
-    events = []
+    events: list[dict] = []
     baseline_time, baseline_height = measurements[0]
     in_delivery = False
     start_time = start_height = None
@@ -70,7 +103,12 @@ def detect_deliveries(
             if h > peak_height:
                 peak_height = h
                 stabilization_start = None
-            elif abs(h - prev_h) < stability_delta_mm:
+            elif (peak_height - h) <= stability_delta_mm:
+                # Stabilisation évaluée par rapport au pic (pas seulement à
+                # la mesure précédente) : un palier proche du pic confirme
+                # la livraison ; un palier loin en dessous — ex. consommation
+                # normale après une fausse détection — ne doit jamais la
+                # confirmer (cause du bug des livraisons à volume négatif).
                 if stabilization_start is None:
                     stabilization_start = prev_t
                 elif (t - stabilization_start) >= timedelta(minutes=stabilization_minutes):
@@ -81,8 +119,50 @@ def detect_deliveries(
                     baseline_time, baseline_height = t, h
             else:
                 stabilization_start = None
+                if h < start_height:
+                    # Retombé sous le niveau de départ sans jamais s'être
+                    # stabilisé près du pic : ce n'était pas une livraison
+                    # (juste une consommation) — on abandonne le candidat
+                    # sans enregistrer d'événement.
+                    in_delivery = False
+                    baseline_time, baseline_height = t, h
 
+    open_candidate = None
+    if in_delivery:
+        last_time, last_height = measurements[-1]
+        open_candidate = {"startTime": start_time, "startHeightMm": start_height, "currentTime": last_time, "currentHeightMm": last_height}
+
+    return events, open_candidate
+
+
+def detect_deliveries(
+    measurements: list[tuple],
+    rise_threshold_mm: float = DELIVERY_RISE_THRESHOLD_MM,
+    stability_delta_mm: float = DELIVERY_STABILITY_DELTA_MM,
+    stabilization_minutes: float = DELIVERY_STABILIZATION_MINUTES,
+) -> list[dict]:
+    """`measurements` : liste de (measuredAt: datetime, heightMm: float)
+    triée chronologiquement. Retourne une liste de {startTime,
+    startHeightMm, endTime, endHeightMm} — la conversion en volume est
+    faite par l'appelant via `interpolate_height_to_volume` (jamais
+    dupliquée ici)."""
+    events, _ = _scan_deliveries(measurements, rise_threshold_mm, stability_delta_mm, stabilization_minutes)
     return events
+
+
+def detect_delivery_in_progress(
+    measurements: list[tuple],
+    rise_threshold_mm: float = DELIVERY_RISE_THRESHOLD_MM,
+    stability_delta_mm: float = DELIVERY_STABILITY_DELTA_MM,
+    stabilization_minutes: float = DELIVERY_STABILIZATION_MINUTES,
+) -> dict | None:
+    """Montée en cours, pas encore confirmée (hauteur encore en train de
+    monter, ou stabilisation trop récente pour conclure) — jamais persisté
+    en base, recalculé à chaque appel depuis les mesures récentes. Retourne
+    {startTime, startHeightMm, currentTime, currentHeightMm} ou None si
+    aucune hausse en cours sur la fenêtre fournie."""
+    _, open_candidate = _scan_deliveries(measurements, rise_threshold_mm, stability_delta_mm, stabilization_minutes)
+    return open_candidate
 
 
 def compute_net_corrected_volume(
@@ -145,7 +225,7 @@ def evaluate_threshold_alarms(
     return triggered
 
 
-def is_leak_detected(rate_lph: float, threshold_lph: float = 0.38) -> bool:
+def is_leak_detected(rate_lph: float, threshold_lph: float = LEAK_THRESHOLD_LPH) -> bool:
     """Seuil binaire 0.38 L/H (standard EPA, Point 10 §10.4) — strictement
     supérieur, jamais égal (Point 10 §10.3 : « Si Taux_fuite > 0.38 L/H »)."""
     return rate_lph > threshold_lph
@@ -157,3 +237,36 @@ def correct_volume_to_reference_temperature(
     """Correction volumétrique à 15°C (nouveau-zylo-liquid/Point 5 §5.2) :
     V_15 = V_mesuré × [1 - alpha × (T_mesurée - 15)]."""
     return measured_volume_liters * (1 - thermal_expansion_coefficient * (measured_temperature_c - 15))
+
+
+def classify_tank_variation(
+    volume_start_liters: float,
+    volume_end_liters: float,
+    duration_hours: float,
+    noise_floor_liters: float = CASH_NOISE_FLOOR_LITERS,
+    max_plausible_rate_lph: float = CASH_MAX_PLAUSIBLE_RATE_LPH,
+) -> tuple[str, float]:
+    """Classe une variation de volume observée sur un segment hors-livraison
+    (page_caisse.md §D.1, cas B/C/D/E/F) et retourne (type, volumeSoldLiters).
+
+    - decline ≤ 0 (hauteur stable ou en légère hausse dans le bruit de
+      mesure) -> "stable", volume 0.
+    - decline > plancher de bruit et débit physiquement plausible -> "sale".
+    - hausse franche sans livraison détectée qui la couvre -> "anomaly_unexplained_rise",
+      jamais comptée comme une vente négative.
+    - baisse dont le débit dépasse le plafond plausible -> "anomaly_extreme_variation",
+      exclue du total automatique (seuils non calibrés avec le métier, voir
+      constantes CASH_NOISE_FLOOR_LITERS / CASH_MAX_PLAUSIBLE_RATE_LPH)."""
+    decline = volume_start_liters - volume_end_liters
+
+    if decline <= noise_floor_liters and -decline <= noise_floor_liters:
+        return "stable", 0.0
+
+    if decline < 0:
+        return "anomaly_unexplained_rise", 0.0
+
+    rate_lph = decline / duration_hours if duration_hours > 0 else float("inf")
+    if rate_lph > max_plausible_rate_lph:
+        return "anomaly_extreme_variation", 0.0
+
+    return "sale", decline

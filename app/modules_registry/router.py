@@ -5,6 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.security import get_current_user
+from app.identity.models import User
 from app.identity.permissions import ORGANIZATION_MANAGE
 from app.identity.service import require_organization_member
 from app.modules_registry import service
@@ -45,9 +47,12 @@ async def list_organization_modules(
     dependencies=[Depends(require_permission(MODULE_MANAGE))],
 )
 async def activate(
-    organization_id: uuid.UUID, data: ActivateModuleRequest, db: AsyncSession = Depends(get_db)
+    organization_id: uuid.UUID,
+    data: ActivateModuleRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> OrganizationModule:
-    return await service.activate_module(db, organization_id, data.moduleCode)
+    return await service.activate_module(db, organization_id, current_user.id, data.moduleCode)
 
 
 @router.post(
@@ -56,9 +61,12 @@ async def activate(
     dependencies=[Depends(require_permission(MODULE_MANAGE))],
 )
 async def deactivate(
-    organization_id: uuid.UUID, data: ActivateModuleRequest, db: AsyncSession = Depends(get_db)
+    organization_id: uuid.UUID,
+    data: ActivateModuleRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> OrganizationModule:
-    return await service.deactivate_module(db, organization_id, data.moduleCode)
+    return await service.deactivate_module(db, organization_id, current_user.id, data.moduleCode)
 
 
 @router.get(

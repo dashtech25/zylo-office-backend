@@ -1,7 +1,11 @@
 import uuid
+from datetime import datetime
 
 from httpx import AsyncClient
+from sqlalchemy import update
 
+from app.core.database import AsyncSessionLocal
+from app.modules.zylo_liquid.models import HolykellDeviceRegistry
 from tests.conftest import register_holykell_sensor
 
 
@@ -155,6 +159,75 @@ async def test_list_tank_sensor_mappings(client: AsyncClient, registered_user: d
     res = await client.get(f"/api/v1/zylo-liquid/tank-sensor-mappings?tankId={tank_id}", headers=headers)
     assert res.status_code == 200
     assert res.json()["meta"]["total"] == 1
+
+
+async def test_create_tank_sensor_mapping_response_has_no_live_state(
+    client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict
+):
+    """La réponse de création porte la vérité *déclarée* du mapping, jamais
+    l'état *mesuré* du sensor (qui appartient au registre Holykell, couche
+    télémétrie). `live` est donc null ici, renseigné uniquement par la
+    liste."""
+    headers = _headers(registered_user, zylo_liquid_organization)
+    tank_id = await _create_tank(client, headers, "TSM-07")
+    serial = f"XM4444444HAR{uuid.uuid4().hex[:6]}"
+    await register_holykell_sensor(zylo_liquid_organization["id"], serial, "product_level")
+
+    res = await client.post(
+        "/api/v1/zylo-liquid/tank-sensor-mappings",
+        json={"tankId": tank_id, "hkSerialNumber": serial, "measurementType": "product_level"},
+        headers=headers,
+    )
+    assert res.status_code == 201, res.text
+    assert res.json()["live"] is None
+
+
+async def test_list_tank_sensor_mappings_exposes_live_registry_state(
+    client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict
+):
+    """La liste enrichit chaque mapping avec le dernier état *mesuré* du
+    sensor (registre Holykell : dernière valeur, dernière visibilité, statut
+    remonté, unité, cycle) — la double vérité déclaré/mesuré sur une seule
+    réponse. Sans registre connu, `live` reste null, jamais un état
+    inventé."""
+    headers = _headers(registered_user, zylo_liquid_organization)
+    tank_id = await _create_tank(client, headers, "TSM-08")
+    serial = f"XM5555555HAR{uuid.uuid4().hex[:6]}"
+    sensor_id = await register_holykell_sensor(zylo_liquid_organization["id"], serial, "product_level")
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            update(HolykellDeviceRegistry)
+            .where(HolykellDeviceRegistry.hkSensorId == sensor_id)
+            .values(
+                lastValue=1234.5,
+                lastValueAt=datetime(2026, 8, 1, 10, 0, 0),
+                hkLastStatus=1,
+                hkLastSeenAt=datetime(2026, 8, 1, 10, 0, 5),
+                hkUnit="mm",
+                hkReportCycleSec=30,
+            )
+        )
+        await db.commit()
+
+    await client.post(
+        "/api/v1/zylo-liquid/tank-sensor-mappings",
+        json={"tankId": tank_id, "hkSerialNumber": serial, "measurementType": "product_level"},
+        headers=headers,
+    )
+    res = await client.get(f"/api/v1/zylo-liquid/tank-sensor-mappings?tankId={tank_id}", headers=headers)
+    assert res.status_code == 200
+    row = res.json()["data"][0]
+    assert row["hkSensorId"] == sensor_id
+    live = row["live"]
+    assert live is not None
+    assert live["hkSerialNumber"] == serial
+    assert live["lastValue"] == 1234.5
+    assert live["lastValueAt"] == "2026-08-01T10:00:00"
+    assert live["hkLastStatus"] == 1
+    assert live["hkLastSeenAt"] == "2026-08-01T10:00:05"
+    assert live["hkUnit"] == "mm"
+    assert live["hkReportCycleSec"] == 30
 
 
 async def test_tank_sensor_mapping_not_found(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):

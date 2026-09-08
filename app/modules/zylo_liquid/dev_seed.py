@@ -120,7 +120,7 @@ async def seed_demo_network(
         if station_code in stations:
             continue
         stations[station_code] = await service.create_station(
-            db, organization_id,
+            db, organization_id, owner_user_id,
             CreateStationRequest(name=station_name, code=station_code, cityId=city.id, address=f"{station_name}, Douala", phone="+237600000000"),
         )
 
@@ -147,7 +147,7 @@ async def seed_demo_network(
         station = stations[station_code]
         product = fuel_products[product_key]
         tank = await service.create_tank(
-            db, organization_id,
+            db, organization_id, owner_user_id,
             CreateTankRequest(
                 stationId=station.id, tankNumber=tank_number, displayName=f"Cuve {tank_number}",
                 capacityLiters=capacity, tankHeightMm=TANK_HEIGHT_MM, fuelProductId=product.id,

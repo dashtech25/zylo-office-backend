@@ -4,15 +4,18 @@ from fastapi import Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.permissions import AUDIT_LOG_VIEW
+from app.audit.service import record_audit_event
 from app.billing.permissions import SUBSCRIPTION_MANAGE
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.security import get_current_user
 from app.identity.models import Organization, OrganizationUser, User
 from app.identity.permissions import ORGANIZATION_MANAGE
-from app.identity.schemas import CreateOrganizationRequest
+from app.identity.schemas import CreateOrganizationRequest, UpdateOrganizationRequest
 from app.modules_registry.permissions import MODULE_MANAGE
 from app.rbac.models import Role, RolePermission, UserRole
+from app.rbac.permissions import GRANT_MANAGE, ROLE_MANAGE
 from app.rbac.service import get_or_create_permission
 from app.shared.permissions import CURRENCY_MANAGE, CURRENCY_READ, EXCHANGE_RATE_MANAGE, EXCHANGE_RATE_READ, GEO_READ
 
@@ -27,6 +30,9 @@ from app.shared.permissions import CURRENCY_MANAGE, CURRENCY_READ, EXCHANGE_RATE
 OWNER_DEFAULT_PERMISSIONS = [
     (ORGANIZATION_MANAGE, "identity", "Gérer l'organisation (membres, rôles, paramètres)."),
     (MODULE_MANAGE, "modules_registry", "Activer/désactiver les modules pour l'organisation."),
+    (ROLE_MANAGE, "rbac", "Créer des rôles et modifier leurs permissions, attribuer/retirer un rôle."),
+    (GRANT_MANAGE, "rbac", "Accorder ou refuser une permission individuelle, révoquer un grant."),
+    (AUDIT_LOG_VIEW, "audit", "Consulter le journal d'audit."),
     (SUBSCRIPTION_MANAGE, "billing", "Gérer les abonnements de l'organisation."),
     (CURRENCY_READ, "shared", "Consulter le référentiel des devises."),
     (CURRENCY_MANAGE, "shared", "Créer/modifier le référentiel des devises."),
@@ -63,6 +69,32 @@ async def create_organization(db: AsyncSession, owner: User, data: CreateOrganiz
     return organization
 
 
+async def backfill_owner_default_permissions(db: AsyncSession) -> int:
+    """Idempotent — répare les organisations créées avant l'ajout d'une
+    entrée à `OWNER_DEFAULT_PERMISSIONS` (ex. `ROLE_MANAGE`/`GRANT_MANAGE`/
+    `AUDIT_LOG_VIEW`, ajoutées en cours de développement du socle RBAC :
+    seules les organisations créées APRÈS ce commit recevaient ces
+    permissions via `create_organization`). Ne touche jamais aux rôles
+    personnalisés ni aux grants individuels — uniquement le rôle `owner`.
+    Retourne le nombre de lignes `RolePermission` effectivement ajoutées."""
+    owner_roles = (await db.execute(select(Role).where(Role.code == "owner"))).scalars().all()
+    added = 0
+    for owner_role in owner_roles:
+        existing_permission_ids = set(
+            (await db.execute(select(RolePermission.permissionId).where(RolePermission.roleId == owner_role.id)))
+            .scalars()
+            .all()
+        )
+        for code, module_code, description in OWNER_DEFAULT_PERMISSIONS:
+            permission = await get_or_create_permission(db, code, module_code, description)
+            if permission.id not in existing_permission_ids:
+                db.add(RolePermission(roleId=owner_role.id, permissionId=permission.id))
+                existing_permission_ids.add(permission.id)
+                added += 1
+    await db.commit()
+    return added
+
+
 async def list_user_organizations(db: AsyncSession, user_id: uuid.UUID) -> list[Organization]:
     """Organisations auxquelles appartient l'utilisateur (Point App Launcher,
     frontend) — nécessaire pour que le frontend sache dans quelle
@@ -74,6 +106,33 @@ async def list_user_organizations(db: AsyncSession, user_id: uuid.UUID) -> list[
         .order_by(Organization.name)
     )
     return list(result.scalars().all())
+
+
+async def update_organization(
+    db: AsyncSession, organization_id: str, actor_user_id: uuid.UUID, data: UpdateOrganizationRequest
+) -> Organization:
+    """Seul `name` est modifiable — `Organization` (Core) n'a aucun autre
+    champ éditable (pas de logo/téléphone/email/langue/devise : voir l'audit
+    fait pour la page Paramètres Zylo Liquid, aucun de ces champs n'existe
+    dans le modèle). `slug` reste immuable (identifiant stable)."""
+    organization = await db.get(Organization, organization_id)
+    if organization is None:
+        raise AppError(code="organization_not_found", message="Organisation introuvable.", status_code=404)
+    before_name = organization.name
+    organization.name = data.name
+    await record_audit_event(
+        db,
+        organization.id,
+        actor_user_id,
+        action="identity.organization.update",
+        entity_type="Organization",
+        entity_id=organization.id,
+        summary=f"Modification de l'organisation ({before_name} → {data.name})",
+        changes={"name": {"before": before_name, "after": data.name}},
+    )
+    await db.commit()
+    await db.refresh(organization)
+    return organization
 
 
 async def require_organization_member(

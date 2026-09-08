@@ -91,3 +91,55 @@ async def test_list_organization_modules_is_forbidden_for_a_non_member(client: A
     res = await client.get(f"/api/v1/modules/organizations/{organization['id']}", headers=headers)
     assert res.status_code == 403
     assert res.json()["error"]["code"] == "not_organization_member"
+
+
+async def test_backfill_grants_permissions_added_after_module_activation(client: AsyncClient, registered_user: dict, organization: dict):
+    """Bug réel découvert par un test E2E navigateur (processus-double-
+    sources-verite, Phase 8) : une organisation qui avait activé zylo_liquid
+    AVANT l'ajout de nouvelles permissions au module (ex. la couche
+    déclarative) ne les recevait jamais — `grant_module_permissions_to_owner`
+    ne s'exécute qu'à l'activation, jamais rejoué après coup. Vérifie que le
+    backfill comble ce manque, sans toucher aux permissions déjà accordées."""
+    from app.core.database import AsyncSessionLocal
+    from app.identity.models import User
+    from app.modules_registry.service import backfill_active_module_permissions_for_owners
+    from app.rbac.models import Permission, Role, RolePermission
+    from app.rbac.service import get_or_create_permission
+    from sqlalchemy import select
+
+    headers = await _headers(registered_user, organization)
+    org_id = organization["id"]
+    await client.post(f"/api/v1/modules/organizations/{org_id}/activate", json={"moduleCode": "zylo_liquid"}, headers=headers)
+
+    # Simule une permission ajoutée au module APRÈS cette activation (comme
+    # les permissions de la Phase 8, ajoutées longtemps après l'activation
+    # initiale de zylo_liquid par des organisations déjà existantes).
+    fake_permission_code = f"zyloLiquid.testFutureFeature.{uuid.uuid4().hex[:8]}"
+    async with AsyncSessionLocal() as db:
+        await get_or_create_permission(db, fake_permission_code, "zylo_liquid", "Permission de test ajoutée après coup.")
+        await db.commit()
+
+        user = (await db.execute(select(User).where(User.email == registered_user["email"]))).scalar_one()
+        owner_role = (await db.execute(select(Role).where(Role.organizationId == org_id, Role.code == "owner"))).scalar_one()
+        permission = (await db.execute(select(Permission).where(Permission.code == fake_permission_code))).scalar_one()
+
+        # Avant le backfill : le owner n'a pas cette permission (créée après son activation du module).
+        has_it_before = (
+            await db.execute(select(RolePermission).where(RolePermission.roleId == owner_role.id, RolePermission.permissionId == permission.id))
+        ).scalar_one_or_none()
+        assert has_it_before is None
+
+        await backfill_active_module_permissions_for_owners(db)
+
+        has_it_after = (
+            await db.execute(select(RolePermission).where(RolePermission.roleId == owner_role.id, RolePermission.permissionId == permission.id))
+        ).scalar_one_or_none()
+        assert has_it_after is not None
+
+    # Idempotent — un second passage ne doit ni échouer ni dupliquer.
+    async with AsyncSessionLocal() as db:
+        await backfill_active_module_permissions_for_owners(db)
+        count = (
+            await db.execute(select(RolePermission).where(RolePermission.roleId == owner_role.id, RolePermission.permissionId == permission.id))
+        ).scalars().all()
+        assert len(count) == 1

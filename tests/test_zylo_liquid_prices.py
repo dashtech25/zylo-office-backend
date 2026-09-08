@@ -18,20 +18,44 @@ def _random_currency_code() -> str:
 
 
 async def _create_currency(code: str) -> str:
+    # `currency.code` est limité à 3 caractères (ISO 4217) et la base de test
+    # est persistante entre les sessions : tirage renouvelé sur violation
+    # d'unicité (pattern commun aux helpers `_create_currency`).
+    from sqlalchemy.exc import IntegrityError
+
     async with AsyncSessionLocal() as db:
-        currency = Currency(code=code, name=code, symbol=code, decimalPlaces=0)
-        db.add(currency)
-        await db.commit()
-        await db.refresh(currency)
-        return str(currency.id)
+        for _ in range(10):
+            currency = Currency(code=code, name=code, symbol=code, decimalPlaces=0)
+            db.add(currency)
+            try:
+                await db.commit()
+            except IntegrityError:
+                await db.rollback()
+                code = _random_currency_code()
+                continue
+            await db.refresh(currency)
+            return str(currency.id)
+    raise AssertionError("impossible d'allouer un code devise unique")
 
 
 async def _create_city_with_currency(currency_code: str) -> str:
+    # `country.isoCode2` est limité à 2 caractères (ISO 3166-1) et la base de
+    # test est persistante entre les sessions : tirage renouvelé sur violation
+    # d'unicité (même pattern que la fixture `test_city` du conftest).
+    from sqlalchemy.exc import IntegrityError
+
     async with AsyncSessionLocal() as db:
-        suffix = uuid.uuid4().hex[:8]
-        country = Country(isoCode2=suffix[:2].upper(), isoCode3=suffix[:3].upper(), name=f"Land {suffix}", currencyCode=currency_code)
-        db.add(country)
-        await db.flush()
+        for _ in range(20):
+            suffix = uuid.uuid4().hex[:8]
+            country = Country(isoCode2=suffix[:2].upper(), isoCode3=suffix[:3].upper(), name=f"Land {suffix}", currencyCode=currency_code)
+            db.add(country)
+            try:
+                await db.flush()
+                break
+            except IntegrityError:
+                await db.rollback()
+        else:
+            raise AssertionError("impossible d'allouer un code pays unique")
         region = Region(countryId=country.id, name=f"Region {suffix}", code=f"R{suffix}")
         db.add(region)
         await db.flush()
@@ -189,3 +213,69 @@ async def test_prices_without_permission_is_denied(client: AsyncClient, register
     res = await client.get("/api/v1/zylo-liquid/prices", headers=headers)
     assert res.status_code == 403
     assert res.json()["error"]["code"] == "module_inactive"
+
+
+async def test_network_default_price_allows_two_currencies_same_date(
+    client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict
+):
+    """Refonte multi-devise (Phase 4 §1 de refonte-configuration-zylo-liquid.md) :
+    un même produit doit pouvoir avoir un prix réseau simultané dans plusieurs
+    devises, à la même date d'effet — vérifie directement la correction de
+    l'index partiel `uq_zlPriceHistory_networkDefault_product_effectiveFrom`."""
+    headers = _headers(registered_user, zylo_liquid_organization)
+    fp_res = await client.post(
+        "/api/v1/zylo-liquid/fuel-products", json={"name": "Super multi-devise", "code": "SPMD"}, headers=headers
+    )
+    fuel_product_id = fp_res.json()["id"]
+    xaf_id = await _create_currency(_random_currency_code())
+    xof_id = await _create_currency(_random_currency_code())
+
+    res_xaf = await client.post(
+        "/api/v1/zylo-liquid/prices",
+        json={
+            "fuelProductId": fuel_product_id,
+            "priceAmount": 850,
+            "currencyId": xaf_id,
+            "effectiveFrom": "2026-02-01T00:00:00",
+        },
+        headers=headers,
+    )
+    res_xof = await client.post(
+        "/api/v1/zylo-liquid/prices",
+        json={
+            "fuelProductId": fuel_product_id,
+            "priceAmount": 750,
+            "currencyId": xof_id,
+            "effectiveFrom": "2026-02-01T00:00:00",
+        },
+        headers=headers,
+    )
+    assert res_xaf.status_code == 201, res_xaf.text
+    assert res_xof.status_code == 201, res_xof.text
+    assert res_xaf.json()["currencyId"] == xaf_id
+    assert res_xof.json()["currencyId"] == xof_id
+
+
+async def test_network_default_price_conflict_same_currency_same_date(
+    client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict
+):
+    """Le conflit reste bloqué quand c'est la MÊME devise, à la même date —
+    seule la coexistence multi-devises est désormais permise, pas les
+    doublons purs et simples."""
+    headers = _headers(registered_user, zylo_liquid_organization)
+    fp_res = await client.post(
+        "/api/v1/zylo-liquid/fuel-products", json={"name": "Gasoil multi-devise", "code": "GOMD"}, headers=headers
+    )
+    fuel_product_id = fp_res.json()["id"]
+    currency_id = await _create_currency(_random_currency_code())
+    payload = {
+        "fuelProductId": fuel_product_id,
+        "priceAmount": 700,
+        "currencyId": currency_id,
+        "effectiveFrom": "2026-02-01T00:00:00",
+    }
+    first = await client.post("/api/v1/zylo-liquid/prices", json=payload, headers=headers)
+    second = await client.post("/api/v1/zylo-liquid/prices", json=payload, headers=headers)
+    assert first.status_code == 201, first.text
+    assert second.status_code == 409
+    assert second.json()["error"]["code"] == "price_conflict_same_period"

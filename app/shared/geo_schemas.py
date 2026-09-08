@@ -10,6 +10,7 @@ class CityResponse(BaseModel):
     regionName: str
     countryId: uuid.UUID
     countryName: str
+    currencyId: uuid.UUID | None
     currencyCode: str
 
     model_config = {"from_attributes": True}

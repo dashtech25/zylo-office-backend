@@ -115,6 +115,28 @@ def test_detect_deliveries_does_not_close_prematurely_during_brief_plateau():
     assert events[0]["endTime"] == base + timedelta(minutes=45)
 
 
+def test_detect_deliveries_ignores_large_drain_after_false_rise():
+    """Régression : une hausse >=50mm suivie d'une chute massive qui ne se
+    stabilise jamais près du pic (consommation normale, pas une livraison)
+    ne doit produire aucun événement — bug réel observé en production
+    (Station Bonabéri, volume livré négatif car endHeightMm << startHeightMm
+    à cause d'une stabilisation évaluée sur la mesure précédente au lieu du
+    pic)."""
+    base = datetime(2026, 1, 1, 16, 55)
+    measurements = [
+        (base, 1968.2),
+        (base + timedelta(minutes=1), 2020.0),  # déclenche (>=50mm)
+        (base + timedelta(minutes=10), 1500.0),
+        (base + timedelta(minutes=20), 1000.0),
+        (base + timedelta(minutes=30), 500.0),
+        (base + timedelta(minutes=40), 200.0),
+        (base + timedelta(minutes=50), 164.8),
+        (base + timedelta(minutes=65), 164.8),
+        (base + timedelta(minutes=66), 164.8),
+    ]
+    assert detect_deliveries(measurements) == []
+
+
 def test_evaluate_threshold_alarms_reference_example():
     """Exemple exact de Point 13 §13.5 : H_carburant=195mm, H_eau=0mm,
     Low_alarm=200mm -> ALARME NIVEAU BAS."""

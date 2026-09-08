@@ -15,13 +15,25 @@ def _headers(user: dict, organization: dict) -> dict:
 
 
 async def _create_currency() -> str:
+    # `currency.code` est limité à 3 caractères (norme ISO 4217) et la base de
+    # test est persistante entre les sessions : un code court déterministe
+    # finit par entrer en collision. Code aléatoire + nouvelle tentative sur
+    # violation d'unicité → tests idempotents.
+    from sqlalchemy.exc import IntegrityError
+
     async with AsyncSessionLocal() as db:
-        code = f"M{uuid.uuid4().hex[:2].upper()}"
-        currency = Currency(code=code, name=code, symbol=code, decimalPlaces=0)
-        db.add(currency)
-        await db.commit()
-        await db.refresh(currency)
-        return str(currency.id)
+        for _ in range(10):
+            code = uuid.uuid4().hex[:3].upper()
+            currency = Currency(code=code, name=code, symbol=code, decimalPlaces=0)
+            db.add(currency)
+            try:
+                await db.commit()
+            except IntegrityError:
+                await db.rollback()
+                continue
+            await db.refresh(currency)
+            return str(currency.id)
+    raise AssertionError("impossible d'allouer un code devise unique")
 
 
 async def _create_tank_with_sensor(client: AsyncClient, headers: dict, organization_id: str, station_code: str) -> tuple[str, str, str, int]:

@@ -6,7 +6,7 @@ from app.core.security import get_current_user
 from app.identity import service
 from app.identity.models import Organization, User
 from app.identity.permissions import ORGANIZATION_MANAGE
-from app.identity.schemas import CreateOrganizationRequest, OrganizationResponse
+from app.identity.schemas import CreateOrganizationRequest, OrganizationResponse, UpdateOrganizationRequest
 from app.rbac.service import require_permission
 
 router = APIRouter()
@@ -27,6 +27,17 @@ async def create_organization(
     db: AsyncSession = Depends(get_db),
 ) -> Organization:
     return await service.create_organization(db, current_user, data)
+
+
+@router.patch("/{organization_id}", response_model=OrganizationResponse)
+async def update_organization(
+    organization_id: str,
+    data: UpdateOrganizationRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_permission(ORGANIZATION_MANAGE)),
+) -> Organization:
+    return await service.update_organization(db, organization_id, current_user.id, data)
 
 
 @router.get("/{organization_id}/protected-demo")

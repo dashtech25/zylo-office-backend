@@ -5,6 +5,9 @@ reprise de app/identity/permissions.py)."""
 FUEL_PRODUCT_READ = "zyloLiquid.fuelProduct.read"
 FUEL_PRODUCT_MANAGE = "zyloLiquid.fuelProduct.manage"
 
+STATION_FUEL_PRODUCT_READ = "zyloLiquid.stationFuelProduct.read"
+STATION_FUEL_PRODUCT_MANAGE = "zyloLiquid.stationFuelProduct.manage"
+
 STATION_READ = "zyloLiquid.station.read"
 STATION_MANAGE = "zyloLiquid.station.manage"
 
@@ -33,3 +36,111 @@ PRICE_HISTORY_READ = "zyloLiquid.priceHistory.read"
 # attendant, option la plus restrictive par défaut, jamais une permission
 # distincte plus permissive par supposition.
 PRICE_HISTORY_CREATE = "zyloLiquid.priceHistory.create"
+
+CASH_READ = "zyloLiquid.cash.read"
+
+# Couche déclarative (processus-double-sources-verite, Phase 7 §2 de
+# 07-formalisation-technique.md) : verbe `create` plutôt que `manage`, même
+# raisonnement déjà appliqué à PRICE_HISTORY_CREATE — une correction est
+# toujours une nouvelle ligne (Phase 5 §3), jamais une réécriture.
+DELIVERY_DECLARATION_READ = "zyloLiquid.deliveryDeclaration.read"
+DELIVERY_DECLARATION_CREATE = "zyloLiquid.deliveryDeclaration.create"
+
+SHIFT_CASH_DECLARATION_READ = "zyloLiquid.shiftCashDeclaration.read"
+SHIFT_CASH_DECLARATION_CREATE = "zyloLiquid.shiftCashDeclaration.create"
+
+MANUAL_GAUGING_DECLARATION_READ = "zyloLiquid.manualGaugingDeclaration.read"
+MANUAL_GAUGING_DECLARATION_CREATE = "zyloLiquid.manualGaugingDeclaration.create"
+
+QUALITY_CHECK_DECLARATION_READ = "zyloLiquid.qualityCheckDeclaration.read"
+QUALITY_CHECK_DECLARATION_CREATE = "zyloLiquid.qualityCheckDeclaration.create"
+
+LEAK_TEST_DECLARATION_READ = "zyloLiquid.leakTestDeclaration.read"
+LEAK_TEST_DECLARATION_CREATE = "zyloLiquid.leakTestDeclaration.create"
+
+INCIDENT_DECLARATION_READ = "zyloLiquid.incidentDeclaration.read"
+INCIDENT_DECLARATION_CREATE = "zyloLiquid.incidentDeclaration.create"
+
+# Transversale aux 6 types de déclaration (Phase 7 §2) : verrouiller est la
+# même action quel que soit le type, jamais six permissions distinctes.
+DECLARATION_LOCK = "zyloLiquid.declaration.lock"
+
+# Couche Commercial (Phase 7 §2) — portée organisation entière, sauf SALE_*
+# qui reste scopée station (comme les entités déclaratives, une vente a
+# toujours lieu dans une station précise).
+COMMERCIAL_ACCOUNT_READ = "zyloLiquid.commercialAccount.read"
+COMMERCIAL_ACCOUNT_MANAGE = "zyloLiquid.commercialAccount.manage"
+
+SALE_READ = "zyloLiquid.sale.read"
+SALE_CREATE = "zyloLiquid.sale.create"
+
+RECEIVABLE_READ = "zyloLiquid.receivable.read"
+RECEIVABLE_MANAGE = "zyloLiquid.receivable.manage"
+
+PAYMENT_READ = "zyloLiquid.payment.read"
+PAYMENT_CREATE = "zyloLiquid.payment.create"
+
+# Modèle documentaire (Phase 5 §6) — portée organisation entière : un
+# document peut être lié à des entités de nature différente (déclarative,
+# commerciale), jamais borné à une seule station.
+DOCUMENT_READ = "zyloLiquid.document.read"
+DOCUMENT_CREATE = "zyloLiquid.document.create"
+
+# Rapprochement (Phase 6, Phase 7 §2) — RECONCILIATION_READ scopé station
+# pour les types opérationnels comme les autres déclarations ; les
+# tolérances par station restent une gestion de gérant.
+RECONCILIATION_READ = "zyloLiquid.reconciliation.read"
+RECONCILIATION_SETTINGS_MANAGE = "zyloLiquid.reconciliationSettings.manage"
+
+# Couche Approvisionnement (fusion prototype #/livraisons avec la couche
+# réelle — décision commanditaire « créer toutes les tables nécessaires,
+# même fournisseur »). Fournisseur/transporteur/camion : référentiels réseau,
+# portée organisation entière comme CommercialAccount. Commande
+# d'approvisionnement : portée station comme les entités déclaratives.
+SUPPLIER_READ = "zyloLiquid.supplier.read"
+SUPPLIER_MANAGE = "zyloLiquid.supplier.manage"
+
+CARRIER_READ = "zyloLiquid.carrier.read"
+CARRIER_MANAGE = "zyloLiquid.carrier.manage"
+
+TRUCK_READ = "zyloLiquid.truck.read"
+TRUCK_MANAGE = "zyloLiquid.truck.manage"
+
+PURCHASE_ORDER_READ = "zyloLiquid.purchaseOrder.read"
+PURCHASE_ORDER_MANAGE = "zyloLiquid.purchaseOrder.manage"
+
+# ================================================================
+# Mission « vente-maintenant-reglementation » (06-permissions-par-domaine.md
+# de la mission) — nouvelles permissions par domaine, jamais un second
+# système de permissions.
+# ================================================================
+
+DOCUMENT_MANAGE = "zyloLiquid.document.manage"
+DOCUMENT_DELETE = "zyloLiquid.document.delete"
+DOCUMENT_READ_SENSITIVE = "zyloLiquid.document.readSensitive"
+
+SELLABLE_PRODUCT_READ = "zyloLiquid.sellableProduct.read"
+SELLABLE_PRODUCT_MANAGE = "zyloLiquid.sellableProduct.manage"
+
+PRODUCT_SALE_READ = "zyloLiquid.productSale.read"
+PRODUCT_SALE_CREATE = "zyloLiquid.productSale.create"
+PRODUCT_SALE_CANCEL = "zyloLiquid.productSale.cancel"
+
+EQUIPMENT_READ = "zyloLiquid.equipment.read"
+EQUIPMENT_MANAGE = "zyloLiquid.equipment.manage"
+
+INTERVENTION_READ = "zyloLiquid.intervention.read"
+INTERVENTION_CREATE = "zyloLiquid.intervention.create"
+INTERVENTION_ASSIGN = "zyloLiquid.intervention.assign"
+INTERVENTION_CLOSE = "zyloLiquid.intervention.close"
+
+TECHNICIAN_READ = "zyloLiquid.technician.read"
+TECHNICIAN_MANAGE = "zyloLiquid.technician.manage"
+
+REGULATORY_DOCUMENT_READ = "zyloLiquid.regulatoryDocument.read"
+REGULATORY_DOCUMENT_CREATE = "zyloLiquid.regulatoryDocument.create"
+REGULATORY_DOCUMENT_MANAGE = "zyloLiquid.regulatoryDocument.manage"
+REGULATORY_DOCUMENT_ARCHIVE = "zyloLiquid.regulatoryDocument.archive"
+
+REGULATORY_DECLARATION_READ = "zyloLiquid.regulatoryDeclaration.read"
+REGULATORY_DECLARATION_MANAGE = "zyloLiquid.regulatoryDeclaration.manage"

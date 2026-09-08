@@ -13,7 +13,7 @@ async def test_create_and_get_fuel_product(client: AsyncClient, registered_user:
     headers = _headers(registered_user, zylo_liquid_organization)
     res = await client.post(
         "/api/v1/zylo-liquid/fuel-products",
-        json={"name": "Super", "code": "SP", "densityGPerCm3": 0.755, "currentPriceFcfa": 730, "displayColor": "#e11d48"},
+        json={"name": "Super", "code": "SP", "densityGPerCm3": 0.755, "displayColor": "#2563eb"},
         headers=headers,
     )
     assert res.status_code == 201
@@ -81,11 +81,11 @@ async def test_update_fuel_product(client: AsyncClient, registered_user: dict, z
     fuel_product_id = create_res.json()["id"]
 
     patch_res = await client.patch(
-        f"/api/v1/zylo-liquid/fuel-products/{fuel_product_id}", json={"currentPriceFcfa": 900, "active": False}, headers=headers
+        f"/api/v1/zylo-liquid/fuel-products/{fuel_product_id}", json={"densityGPerCm3": 0.83, "active": False}, headers=headers
     )
     assert patch_res.status_code == 200
     body = patch_res.json()
-    assert body["currentPriceFcfa"] == 900
+    assert body["densityGPerCm3"] == 0.83
     assert body["active"] is False
     assert body["code"] == "KE"  # code jamais modifiable par ce endpoint
 

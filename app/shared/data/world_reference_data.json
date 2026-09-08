@@ -1,0 +1,2783 @@
+{
+  "currencies": [
+    {
+      "code": "USD",
+      "name": "United States dollar",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "VEF",
+      "name": "Venezuelan bolívar fuerte",
+      "symbol": "Bs.F",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "CAD",
+      "name": "Canadian dollar",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "CHF",
+      "name": "Swiss franc",
+      "symbol": "CHF",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "BRL",
+      "name": "Brazilian real",
+      "symbol": "R$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "CNY",
+      "name": "Chinese yuan",
+      "symbol": "¥",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "CNH",
+      "name": "Chinese yuan - Offshore",
+      "symbol": "¥",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "COP",
+      "name": "Colombian peso",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "CZK",
+      "name": "Czech koruna",
+      "symbol": "Kč",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "DKK",
+      "name": "Danish krone",
+      "symbol": "kr",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "HUF",
+      "name": "Hungarian forint",
+      "symbol": "Ft",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "IDR",
+      "name": "Indonesian rupiah",
+      "symbol": "Rp",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "LVL",
+      "name": "Latvian lats",
+      "symbol": "Ls",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "NOK",
+      "name": "Norwegian krone",
+      "symbol": "kr",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "XPF",
+      "name": "CFP franc",
+      "symbol": "XPF",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "PAB",
+      "name": "Panamanian balboa",
+      "symbol": "B/.",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "PLN",
+      "name": "Polish złoty",
+      "symbol": "zł",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "SEK",
+      "name": "Swedish krona",
+      "symbol": "kr",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "ARS",
+      "name": "Argentine peso",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "INR",
+      "name": "Indian rupee",
+      "symbol": "₹",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "AUD",
+      "name": "Australian dollar",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "UAH",
+      "name": "Ukraine Hryvnia",
+      "symbol": "₴",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "VND",
+      "name": "Vietnamese đồng",
+      "symbol": "₫",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "HKD",
+      "name": "Hong Kong dollar",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "JPY",
+      "name": "Japanese yen",
+      "symbol": "¥",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "BGN",
+      "name": "Bulgarian lev",
+      "symbol": "лв",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "LTL",
+      "name": "Lithuanian litas",
+      "symbol": "Lt",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "RON",
+      "name": "Romanian leu",
+      "symbol": "lei",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "HRK",
+      "name": "Croatian kuna",
+      "symbol": "kn",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "RUB",
+      "name": "Russian ruble",
+      "symbol": "руб",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "TRY",
+      "name": "Turkish lira",
+      "symbol": "₺",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "KRW",
+      "name": "South Korean won",
+      "symbol": "₩",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "MXN",
+      "name": "Mexican peso",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "MYR",
+      "name": "Malaysian ringgit",
+      "symbol": "RM",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "NZD",
+      "name": "New Zealand dollar",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "PHP",
+      "name": "Philippine peso",
+      "symbol": "₱",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "SGD",
+      "name": "Singapore dollar",
+      "symbol": "S$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "ZAR",
+      "name": "South African rand",
+      "symbol": "R",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "CRC",
+      "name": "Costa Rican colón",
+      "symbol": "₡",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "MUR",
+      "name": "Mauritian rupee",
+      "symbol": "Rs",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "XOF",
+      "name": "CFA franc BCEAO",
+      "symbol": "CFA",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "XAF",
+      "name": "CFA franc BEAC",
+      "symbol": "FCFA",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "UGX",
+      "name": "Ugandan shilling",
+      "symbol": "USh",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "HNL",
+      "name": "Honduran lempira",
+      "symbol": "L",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "CLP",
+      "name": "Chilean peso",
+      "symbol": "$",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "UYU",
+      "name": "Uruguayan peso",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "AFN",
+      "name": "Afghan afghani",
+      "symbol": "Afs",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "AOA",
+      "name": "Angolan kwanza",
+      "symbol": "Kz",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "XCD",
+      "name": "East Caribbean dollar",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "AMD",
+      "name": "Armenian dram",
+      "symbol": "դր.",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "AWG",
+      "name": "Aruban florin",
+      "symbol": "Afl.",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "AZN",
+      "name": "Azerbaijani manat",
+      "symbol": "₼",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "BSD",
+      "name": "Bahamian dollar",
+      "symbol": "B$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "BHD",
+      "name": "Bahraini dinar",
+      "symbol": "BD",
+      "decimalPlaces": 3
+    },
+    {
+      "code": "BDT",
+      "name": "Bangladeshi taka",
+      "symbol": "৳",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "BBD",
+      "name": "Barbados dollar",
+      "symbol": "Bds$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "BYR",
+      "name": "Belarusian ruble",
+      "symbol": "BR",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "BYN",
+      "name": "Belarusian ruble",
+      "symbol": "Br",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "BZD",
+      "name": "Belize dollar",
+      "symbol": "BZ$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "BMD",
+      "name": "Bermudian dollar",
+      "symbol": "BD$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "BTN",
+      "name": "Bhutanese ngultrum",
+      "symbol": "Nu.",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "BOB",
+      "name": "Boliviano",
+      "symbol": "Bs.",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "BAM",
+      "name": "Bosnia and Herzegovina convertible mark",
+      "symbol": "KM",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "BWP",
+      "name": "Botswana pula",
+      "symbol": "P",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "BIF",
+      "name": "Burundian franc",
+      "symbol": "FBu",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "KHR",
+      "name": "Cambodian riel",
+      "symbol": "៛",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "KYD",
+      "name": "Cayman Islands dollar",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "KMF",
+      "name": "Comorian franc",
+      "symbol": "CF",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "CDF",
+      "name": "Congolese franc",
+      "symbol": "Fr",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "CUP",
+      "name": "Cuban peso",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "ANG",
+      "name": "Netherlands Antillean guilder",
+      "symbol": "ƒ",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "XCG",
+      "name": "Caribbean Guilder",
+      "symbol": "Cg",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "DJF",
+      "name": "Djiboutian franc",
+      "symbol": "Fdj",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "DOP",
+      "name": "Dominican peso",
+      "symbol": "RD$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "EGP",
+      "name": "Egyptian pound",
+      "symbol": "LE",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "SVC",
+      "name": "Salvadoran Colon",
+      "symbol": "¢",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "ERN",
+      "name": "Eritrean nakfa",
+      "symbol": "Nfk",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "ETB",
+      "name": "Ethiopian birr",
+      "symbol": "Br",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "FKP",
+      "name": "Falkland Islands pound",
+      "symbol": "£",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "FJD",
+      "name": "Fiji dollar",
+      "symbol": "FJ$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "GEL",
+      "name": "Georgian lari",
+      "symbol": "ლ",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "GIP",
+      "name": "Gibraltar pound",
+      "symbol": "£",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "GNF",
+      "name": "Guinean franc",
+      "symbol": "FG",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "GYD",
+      "name": "Guyanese dollar",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "HTG",
+      "name": "Haitian gourde",
+      "symbol": "G",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "ISK",
+      "name": "Icelandic króna",
+      "symbol": "kr",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "IRR",
+      "name": "Iranian rial",
+      "symbol": "﷼",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "IQD",
+      "name": "Iraqi dinar",
+      "symbol": " ع.د",
+      "decimalPlaces": 3
+    },
+    {
+      "code": "ILS",
+      "name": "Israeli new shekel",
+      "symbol": "₪",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "JMD",
+      "name": "Jamaican dollar",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "JOD",
+      "name": "Jordanian dinar",
+      "symbol": " د.ا ",
+      "decimalPlaces": 3
+    },
+    {
+      "code": "KZT",
+      "name": "Kazakhstani tenge",
+      "symbol": "₸",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "KES",
+      "name": "Kenyan shilling",
+      "symbol": "KSh",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "KWD",
+      "name": "Kuwaiti dinar",
+      "symbol": " د.ك ",
+      "decimalPlaces": 3
+    },
+    {
+      "code": "KGS",
+      "name": "Kyrgyzstani som",
+      "symbol": "лв",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "LAK",
+      "name": "Lao kip",
+      "symbol": "₭",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "LBP",
+      "name": "Lebanese pound",
+      "symbol": "ل.ل",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "LSL",
+      "name": "Lesotho loti",
+      "symbol": "M",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "LRD",
+      "name": "Liberian dollar",
+      "symbol": "L$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "LYD",
+      "name": "Libyan dinar",
+      "symbol": " ل.د ",
+      "decimalPlaces": 3
+    },
+    {
+      "code": "MOP",
+      "name": "Macanese pataca",
+      "symbol": "MOP$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "MKD",
+      "name": "Macedonian denar",
+      "symbol": "ден",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "MGA",
+      "name": "Malagasy ariary",
+      "symbol": "Ar",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "MWK",
+      "name": "Malawian kwacha",
+      "symbol": "MK",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "MVR",
+      "name": "Maldivian rufiyaa",
+      "symbol": "Rf",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "MRO",
+      "name": "Mauritanian ouguiya (old)",
+      "symbol": "UM",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "MRU",
+      "name": "Mauritanian ouguiya",
+      "symbol": "UM",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "MDL",
+      "name": "Moldovan leu",
+      "symbol": "L",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "MNT",
+      "name": "Mongolian tögrög",
+      "symbol": "₮",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "MAD",
+      "name": "Moroccan dirham",
+      "symbol": "DH",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "BND",
+      "name": "Brunei dollar",
+      "symbol": "B$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "DZD",
+      "name": "Algerian dinar",
+      "symbol": "DA",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "GHS",
+      "name": "Ghanaian cedi",
+      "symbol": "GH¢",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "GMD",
+      "name": "Gambian dalasi",
+      "symbol": "D",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "MZN",
+      "name": "Mozambican metical",
+      "symbol": "MT",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "MMK",
+      "name": "Myanmar kyat",
+      "symbol": "K",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "NAD",
+      "name": "Namibian dollar",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "NPR",
+      "name": "Nepalese rupee",
+      "symbol": "₨",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "ALL",
+      "name": "Albanian lek",
+      "symbol": "L",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "NIO",
+      "name": "Nicaraguan córdoba",
+      "symbol": "C$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "NGN",
+      "name": "Nigerian naira",
+      "symbol": "₦",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "KPW",
+      "name": "North Korean won",
+      "symbol": "₩",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "ZIG",
+      "name": "Zimbabwe Gold",
+      "symbol": "ZiG",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "ZMW",
+      "name": "Zambian kwacha",
+      "symbol": "ZK",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "YER",
+      "name": "Yemeni rial",
+      "symbol": "﷼",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "EUR",
+      "name": "Euro",
+      "symbol": "€",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "VUV",
+      "name": "Vanuatu vatu",
+      "symbol": "VT",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "UZS",
+      "name": "Uzbekistan som",
+      "symbol": "лв",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "AED",
+      "name": "United Arab Emirates dirham",
+      "symbol": "AED",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "TMT",
+      "name": "Turkmenistan manat",
+      "symbol": "T",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "TND",
+      "name": "Tunisian dinar",
+      "symbol": "DT",
+      "decimalPlaces": 3
+    },
+    {
+      "code": "TTD",
+      "name": "Trinidad and Tobago dollar",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "TOP",
+      "name": "Tongan paʻanga",
+      "symbol": "T$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "THB",
+      "name": "Thai baht",
+      "symbol": "฿",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "TZS",
+      "name": "Tanzanian shilling",
+      "symbol": "TSh",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "TJS",
+      "name": "Tajikistani somoni",
+      "symbol": "TJS",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "TWD",
+      "name": "New Taiwan dollar",
+      "symbol": "NT$",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "SYP",
+      "name": "Syrian pound",
+      "symbol": "£",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "SZL",
+      "name": "Swazi lilangeni",
+      "symbol": "E",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "SRD",
+      "name": "Surinamese dollar",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "SDG",
+      "name": "Sudanese pound",
+      "symbol": "ج.س.",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "LKR",
+      "name": "Sri Lankan rupee",
+      "symbol": "Rs",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "SSP",
+      "name": "South Sudanese pound",
+      "symbol": "£",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "GBP",
+      "name": "Pound sterling",
+      "symbol": "£",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "SOS",
+      "name": "Somali shilling",
+      "symbol": "Sh.",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "SBD",
+      "name": "Solomon Islands dollar",
+      "symbol": "SI$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "SLL",
+      "name": "Sierra Leonean leone",
+      "symbol": "Le",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "SLE",
+      "name": "Sierra Leonean leone",
+      "symbol": "Le",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "SCR",
+      "name": "Seychellois rupee",
+      "symbol": "SR",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "RSD",
+      "name": "Serbian dinar",
+      "symbol": "din.",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "SAR",
+      "name": "Saudi riyal",
+      "symbol": "SR",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "STD",
+      "name": "São Tomé and Príncipe dobra",
+      "symbol": "Db",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "WST",
+      "name": "Samoan tālā",
+      "symbol": "WS$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "SHP",
+      "name": "Saint Helena pound",
+      "symbol": "£",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "RWF",
+      "name": "Rwandan franc",
+      "symbol": "RF",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "QAR",
+      "name": "Qatari riyal",
+      "symbol": "QR",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "PEN",
+      "name": "Peruvian sol",
+      "symbol": "S/",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "PYG",
+      "name": "Paraguayan guaraní",
+      "symbol": "₲",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "PGK",
+      "name": "Papua New Guinean kina",
+      "symbol": "K",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "PKR",
+      "name": "Pakistani rupee",
+      "symbol": "Rs.",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "OMR",
+      "name": "Omani rial",
+      "symbol": "ر.ع.",
+      "decimalPlaces": 3
+    },
+    {
+      "code": "CVE",
+      "name": "Cape Verdean escudo",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "COU",
+      "name": "Unidad de Valor Real",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "CLF",
+      "name": "Unidad de Fomento",
+      "symbol": "$",
+      "decimalPlaces": 4
+    },
+    {
+      "code": "CUC",
+      "name": "Cuban convertible peso",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "GTQ",
+      "name": "Guatemalan Quetzal",
+      "symbol": "Q",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "VES",
+      "name": "Venezuelan bolívar soberano",
+      "symbol": "Bs",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "UYW",
+      "name": "Unidad previsional",
+      "symbol": "$",
+      "decimalPlaces": 4
+    },
+    {
+      "code": "UYI",
+      "name": "Uruguay Peso en Unidades Indexadas",
+      "symbol": "$",
+      "decimalPlaces": 4
+    },
+    {
+      "code": "STN",
+      "name": "São Tomé and Príncipe dobra",
+      "symbol": "Db",
+      "decimalPlaces": 2
+    }
+  ],
+  "countries": [
+    {
+      "isoCode2": "AD",
+      "name": "Andorra",
+      "currencyCode": "EUR",
+      "phonePrefix": "376",
+      "defaultTimezone": "Europe/Andorra"
+    },
+    {
+      "isoCode2": "AE",
+      "name": "United Arab Emirates",
+      "currencyCode": "AED",
+      "phonePrefix": "971",
+      "defaultTimezone": "Asia/Dubai"
+    },
+    {
+      "isoCode2": "AF",
+      "name": "Afghanistan",
+      "currencyCode": "AFN",
+      "phonePrefix": "93",
+      "defaultTimezone": "Asia/Kabul"
+    },
+    {
+      "isoCode2": "AG",
+      "name": "Antigua and Barbuda",
+      "currencyCode": "XCD",
+      "phonePrefix": "1268",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "AI",
+      "name": "Anguilla",
+      "currencyCode": "XCD",
+      "phonePrefix": "1264",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "AL",
+      "name": "Albania",
+      "currencyCode": "ALL",
+      "phonePrefix": "355",
+      "defaultTimezone": "Europe/Tirane"
+    },
+    {
+      "isoCode2": "AM",
+      "name": "Armenia",
+      "currencyCode": "AMD",
+      "phonePrefix": "374",
+      "defaultTimezone": "Asia/Yerevan"
+    },
+    {
+      "isoCode2": "AO",
+      "name": "Angola",
+      "currencyCode": "AOA",
+      "phonePrefix": "244",
+      "defaultTimezone": "Africa/Lagos"
+    },
+    {
+      "isoCode2": "AQ",
+      "name": "Antarctica",
+      "currencyCode": "XCD",
+      "phonePrefix": "672",
+      "defaultTimezone": "Antarctica/Casey"
+    },
+    {
+      "isoCode2": "AR",
+      "name": "Argentina",
+      "currencyCode": "ARS",
+      "phonePrefix": "54",
+      "defaultTimezone": "America/Argentina/Buenos_Aires"
+    },
+    {
+      "isoCode2": "AS",
+      "name": "American Samoa",
+      "currencyCode": "USD",
+      "phonePrefix": "1684",
+      "defaultTimezone": "Pacific/Pago_Pago"
+    },
+    {
+      "isoCode2": "AT",
+      "name": "Austria",
+      "currencyCode": "EUR",
+      "phonePrefix": "43",
+      "defaultTimezone": "Europe/Vienna"
+    },
+    {
+      "isoCode2": "AU",
+      "name": "Australia",
+      "currencyCode": "AUD",
+      "phonePrefix": "61",
+      "defaultTimezone": "Australia/Lord_Howe"
+    },
+    {
+      "isoCode2": "AW",
+      "name": "Aruba",
+      "currencyCode": "AWG",
+      "phonePrefix": "297",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "AX",
+      "name": "Åland Islands",
+      "currencyCode": "EUR",
+      "phonePrefix": "358",
+      "defaultTimezone": "Europe/Helsinki"
+    },
+    {
+      "isoCode2": "AZ",
+      "name": "Azerbaijan",
+      "currencyCode": "AZN",
+      "phonePrefix": "994",
+      "defaultTimezone": "Asia/Baku"
+    },
+    {
+      "isoCode2": "BA",
+      "name": "Bosnia and Herzegovina",
+      "currencyCode": "BAM",
+      "phonePrefix": "387",
+      "defaultTimezone": "Europe/Belgrade"
+    },
+    {
+      "isoCode2": "BB",
+      "name": "Barbados",
+      "currencyCode": "BBD",
+      "phonePrefix": "1246",
+      "defaultTimezone": "America/Barbados"
+    },
+    {
+      "isoCode2": "BD",
+      "name": "Bangladesh",
+      "currencyCode": "BDT",
+      "phonePrefix": "880",
+      "defaultTimezone": "Asia/Dhaka"
+    },
+    {
+      "isoCode2": "BE",
+      "name": "Belgium",
+      "currencyCode": "EUR",
+      "phonePrefix": "32",
+      "defaultTimezone": "Europe/Brussels"
+    },
+    {
+      "isoCode2": "BF",
+      "name": "Burkina Faso",
+      "currencyCode": "XOF",
+      "phonePrefix": "226",
+      "defaultTimezone": "Africa/Abidjan"
+    },
+    {
+      "isoCode2": "BG",
+      "name": "Bulgaria",
+      "currencyCode": "EUR",
+      "phonePrefix": "359",
+      "defaultTimezone": "Europe/Sofia"
+    },
+    {
+      "isoCode2": "BH",
+      "name": "Bahrain",
+      "currencyCode": "BHD",
+      "phonePrefix": "973",
+      "defaultTimezone": "Asia/Qatar"
+    },
+    {
+      "isoCode2": "BI",
+      "name": "Burundi",
+      "currencyCode": "BIF",
+      "phonePrefix": "257",
+      "defaultTimezone": "Africa/Maputo"
+    },
+    {
+      "isoCode2": "BJ",
+      "name": "Benin",
+      "currencyCode": "XOF",
+      "phonePrefix": "229",
+      "defaultTimezone": "Africa/Lagos"
+    },
+    {
+      "isoCode2": "BL",
+      "name": "Saint Barthélémy",
+      "currencyCode": "EUR",
+      "phonePrefix": "590",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "BM",
+      "name": "Bermuda",
+      "currencyCode": "BMD",
+      "phonePrefix": "1441",
+      "defaultTimezone": "Atlantic/Bermuda"
+    },
+    {
+      "isoCode2": "BN",
+      "name": "Brunei Darussalam",
+      "currencyCode": "BND",
+      "phonePrefix": "673",
+      "defaultTimezone": "Asia/Kuching"
+    },
+    {
+      "isoCode2": "BO",
+      "name": "Bolivia",
+      "currencyCode": "BOB",
+      "phonePrefix": "591",
+      "defaultTimezone": "America/La_Paz"
+    },
+    {
+      "isoCode2": "BQ",
+      "name": "Bonaire, Sint Eustatius and Saba",
+      "currencyCode": "USD",
+      "phonePrefix": "599",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "BR",
+      "name": "Brazil",
+      "currencyCode": "BRL",
+      "phonePrefix": "55",
+      "defaultTimezone": "America/Noronha"
+    },
+    {
+      "isoCode2": "BS",
+      "name": "Bahamas",
+      "currencyCode": "BSD",
+      "phonePrefix": "1242",
+      "defaultTimezone": "America/Toronto"
+    },
+    {
+      "isoCode2": "BT",
+      "name": "Bhutan",
+      "currencyCode": "BTN",
+      "phonePrefix": "975",
+      "defaultTimezone": "Asia/Thimphu"
+    },
+    {
+      "isoCode2": "BV",
+      "name": "Bouvet Island",
+      "currencyCode": "NOK",
+      "phonePrefix": "55",
+      "defaultTimezone": "UTC"
+    },
+    {
+      "isoCode2": "BW",
+      "name": "Botswana",
+      "currencyCode": "BWP",
+      "phonePrefix": "267",
+      "defaultTimezone": "Africa/Maputo"
+    },
+    {
+      "isoCode2": "BY",
+      "name": "Belarus",
+      "currencyCode": "BYN",
+      "phonePrefix": "375",
+      "defaultTimezone": "Europe/Minsk"
+    },
+    {
+      "isoCode2": "BZ",
+      "name": "Belize",
+      "currencyCode": "BZD",
+      "phonePrefix": "501",
+      "defaultTimezone": "America/Belize"
+    },
+    {
+      "isoCode2": "CA",
+      "name": "Canada",
+      "currencyCode": "CAD",
+      "phonePrefix": "1",
+      "defaultTimezone": "America/St_Johns"
+    },
+    {
+      "isoCode2": "CC",
+      "name": "Cocos (Keeling) Islands",
+      "currencyCode": "AUD",
+      "phonePrefix": "61",
+      "defaultTimezone": "Asia/Yangon"
+    },
+    {
+      "isoCode2": "CF",
+      "name": "Central African Republic",
+      "currencyCode": "XAF",
+      "phonePrefix": "236",
+      "defaultTimezone": "Africa/Lagos"
+    },
+    {
+      "isoCode2": "CD",
+      "name": "Congo (DRC)",
+      "currencyCode": "CDF",
+      "phonePrefix": "243",
+      "defaultTimezone": "Africa/Maputo"
+    },
+    {
+      "isoCode2": "CG",
+      "name": "Congo (Republic)",
+      "currencyCode": "XAF",
+      "phonePrefix": "242",
+      "defaultTimezone": "Africa/Lagos"
+    },
+    {
+      "isoCode2": "CH",
+      "name": "Switzerland",
+      "currencyCode": "CHF",
+      "phonePrefix": "41",
+      "defaultTimezone": "Europe/Zurich"
+    },
+    {
+      "isoCode2": "CI",
+      "name": "Côte d'Ivoire",
+      "currencyCode": "XOF",
+      "phonePrefix": "225",
+      "defaultTimezone": "Africa/Abidjan"
+    },
+    {
+      "isoCode2": "CK",
+      "name": "Cook Islands",
+      "currencyCode": "NZD",
+      "phonePrefix": "682",
+      "defaultTimezone": "Pacific/Rarotonga"
+    },
+    {
+      "isoCode2": "CL",
+      "name": "Chile",
+      "currencyCode": "CLP",
+      "phonePrefix": "56",
+      "defaultTimezone": "America/Santiago"
+    },
+    {
+      "isoCode2": "CM",
+      "name": "Cameroon",
+      "currencyCode": "XAF",
+      "phonePrefix": "237",
+      "defaultTimezone": "Africa/Lagos"
+    },
+    {
+      "isoCode2": "CN",
+      "name": "China",
+      "currencyCode": "CNY",
+      "phonePrefix": "86",
+      "defaultTimezone": "Asia/Shanghai"
+    },
+    {
+      "isoCode2": "CO",
+      "name": "Colombia",
+      "currencyCode": "COP",
+      "phonePrefix": "57",
+      "defaultTimezone": "America/Bogota"
+    },
+    {
+      "isoCode2": "CR",
+      "name": "Costa Rica",
+      "currencyCode": "CRC",
+      "phonePrefix": "506",
+      "defaultTimezone": "America/Costa_Rica"
+    },
+    {
+      "isoCode2": "CU",
+      "name": "Cuba",
+      "currencyCode": "CUP",
+      "phonePrefix": "53",
+      "defaultTimezone": "America/Havana"
+    },
+    {
+      "isoCode2": "CV",
+      "name": "Cape Verde",
+      "currencyCode": "CVE",
+      "phonePrefix": "238",
+      "defaultTimezone": "Atlantic/Cape_Verde"
+    },
+    {
+      "isoCode2": "CW",
+      "name": "Curaçao",
+      "currencyCode": "XCG",
+      "phonePrefix": "599",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "CX",
+      "name": "Christmas Island",
+      "currencyCode": "AUD",
+      "phonePrefix": "61",
+      "defaultTimezone": "Asia/Bangkok"
+    },
+    {
+      "isoCode2": "CY",
+      "name": "Cyprus",
+      "currencyCode": "EUR",
+      "phonePrefix": "357",
+      "defaultTimezone": "Asia/Nicosia"
+    },
+    {
+      "isoCode2": "CZ",
+      "name": "Czech Republic",
+      "currencyCode": "CZK",
+      "phonePrefix": "420",
+      "defaultTimezone": "Europe/Prague"
+    },
+    {
+      "isoCode2": "DE",
+      "name": "Germany",
+      "currencyCode": "EUR",
+      "phonePrefix": "49",
+      "defaultTimezone": "Europe/Zurich"
+    },
+    {
+      "isoCode2": "DJ",
+      "name": "Djibouti",
+      "currencyCode": "DJF",
+      "phonePrefix": "253",
+      "defaultTimezone": "Africa/Nairobi"
+    },
+    {
+      "isoCode2": "DK",
+      "name": "Denmark",
+      "currencyCode": "DKK",
+      "phonePrefix": "45",
+      "defaultTimezone": "Europe/Berlin"
+    },
+    {
+      "isoCode2": "DM",
+      "name": "Dominica",
+      "currencyCode": "XCD",
+      "phonePrefix": "1767",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "DO",
+      "name": "Dominican Republic",
+      "currencyCode": "DOP",
+      "phonePrefix": "1849",
+      "defaultTimezone": "America/Santo_Domingo"
+    },
+    {
+      "isoCode2": "DZ",
+      "name": "Algeria",
+      "currencyCode": "DZD",
+      "phonePrefix": "213",
+      "defaultTimezone": "Africa/Algiers"
+    },
+    {
+      "isoCode2": "EC",
+      "name": "Ecuador",
+      "currencyCode": "USD",
+      "phonePrefix": "593",
+      "defaultTimezone": "America/Guayaquil"
+    },
+    {
+      "isoCode2": "EE",
+      "name": "Estonia",
+      "currencyCode": "EUR",
+      "phonePrefix": "372",
+      "defaultTimezone": "Europe/Tallinn"
+    },
+    {
+      "isoCode2": "EG",
+      "name": "Egypt",
+      "currencyCode": "EGP",
+      "phonePrefix": "20",
+      "defaultTimezone": "Africa/Cairo"
+    },
+    {
+      "isoCode2": "EH",
+      "name": "Western Sahara",
+      "currencyCode": "MAD",
+      "phonePrefix": "212",
+      "defaultTimezone": "Africa/El_Aaiun"
+    },
+    {
+      "isoCode2": "ER",
+      "name": "Eritrea",
+      "currencyCode": "ERN",
+      "phonePrefix": "291",
+      "defaultTimezone": "Africa/Nairobi"
+    },
+    {
+      "isoCode2": "ES",
+      "name": "Spain",
+      "currencyCode": "EUR",
+      "phonePrefix": "34",
+      "defaultTimezone": "Europe/Madrid"
+    },
+    {
+      "isoCode2": "ET",
+      "name": "Ethiopia",
+      "currencyCode": "ETB",
+      "phonePrefix": "251",
+      "defaultTimezone": "Africa/Nairobi"
+    },
+    {
+      "isoCode2": "FI",
+      "name": "Finland",
+      "currencyCode": "EUR",
+      "phonePrefix": "358",
+      "defaultTimezone": "Europe/Helsinki"
+    },
+    {
+      "isoCode2": "FJ",
+      "name": "Fiji",
+      "currencyCode": "FJD",
+      "phonePrefix": "679",
+      "defaultTimezone": "Pacific/Fiji"
+    },
+    {
+      "isoCode2": "FK",
+      "name": "Falkland Islands",
+      "currencyCode": "FKP",
+      "phonePrefix": "500",
+      "defaultTimezone": "Atlantic/Stanley"
+    },
+    {
+      "isoCode2": "FM",
+      "name": "Micronesia",
+      "currencyCode": "USD",
+      "phonePrefix": "691",
+      "defaultTimezone": "Pacific/Kosrae"
+    },
+    {
+      "isoCode2": "FO",
+      "name": "Faroe Islands",
+      "currencyCode": "DKK",
+      "phonePrefix": "298",
+      "defaultTimezone": "Atlantic/Faroe"
+    },
+    {
+      "isoCode2": "FR",
+      "name": "France",
+      "currencyCode": "EUR",
+      "phonePrefix": "33",
+      "defaultTimezone": "Europe/Paris"
+    },
+    {
+      "isoCode2": "GA",
+      "name": "Gabon",
+      "currencyCode": "XAF",
+      "phonePrefix": "241",
+      "defaultTimezone": "Africa/Lagos"
+    },
+    {
+      "isoCode2": "GD",
+      "name": "Grenada",
+      "currencyCode": "XCD",
+      "phonePrefix": "1473",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "GE",
+      "name": "Georgia",
+      "currencyCode": "GEL",
+      "phonePrefix": "995",
+      "defaultTimezone": "Asia/Tbilisi"
+    },
+    {
+      "isoCode2": "GF",
+      "name": "French Guiana",
+      "currencyCode": "EUR",
+      "phonePrefix": "594",
+      "defaultTimezone": "America/Cayenne"
+    },
+    {
+      "isoCode2": "GH",
+      "name": "Ghana",
+      "currencyCode": "GHS",
+      "phonePrefix": "233",
+      "defaultTimezone": "Africa/Abidjan"
+    },
+    {
+      "isoCode2": "GI",
+      "name": "Gibraltar",
+      "currencyCode": "GIP",
+      "phonePrefix": "350",
+      "defaultTimezone": "Europe/Gibraltar"
+    },
+    {
+      "isoCode2": "GG",
+      "name": "Guernsey",
+      "currencyCode": "GBP",
+      "phonePrefix": "44",
+      "defaultTimezone": "Europe/London"
+    },
+    {
+      "isoCode2": "GL",
+      "name": "Greenland",
+      "currencyCode": "DKK",
+      "phonePrefix": "299",
+      "defaultTimezone": "America/Nuuk"
+    },
+    {
+      "isoCode2": "GM",
+      "name": "Gambia",
+      "currencyCode": "GMD",
+      "phonePrefix": "220",
+      "defaultTimezone": "Africa/Abidjan"
+    },
+    {
+      "isoCode2": "GN",
+      "name": "Guinea",
+      "currencyCode": "GNF",
+      "phonePrefix": "224",
+      "defaultTimezone": "Africa/Abidjan"
+    },
+    {
+      "isoCode2": "GP",
+      "name": "Guadeloupe",
+      "currencyCode": "EUR",
+      "phonePrefix": "590",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "GQ",
+      "name": "Equatorial Guinea",
+      "currencyCode": "XAF",
+      "phonePrefix": "240",
+      "defaultTimezone": "Africa/Lagos"
+    },
+    {
+      "isoCode2": "GR",
+      "name": "Greece",
+      "currencyCode": "EUR",
+      "phonePrefix": "30",
+      "defaultTimezone": "Europe/Athens"
+    },
+    {
+      "isoCode2": "GS",
+      "name": "South Georgia and the South Sandwich Islands",
+      "currencyCode": "GBP",
+      "phonePrefix": "500",
+      "defaultTimezone": "Atlantic/South_Georgia"
+    },
+    {
+      "isoCode2": "GT",
+      "name": "Guatemala",
+      "currencyCode": "GTQ",
+      "phonePrefix": "502",
+      "defaultTimezone": "America/Guatemala"
+    },
+    {
+      "isoCode2": "GU",
+      "name": "Guam",
+      "currencyCode": "USD",
+      "phonePrefix": "1671",
+      "defaultTimezone": "Pacific/Guam"
+    },
+    {
+      "isoCode2": "GW",
+      "name": "Guinea-Bissau",
+      "currencyCode": "XOF",
+      "phonePrefix": "245",
+      "defaultTimezone": "Africa/Bissau"
+    },
+    {
+      "isoCode2": "GY",
+      "name": "Guyana",
+      "currencyCode": "GYD",
+      "phonePrefix": "592",
+      "defaultTimezone": "America/Guyana"
+    },
+    {
+      "isoCode2": "HK",
+      "name": "Hong Kong",
+      "currencyCode": "HKD",
+      "phonePrefix": "852",
+      "defaultTimezone": "Asia/Hong_Kong"
+    },
+    {
+      "isoCode2": "HM",
+      "name": "Heard Island and McDonald Islands",
+      "currencyCode": "AUD",
+      "phonePrefix": "672",
+      "defaultTimezone": "UTC"
+    },
+    {
+      "isoCode2": "HN",
+      "name": "Honduras",
+      "currencyCode": "HNL",
+      "phonePrefix": "504",
+      "defaultTimezone": "America/Tegucigalpa"
+    },
+    {
+      "isoCode2": "HR",
+      "name": "Croatia",
+      "currencyCode": "EUR",
+      "phonePrefix": "385",
+      "defaultTimezone": "Europe/Belgrade"
+    },
+    {
+      "isoCode2": "HT",
+      "name": "Haiti",
+      "currencyCode": "HTG",
+      "phonePrefix": "509",
+      "defaultTimezone": "America/Port-au-Prince"
+    },
+    {
+      "isoCode2": "HU",
+      "name": "Hungary",
+      "currencyCode": "HUF",
+      "phonePrefix": "36",
+      "defaultTimezone": "Europe/Budapest"
+    },
+    {
+      "isoCode2": "ID",
+      "name": "Indonesia",
+      "currencyCode": "IDR",
+      "phonePrefix": "62",
+      "defaultTimezone": "Asia/Jakarta"
+    },
+    {
+      "isoCode2": "IE",
+      "name": "Ireland",
+      "currencyCode": "EUR",
+      "phonePrefix": "353",
+      "defaultTimezone": "Europe/Dublin"
+    },
+    {
+      "isoCode2": "IL",
+      "name": "Israel",
+      "currencyCode": "ILS",
+      "phonePrefix": "972",
+      "defaultTimezone": "Asia/Jerusalem"
+    },
+    {
+      "isoCode2": "IM",
+      "name": "Isle of Man",
+      "currencyCode": "GBP",
+      "phonePrefix": "44",
+      "defaultTimezone": "Europe/London"
+    },
+    {
+      "isoCode2": "IN",
+      "name": "India",
+      "currencyCode": "INR",
+      "phonePrefix": "91",
+      "defaultTimezone": "Asia/Kolkata"
+    },
+    {
+      "isoCode2": "IO",
+      "name": "British Indian Ocean Territory",
+      "currencyCode": "USD",
+      "phonePrefix": "246",
+      "defaultTimezone": "Indian/Chagos"
+    },
+    {
+      "isoCode2": "IQ",
+      "name": "Iraq",
+      "currencyCode": "IQD",
+      "phonePrefix": "964",
+      "defaultTimezone": "Asia/Baghdad"
+    },
+    {
+      "isoCode2": "IR",
+      "name": "Iran",
+      "currencyCode": "IRR",
+      "phonePrefix": "98",
+      "defaultTimezone": "Asia/Tehran"
+    },
+    {
+      "isoCode2": "IS",
+      "name": "Iceland",
+      "currencyCode": "ISK",
+      "phonePrefix": "354",
+      "defaultTimezone": "Africa/Abidjan"
+    },
+    {
+      "isoCode2": "IT",
+      "name": "Italy",
+      "currencyCode": "EUR",
+      "phonePrefix": "39",
+      "defaultTimezone": "Europe/Rome"
+    },
+    {
+      "isoCode2": "JE",
+      "name": "Jersey",
+      "currencyCode": "GBP",
+      "phonePrefix": "44",
+      "defaultTimezone": "Europe/London"
+    },
+    {
+      "isoCode2": "JM",
+      "name": "Jamaica",
+      "currencyCode": "JMD",
+      "phonePrefix": "1876",
+      "defaultTimezone": "America/Jamaica"
+    },
+    {
+      "isoCode2": "JO",
+      "name": "Jordan",
+      "currencyCode": "JOD",
+      "phonePrefix": "962",
+      "defaultTimezone": "Asia/Amman"
+    },
+    {
+      "isoCode2": "JP",
+      "name": "Japan",
+      "currencyCode": "JPY",
+      "phonePrefix": "81",
+      "defaultTimezone": "Asia/Tokyo"
+    },
+    {
+      "isoCode2": "KE",
+      "name": "Kenya",
+      "currencyCode": "KES",
+      "phonePrefix": "254",
+      "defaultTimezone": "Africa/Nairobi"
+    },
+    {
+      "isoCode2": "KG",
+      "name": "Kyrgyzstan",
+      "currencyCode": "KGS",
+      "phonePrefix": "996",
+      "defaultTimezone": "Asia/Bishkek"
+    },
+    {
+      "isoCode2": "KH",
+      "name": "Cambodia",
+      "currencyCode": "KHR",
+      "phonePrefix": "855",
+      "defaultTimezone": "Asia/Bangkok"
+    },
+    {
+      "isoCode2": "KI",
+      "name": "Kiribati",
+      "currencyCode": "AUD",
+      "phonePrefix": "686",
+      "defaultTimezone": "Pacific/Tarawa"
+    },
+    {
+      "isoCode2": "KM",
+      "name": "Comoros",
+      "currencyCode": "KMF",
+      "phonePrefix": "269",
+      "defaultTimezone": "Africa/Nairobi"
+    },
+    {
+      "isoCode2": "KN",
+      "name": "Saint Kitts and Nevis",
+      "currencyCode": "XCD",
+      "phonePrefix": "1869",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "KP",
+      "name": "North Korea",
+      "currencyCode": "KPW",
+      "phonePrefix": "850",
+      "defaultTimezone": "Asia/Pyongyang"
+    },
+    {
+      "isoCode2": "KR",
+      "name": "South Korea",
+      "currencyCode": "KRW",
+      "phonePrefix": "82",
+      "defaultTimezone": "Asia/Seoul"
+    },
+    {
+      "isoCode2": "KW",
+      "name": "Kuwait",
+      "currencyCode": "KWD",
+      "phonePrefix": "965",
+      "defaultTimezone": "Asia/Riyadh"
+    },
+    {
+      "isoCode2": "KY",
+      "name": "Cayman Islands",
+      "currencyCode": "KYD",
+      "phonePrefix": "1345",
+      "defaultTimezone": "America/Panama"
+    },
+    {
+      "isoCode2": "KZ",
+      "name": "Kazakhstan",
+      "currencyCode": "KZT",
+      "phonePrefix": "7",
+      "defaultTimezone": "Asia/Almaty"
+    },
+    {
+      "isoCode2": "LA",
+      "name": "Laos",
+      "currencyCode": "LAK",
+      "phonePrefix": "856",
+      "defaultTimezone": "Asia/Bangkok"
+    },
+    {
+      "isoCode2": "LB",
+      "name": "Lebanon",
+      "currencyCode": "LBP",
+      "phonePrefix": "961",
+      "defaultTimezone": "Asia/Beirut"
+    },
+    {
+      "isoCode2": "LC",
+      "name": "Saint Lucia",
+      "currencyCode": "XCD",
+      "phonePrefix": "1758",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "LI",
+      "name": "Liechtenstein",
+      "currencyCode": "CHF",
+      "phonePrefix": "423",
+      "defaultTimezone": "Europe/Zurich"
+    },
+    {
+      "isoCode2": "LK",
+      "name": "Sri Lanka",
+      "currencyCode": "LKR",
+      "phonePrefix": "94",
+      "defaultTimezone": "Asia/Colombo"
+    },
+    {
+      "isoCode2": "LR",
+      "name": "Liberia",
+      "currencyCode": "LRD",
+      "phonePrefix": "231",
+      "defaultTimezone": "Africa/Monrovia"
+    },
+    {
+      "isoCode2": "LS",
+      "name": "Lesotho",
+      "currencyCode": "LSL",
+      "phonePrefix": "266",
+      "defaultTimezone": "Africa/Johannesburg"
+    },
+    {
+      "isoCode2": "LT",
+      "name": "Lithuania",
+      "currencyCode": "EUR",
+      "phonePrefix": "370",
+      "defaultTimezone": "Europe/Vilnius"
+    },
+    {
+      "isoCode2": "LU",
+      "name": "Luxembourg",
+      "currencyCode": "EUR",
+      "phonePrefix": "352",
+      "defaultTimezone": "Europe/Brussels"
+    },
+    {
+      "isoCode2": "LV",
+      "name": "Latvia",
+      "currencyCode": "EUR",
+      "phonePrefix": "371",
+      "defaultTimezone": "Europe/Riga"
+    },
+    {
+      "isoCode2": "LY",
+      "name": "Libya",
+      "currencyCode": "LYD",
+      "phonePrefix": "218",
+      "defaultTimezone": "Africa/Tripoli"
+    },
+    {
+      "isoCode2": "MA",
+      "name": "Morocco",
+      "currencyCode": "MAD",
+      "phonePrefix": "212",
+      "defaultTimezone": "Africa/Casablanca"
+    },
+    {
+      "isoCode2": "MC",
+      "name": "Monaco",
+      "currencyCode": "EUR",
+      "phonePrefix": "377",
+      "defaultTimezone": "Europe/Paris"
+    },
+    {
+      "isoCode2": "MD",
+      "name": "Moldova",
+      "currencyCode": "MDL",
+      "phonePrefix": "373",
+      "defaultTimezone": "Europe/Chisinau"
+    },
+    {
+      "isoCode2": "ME",
+      "name": "Montenegro",
+      "currencyCode": "EUR",
+      "phonePrefix": "382",
+      "defaultTimezone": "Europe/Belgrade"
+    },
+    {
+      "isoCode2": "MF",
+      "name": "Saint Martin (French part)",
+      "currencyCode": "EUR",
+      "phonePrefix": "590",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "MG",
+      "name": "Madagascar",
+      "currencyCode": "MGA",
+      "phonePrefix": "261",
+      "defaultTimezone": "Africa/Nairobi"
+    },
+    {
+      "isoCode2": "MH",
+      "name": "Marshall Islands",
+      "currencyCode": "USD",
+      "phonePrefix": "692",
+      "defaultTimezone": "Pacific/Tarawa"
+    },
+    {
+      "isoCode2": "MK",
+      "name": "North Macedonia",
+      "currencyCode": "MKD",
+      "phonePrefix": "389",
+      "defaultTimezone": "Europe/Belgrade"
+    },
+    {
+      "isoCode2": "ML",
+      "name": "Mali",
+      "currencyCode": "XOF",
+      "phonePrefix": "223",
+      "defaultTimezone": "Africa/Abidjan"
+    },
+    {
+      "isoCode2": "MM",
+      "name": "Myanmar",
+      "currencyCode": "MMK",
+      "phonePrefix": "95",
+      "defaultTimezone": "Asia/Yangon"
+    },
+    {
+      "isoCode2": "MN",
+      "name": "Mongolia",
+      "currencyCode": "MNT",
+      "phonePrefix": "976",
+      "defaultTimezone": "Asia/Ulaanbaatar"
+    },
+    {
+      "isoCode2": "MO",
+      "name": "Macau",
+      "currencyCode": "MOP",
+      "phonePrefix": "853",
+      "defaultTimezone": "Asia/Macau"
+    },
+    {
+      "isoCode2": "MP",
+      "name": "Northern Mariana Islands",
+      "currencyCode": "USD",
+      "phonePrefix": "1670",
+      "defaultTimezone": "Pacific/Guam"
+    },
+    {
+      "isoCode2": "MQ",
+      "name": "Martinique",
+      "currencyCode": "EUR",
+      "phonePrefix": "596",
+      "defaultTimezone": "America/Martinique"
+    },
+    {
+      "isoCode2": "MR",
+      "name": "Mauritania",
+      "currencyCode": "MRU",
+      "phonePrefix": "222",
+      "defaultTimezone": "Africa/Abidjan"
+    },
+    {
+      "isoCode2": "MS",
+      "name": "Montserrat",
+      "currencyCode": "XCD",
+      "phonePrefix": "1664",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "MT",
+      "name": "Malta",
+      "currencyCode": "EUR",
+      "phonePrefix": "356",
+      "defaultTimezone": "Europe/Malta"
+    },
+    {
+      "isoCode2": "MU",
+      "name": "Mauritius",
+      "currencyCode": "MUR",
+      "phonePrefix": "230",
+      "defaultTimezone": "Indian/Mauritius"
+    },
+    {
+      "isoCode2": "MV",
+      "name": "Maldives",
+      "currencyCode": "MVR",
+      "phonePrefix": "960",
+      "defaultTimezone": "Indian/Maldives"
+    },
+    {
+      "isoCode2": "MW",
+      "name": "Malawi",
+      "currencyCode": "MWK",
+      "phonePrefix": "265",
+      "defaultTimezone": "Africa/Maputo"
+    },
+    {
+      "isoCode2": "MX",
+      "name": "Mexico",
+      "currencyCode": "MXN",
+      "phonePrefix": "52",
+      "defaultTimezone": "America/Mexico_City"
+    },
+    {
+      "isoCode2": "MY",
+      "name": "Malaysia",
+      "currencyCode": "MYR",
+      "phonePrefix": "60",
+      "defaultTimezone": "Asia/Kuching"
+    },
+    {
+      "isoCode2": "MZ",
+      "name": "Mozambique",
+      "currencyCode": "MZN",
+      "phonePrefix": "258",
+      "defaultTimezone": "Africa/Maputo"
+    },
+    {
+      "isoCode2": "NA",
+      "name": "Namibia",
+      "currencyCode": "NAD",
+      "phonePrefix": "264",
+      "defaultTimezone": "Africa/Windhoek"
+    },
+    {
+      "isoCode2": "NC",
+      "name": "New Caledonia",
+      "currencyCode": "XPF",
+      "phonePrefix": "687",
+      "defaultTimezone": "Pacific/Noumea"
+    },
+    {
+      "isoCode2": "NE",
+      "name": "Niger",
+      "currencyCode": "XOF",
+      "phonePrefix": "227",
+      "defaultTimezone": "Africa/Lagos"
+    },
+    {
+      "isoCode2": "NF",
+      "name": "Norfolk Island",
+      "currencyCode": "AUD",
+      "phonePrefix": "672",
+      "defaultTimezone": "Pacific/Norfolk"
+    },
+    {
+      "isoCode2": "NG",
+      "name": "Nigeria",
+      "currencyCode": "NGN",
+      "phonePrefix": "234",
+      "defaultTimezone": "Africa/Lagos"
+    },
+    {
+      "isoCode2": "NI",
+      "name": "Nicaragua",
+      "currencyCode": "NIO",
+      "phonePrefix": "505",
+      "defaultTimezone": "America/Managua"
+    },
+    {
+      "isoCode2": "NL",
+      "name": "Netherlands",
+      "currencyCode": "EUR",
+      "phonePrefix": "31",
+      "defaultTimezone": "Europe/Brussels"
+    },
+    {
+      "isoCode2": "NO",
+      "name": "Norway",
+      "currencyCode": "NOK",
+      "phonePrefix": "47",
+      "defaultTimezone": "Europe/Berlin"
+    },
+    {
+      "isoCode2": "NP",
+      "name": "Nepal",
+      "currencyCode": "NPR",
+      "phonePrefix": "977",
+      "defaultTimezone": "Asia/Kathmandu"
+    },
+    {
+      "isoCode2": "NR",
+      "name": "Nauru",
+      "currencyCode": "AUD",
+      "phonePrefix": "674",
+      "defaultTimezone": "Pacific/Nauru"
+    },
+    {
+      "isoCode2": "NU",
+      "name": "Niue",
+      "currencyCode": "NZD",
+      "phonePrefix": "683",
+      "defaultTimezone": "Pacific/Niue"
+    },
+    {
+      "isoCode2": "NZ",
+      "name": "New Zealand",
+      "currencyCode": "NZD",
+      "phonePrefix": "64",
+      "defaultTimezone": "Pacific/Auckland"
+    },
+    {
+      "isoCode2": "OM",
+      "name": "Oman",
+      "currencyCode": "OMR",
+      "phonePrefix": "968",
+      "defaultTimezone": "Asia/Dubai"
+    },
+    {
+      "isoCode2": "PA",
+      "name": "Panama",
+      "currencyCode": "PAB",
+      "phonePrefix": "507",
+      "defaultTimezone": "America/Panama"
+    },
+    {
+      "isoCode2": "PE",
+      "name": "Peru",
+      "currencyCode": "PEN",
+      "phonePrefix": "51",
+      "defaultTimezone": "America/Lima"
+    },
+    {
+      "isoCode2": "PF",
+      "name": "French Polynesia",
+      "currencyCode": "XPF",
+      "phonePrefix": "689",
+      "defaultTimezone": "Pacific/Tahiti"
+    },
+    {
+      "isoCode2": "PG",
+      "name": "Papua New Guinea",
+      "currencyCode": "PGK",
+      "phonePrefix": "675",
+      "defaultTimezone": "Pacific/Port_Moresby"
+    },
+    {
+      "isoCode2": "PH",
+      "name": "Philippines",
+      "currencyCode": "PHP",
+      "phonePrefix": "63",
+      "defaultTimezone": "Asia/Manila"
+    },
+    {
+      "isoCode2": "PK",
+      "name": "Pakistan",
+      "currencyCode": "PKR",
+      "phonePrefix": "92",
+      "defaultTimezone": "Asia/Karachi"
+    },
+    {
+      "isoCode2": "PL",
+      "name": "Poland",
+      "currencyCode": "PLN",
+      "phonePrefix": "48",
+      "defaultTimezone": "Europe/Warsaw"
+    },
+    {
+      "isoCode2": "PM",
+      "name": "Saint Pierre and Miquelon",
+      "currencyCode": "EUR",
+      "phonePrefix": "508",
+      "defaultTimezone": "America/Miquelon"
+    },
+    {
+      "isoCode2": "PN",
+      "name": "Pitcairn Islands",
+      "currencyCode": "NZD",
+      "phonePrefix": "64",
+      "defaultTimezone": "Pacific/Pitcairn"
+    },
+    {
+      "isoCode2": "PR",
+      "name": "Puerto Rico",
+      "currencyCode": "USD",
+      "phonePrefix": "1939",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "PS",
+      "name": "State of Palestine",
+      "currencyCode": "ILS",
+      "phonePrefix": "970",
+      "defaultTimezone": "Asia/Gaza"
+    },
+    {
+      "isoCode2": "PT",
+      "name": "Portugal",
+      "currencyCode": "EUR",
+      "phonePrefix": "351",
+      "defaultTimezone": "Europe/Lisbon"
+    },
+    {
+      "isoCode2": "PW",
+      "name": "Palau",
+      "currencyCode": "USD",
+      "phonePrefix": "680",
+      "defaultTimezone": "Pacific/Palau"
+    },
+    {
+      "isoCode2": "PY",
+      "name": "Paraguay",
+      "currencyCode": "PYG",
+      "phonePrefix": "595",
+      "defaultTimezone": "America/Asuncion"
+    },
+    {
+      "isoCode2": "QA",
+      "name": "Qatar",
+      "currencyCode": "QAR",
+      "phonePrefix": "974",
+      "defaultTimezone": "Asia/Qatar"
+    },
+    {
+      "isoCode2": "RE",
+      "name": "Réunion",
+      "currencyCode": "EUR",
+      "phonePrefix": "262",
+      "defaultTimezone": "Asia/Dubai"
+    },
+    {
+      "isoCode2": "RO",
+      "name": "Romania",
+      "currencyCode": "RON",
+      "phonePrefix": "40",
+      "defaultTimezone": "Europe/Bucharest"
+    },
+    {
+      "isoCode2": "RS",
+      "name": "Serbia",
+      "currencyCode": "RSD",
+      "phonePrefix": "381",
+      "defaultTimezone": "Europe/Belgrade"
+    },
+    {
+      "isoCode2": "RU",
+      "name": "Russian Federation",
+      "currencyCode": "RUB",
+      "phonePrefix": "7",
+      "defaultTimezone": "Europe/Kaliningrad"
+    },
+    {
+      "isoCode2": "RW",
+      "name": "Rwanda",
+      "currencyCode": "RWF",
+      "phonePrefix": "250",
+      "defaultTimezone": "Africa/Maputo"
+    },
+    {
+      "isoCode2": "SA",
+      "name": "Saudi Arabia",
+      "currencyCode": "SAR",
+      "phonePrefix": "966",
+      "defaultTimezone": "Asia/Riyadh"
+    },
+    {
+      "isoCode2": "SB",
+      "name": "Solomon Islands",
+      "currencyCode": "SBD",
+      "phonePrefix": "677",
+      "defaultTimezone": "Pacific/Guadalcanal"
+    },
+    {
+      "isoCode2": "SC",
+      "name": "Seychelles",
+      "currencyCode": "SCR",
+      "phonePrefix": "248",
+      "defaultTimezone": "Asia/Dubai"
+    },
+    {
+      "isoCode2": "SD",
+      "name": "Sudan",
+      "currencyCode": "SDG",
+      "phonePrefix": "249",
+      "defaultTimezone": "Africa/Khartoum"
+    },
+    {
+      "isoCode2": "SE",
+      "name": "Sweden",
+      "currencyCode": "SEK",
+      "phonePrefix": "46",
+      "defaultTimezone": "Europe/Berlin"
+    },
+    {
+      "isoCode2": "SG",
+      "name": "Singapore",
+      "currencyCode": "SGD",
+      "phonePrefix": "65",
+      "defaultTimezone": "Asia/Singapore"
+    },
+    {
+      "isoCode2": "SH",
+      "name": "Saint Helena, Ascension and Tristan da Cunha",
+      "currencyCode": "SHP",
+      "phonePrefix": "290",
+      "defaultTimezone": "Africa/Abidjan"
+    },
+    {
+      "isoCode2": "SI",
+      "name": "Slovenia",
+      "currencyCode": "EUR",
+      "phonePrefix": "386",
+      "defaultTimezone": "Europe/Belgrade"
+    },
+    {
+      "isoCode2": "SJ",
+      "name": "Svalbard and Jan Mayen",
+      "currencyCode": "NOK",
+      "phonePrefix": "47",
+      "defaultTimezone": "Europe/Berlin"
+    },
+    {
+      "isoCode2": "SK",
+      "name": "Slovakia",
+      "currencyCode": "EUR",
+      "phonePrefix": "421",
+      "defaultTimezone": "Europe/Prague"
+    },
+    {
+      "isoCode2": "SL",
+      "name": "Sierra Leone",
+      "currencyCode": "SLE",
+      "phonePrefix": "232",
+      "defaultTimezone": "Africa/Abidjan"
+    },
+    {
+      "isoCode2": "SM",
+      "name": "San Marino",
+      "currencyCode": "EUR",
+      "phonePrefix": "378",
+      "defaultTimezone": "Europe/Rome"
+    },
+    {
+      "isoCode2": "SN",
+      "name": "Senegal",
+      "currencyCode": "XOF",
+      "phonePrefix": "221",
+      "defaultTimezone": "Africa/Abidjan"
+    },
+    {
+      "isoCode2": "SO",
+      "name": "Somalia",
+      "currencyCode": "SOS",
+      "phonePrefix": "252",
+      "defaultTimezone": "Africa/Nairobi"
+    },
+    {
+      "isoCode2": "SR",
+      "name": "Suriname",
+      "currencyCode": "SRD",
+      "phonePrefix": "597",
+      "defaultTimezone": "America/Paramaribo"
+    },
+    {
+      "isoCode2": "SS",
+      "name": "South Sudan",
+      "currencyCode": "SSP",
+      "phonePrefix": "211",
+      "defaultTimezone": "Africa/Juba"
+    },
+    {
+      "isoCode2": "ST",
+      "name": "São Tomé and Príncipe",
+      "currencyCode": "STD",
+      "phonePrefix": "239",
+      "defaultTimezone": "Africa/Sao_Tome"
+    },
+    {
+      "isoCode2": "SV",
+      "name": "El Salvador",
+      "currencyCode": "SVC",
+      "phonePrefix": "503",
+      "defaultTimezone": "America/El_Salvador"
+    },
+    {
+      "isoCode2": "SX",
+      "name": "Sint Maarten (Dutch part)",
+      "currencyCode": "XCG",
+      "phonePrefix": "1721",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "SY",
+      "name": "Syria",
+      "currencyCode": "SYP",
+      "phonePrefix": "963",
+      "defaultTimezone": "Asia/Damascus"
+    },
+    {
+      "isoCode2": "SZ",
+      "name": "Eswatini",
+      "currencyCode": "SZL",
+      "phonePrefix": "268",
+      "defaultTimezone": "Africa/Johannesburg"
+    },
+    {
+      "isoCode2": "TC",
+      "name": "Turks and Caicos Islands",
+      "currencyCode": "USD",
+      "phonePrefix": "1649",
+      "defaultTimezone": "America/Grand_Turk"
+    },
+    {
+      "isoCode2": "TD",
+      "name": "Chad",
+      "currencyCode": "XAF",
+      "phonePrefix": "235",
+      "defaultTimezone": "Africa/Ndjamena"
+    },
+    {
+      "isoCode2": "TF",
+      "name": "French Southern Territories",
+      "currencyCode": "EUR",
+      "phonePrefix": "262",
+      "defaultTimezone": "Asia/Dubai"
+    },
+    {
+      "isoCode2": "TG",
+      "name": "Togo",
+      "currencyCode": "XOF",
+      "phonePrefix": "228",
+      "defaultTimezone": "Africa/Abidjan"
+    },
+    {
+      "isoCode2": "TH",
+      "name": "Thailand",
+      "currencyCode": "THB",
+      "phonePrefix": "66",
+      "defaultTimezone": "Asia/Bangkok"
+    },
+    {
+      "isoCode2": "TJ",
+      "name": "Tajikistan",
+      "currencyCode": "TJS",
+      "phonePrefix": "992",
+      "defaultTimezone": "Asia/Dushanbe"
+    },
+    {
+      "isoCode2": "TK",
+      "name": "Tokelau",
+      "currencyCode": "NZD",
+      "phonePrefix": "690",
+      "defaultTimezone": "Pacific/Fakaofo"
+    },
+    {
+      "isoCode2": "TM",
+      "name": "Turkmenistan",
+      "currencyCode": "TMT",
+      "phonePrefix": "993",
+      "defaultTimezone": "Asia/Ashgabat"
+    },
+    {
+      "isoCode2": "TN",
+      "name": "Tunisia",
+      "currencyCode": "TND",
+      "phonePrefix": "216",
+      "defaultTimezone": "Africa/Tunis"
+    },
+    {
+      "isoCode2": "TO",
+      "name": "Tonga",
+      "currencyCode": "TOP",
+      "phonePrefix": "676",
+      "defaultTimezone": "Pacific/Tongatapu"
+    },
+    {
+      "isoCode2": "TL",
+      "name": "Timor-Leste",
+      "currencyCode": "USD",
+      "phonePrefix": "670",
+      "defaultTimezone": "Asia/Dili"
+    },
+    {
+      "isoCode2": "TR",
+      "name": "Türkiye",
+      "currencyCode": "TRY",
+      "phonePrefix": "90",
+      "defaultTimezone": "Europe/Istanbul"
+    },
+    {
+      "isoCode2": "TT",
+      "name": "Trinidad and Tobago",
+      "currencyCode": "TTD",
+      "phonePrefix": "1868",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "TV",
+      "name": "Tuvalu",
+      "currencyCode": "AUD",
+      "phonePrefix": "688",
+      "defaultTimezone": "Pacific/Tarawa"
+    },
+    {
+      "isoCode2": "TW",
+      "name": "Taiwan",
+      "currencyCode": "TWD",
+      "phonePrefix": "886",
+      "defaultTimezone": "Asia/Taipei"
+    },
+    {
+      "isoCode2": "TZ",
+      "name": "Tanzania",
+      "currencyCode": "TZS",
+      "phonePrefix": "255",
+      "defaultTimezone": "Africa/Nairobi"
+    },
+    {
+      "isoCode2": "UA",
+      "name": "Ukraine",
+      "currencyCode": "UAH",
+      "phonePrefix": "380",
+      "defaultTimezone": "Europe/Simferopol"
+    },
+    {
+      "isoCode2": "UG",
+      "name": "Uganda",
+      "currencyCode": "UGX",
+      "phonePrefix": "256",
+      "defaultTimezone": "Africa/Nairobi"
+    },
+    {
+      "isoCode2": "UK",
+      "name": "United Kingdom",
+      "currencyCode": "GBP",
+      "phonePrefix": "44",
+      "defaultTimezone": "UTC"
+    },
+    {
+      "isoCode2": "UM",
+      "name": "USA Minor Outlying Islands",
+      "currencyCode": "USD",
+      "phonePrefix": "699",
+      "defaultTimezone": "Pacific/Pago_Pago"
+    },
+    {
+      "isoCode2": "US",
+      "name": "United States",
+      "currencyCode": "USD",
+      "phonePrefix": "1",
+      "defaultTimezone": "America/New_York"
+    },
+    {
+      "isoCode2": "UY",
+      "name": "Uruguay",
+      "currencyCode": "UYU",
+      "phonePrefix": "598",
+      "defaultTimezone": "America/Montevideo"
+    },
+    {
+      "isoCode2": "UZ",
+      "name": "Uzbekistan",
+      "currencyCode": "UZS",
+      "phonePrefix": "998",
+      "defaultTimezone": "Asia/Samarkand"
+    },
+    {
+      "isoCode2": "VA",
+      "name": "Holy See (Vatican City State)",
+      "currencyCode": "EUR",
+      "phonePrefix": "379",
+      "defaultTimezone": "Europe/Rome"
+    },
+    {
+      "isoCode2": "VC",
+      "name": "Saint Vincent and the Grenadines",
+      "currencyCode": "XCD",
+      "phonePrefix": "1784",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "VE",
+      "name": "Venezuela",
+      "currencyCode": "VEF",
+      "phonePrefix": "58",
+      "defaultTimezone": "America/Caracas"
+    },
+    {
+      "isoCode2": "VG",
+      "name": "Virgin Islands (British)",
+      "currencyCode": "USD",
+      "phonePrefix": "1284",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "VI",
+      "name": "Virgin Islands (USA)",
+      "currencyCode": "USD",
+      "phonePrefix": "1340",
+      "defaultTimezone": "America/Puerto_Rico"
+    },
+    {
+      "isoCode2": "VN",
+      "name": "Vietnam",
+      "currencyCode": "VND",
+      "phonePrefix": "84",
+      "defaultTimezone": "Asia/Bangkok"
+    },
+    {
+      "isoCode2": "VU",
+      "name": "Vanuatu",
+      "currencyCode": "VUV",
+      "phonePrefix": "678",
+      "defaultTimezone": "Pacific/Efate"
+    },
+    {
+      "isoCode2": "WF",
+      "name": "Wallis and Futuna",
+      "currencyCode": "XPF",
+      "phonePrefix": "681",
+      "defaultTimezone": "Pacific/Tarawa"
+    },
+    {
+      "isoCode2": "WS",
+      "name": "Samoa",
+      "currencyCode": "WST",
+      "phonePrefix": "685",
+      "defaultTimezone": "Pacific/Apia"
+    },
+    {
+      "isoCode2": "YE",
+      "name": "Yemen",
+      "currencyCode": "YER",
+      "phonePrefix": "967",
+      "defaultTimezone": "Asia/Riyadh"
+    },
+    {
+      "isoCode2": "YT",
+      "name": "Mayotte",
+      "currencyCode": "EUR",
+      "phonePrefix": "262",
+      "defaultTimezone": "Africa/Nairobi"
+    },
+    {
+      "isoCode2": "ZA",
+      "name": "South Africa",
+      "currencyCode": "ZAR",
+      "phonePrefix": "27",
+      "defaultTimezone": "Africa/Johannesburg"
+    },
+    {
+      "isoCode2": "ZM",
+      "name": "Zambia",
+      "currencyCode": "ZMW",
+      "phonePrefix": "260",
+      "defaultTimezone": "Africa/Maputo"
+    },
+    {
+      "isoCode2": "ZW",
+      "name": "Zimbabwe",
+      "currencyCode": "ZIG",
+      "phonePrefix": "263",
+      "defaultTimezone": "Africa/Maputo"
+    },
+    {
+      "isoCode2": "XI",
+      "name": "Northern Ireland",
+      "currencyCode": "GBP",
+      "phonePrefix": "44",
+      "defaultTimezone": "UTC"
+    },
+    {
+      "isoCode2": "XK",
+      "name": "Kosovo",
+      "currencyCode": "EUR",
+      "phonePrefix": "383",
+      "defaultTimezone": "UTC"
+    }
+  ]
+}

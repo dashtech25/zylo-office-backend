@@ -29,6 +29,7 @@ from datetime import date, datetime
 from sqlalchemy import (
     CheckConstraint,
     ForeignKey,
+    Index,
     Numeric,
     SmallInteger,
     String,
@@ -204,9 +205,34 @@ class FuelProduct(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # §5.2). Nullable : sans valeur connue, aucune correction n'est
     # appliquée plutôt que d'inventer un coefficient (endpoint 7, §3.1).
     thermalExpansionCoefficient: Mapped[float | None] = mapped_column(Numeric(8, 6), nullable=True)
-    currentPriceFcfa: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
-    currentCostFcfa: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    # currentPriceFcfa/currentCostFcfa retirés (audit Configuration
+    # carburant P1 §B) : dénormalisation FCFA de l'ancien schéma, jamais mise
+    # à jour par aucun service — `PriceHistory` est la seule source de
+    # vérité pour un prix. Le "prix unitaire courant" affiché à l'écran vient
+    # désormais de `TankCurrentStateResponse.unitPriceAmount`, résolu en
+    # temps réel via `_resolve_applicable_price`.
     displayColor: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    active: Mapped[bool] = mapped_column(nullable=False, default=True)
+
+
+class StationFuelProduct(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "zyloLiquidStationFuelProduct"
+    __table_args__ = (
+        UniqueConstraint("stationId", "fuelProductId", name="uq_zlStationFuelProduct_station_product"),
+        {
+            "comment": "Association explicite « ce produit est vendu dans cette station » — jamais déduite implicitement "
+            "d'une cuve existante ou d'un prix déjà saisi (page_configuration.md §15/§41). `active=false` retire le "
+            "produit de la station sans perdre l'historique de prix déjà enregistré pour ce couple (même philosophie "
+            "que FuelProduct.active : jamais de suppression réelle d'une donnée référencée ailleurs)."
+        },
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    fuelProductId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidFuelProduct.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     active: Mapped[bool] = mapped_column(nullable=False, default=True)
 
 
@@ -237,6 +263,16 @@ class Station(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     latitude: Mapped[float | None] = mapped_column(Numeric(10, 7), nullable=True)
     longitude: Mapped[float | None] = mapped_column(Numeric(10, 7), nullable=True)
     timezone: Mapped[str] = mapped_column(String(50), nullable=False, default="Africa/Douala")
+    # Dérogation explicite de devise (page_caisse_configuration_audit, P1
+    # §E.4, inspirée de `currency_override_id` de l'ancien Zylo/Odoo) : une
+    # station facturant dans une devise différente de celle héritée de sa
+    # ville/pays (ex. station frontalière) peut la fixer ici sans avoir
+    # besoin d'une vraie hiérarchie géographique de devises. `NULL` = pas de
+    # dérogation, la devise reste dérivée de `cityId` (jamais une devise
+    # inventée par défaut si aucune des deux résolutions n'aboutit).
+    currencyOverrideId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("currency.id", ondelete="RESTRICT"), nullable=True
+    )
 
     holykellGroupId: Mapped[int | None] = mapped_column(nullable=True)
 
@@ -444,12 +480,33 @@ class PriceHistory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "zyloLiquidPriceHistory"
     __table_args__ = (
         UniqueConstraint("stationId", "fuelProductId", "effectiveFrom", name="uq_zlPriceHistory_station_product_effectiveFrom"),
+        # PostgreSQL ne considère jamais deux NULL comme égaux dans une
+        # UniqueConstraint classique : sans cet index partiel, la contrainte
+        # ci-dessus n'empêcherait pas deux lignes « prix par défaut réseau »
+        # (stationId NULL, audit Configuration carburant P2 §E) pour le même
+        # produit et la même date — jamais deux prix par défaut concurrents.
+        # currencyId fait partie de la clé (refonte multi-devise, Phase 4
+        # §1 de refonte-configuration-zylo-liquid.md) : un même produit doit
+        # pouvoir avoir un prix réseau simultané dans plusieurs devises —
+        # seule une paire (devise, date) identique doit rester unique.
+        Index(
+            "uq_zlPriceHistory_networkDefault_product_effectiveFrom",
+            "fuelProductId", "currencyId", "effectiveFrom",
+            unique=True,
+            postgresql_where='"stationId" IS NULL',
+        ),
         CheckConstraint('"priceAmount" > 0', name="ck_zlPriceHistory_priceAmount_positive"),
         {"comment": "Historique des prix — changement réel = insertion, correction = UPDATE ciblé. Source : table 'price_history'."},
     )
 
-    stationId: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True
+    # NULL = prix par défaut du réseau (pas rattaché à une station précise),
+    # audit Configuration carburant P2 §E — inspiré de la résolution à 2
+    # niveaux (station précise / défaut société) déjà validée dans l'ancien
+    # Zylo/Odoo (`zylo.liquid.fuel.price._get_current_price`). Résolu par
+    # `_resolve_applicable_price` : priorité au prix propre à la station,
+    # repli sur le prix par défaut réseau seulement si aucun n'existe.
+    stationId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=True, index=True
     )
     fuelProductId: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("zyloLiquidFuelProduct.id", ondelete="RESTRICT"), nullable=False, index=True
@@ -460,3 +517,740 @@ class PriceHistory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     effectiveFrom: Mapped[datetime] = mapped_column(nullable=False, index=True)
     changeReason: Mapped[str | None] = mapped_column(Text, nullable=True)
     createdBy: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)
+
+
+class TankCashDailyAggregate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Cache d'un jour de caisse déjà clos, par cuve (audit Caisse P2 §E.3
+    — performance sur les périodes longues, 30 jours). Ne remplace jamais
+    le calcul à la demande : `service._get_or_compute_tank_cash_for_day`
+    ne consulte cette table que pour une journée entière déjà terminée
+    depuis au moins quelques heures (jamais « aujourd'hui », jamais une
+    journée encore susceptible de recevoir une mesure en retard — cas K
+    de page_caisse.md). Ne porte jamais les segments (traçabilité) : un
+    clic sur une cuve recalcule toujours en direct via
+    `_compute_tank_cash`, cette table ne sert qu'aux totaux agrégés des
+    vues réseau/station."""
+
+    __tablename__ = "zyloLiquidTankCashDailyAggregate"
+    __table_args__ = (
+        UniqueConstraint("tankId", "cashDate", name="uq_zlTankCashDailyAggregate_tank_date"),
+        {"comment": "Cache des totaux de caisse par cuve et par jour clos — jamais la source de vérité, un recalcul reste toujours possible."},
+    )
+
+    tankId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Nommée `cashDate` (pas `date`) : un attribut de classe portant
+    # exactement le nom du type importé `date` casse la résolution du type
+    # SQLAlchemy à l'exécution (`Mapped[date]` se retrouve à pointer vers
+    # l'attribut lui-même plutôt que vers `datetime.date`).
+    cashDate: Mapped[date] = mapped_column(nullable=False, index=True)
+    volumeSoldLiters: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
+    volumeNotCalculableReason: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    monetaryValue: Mapped[float | None] = mapped_column(Numeric(16, 4), nullable=True)
+    currencyCode: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    monetaryValueNotCalculableReason: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    confidence: Mapped[str] = mapped_column(String(20), nullable=False)
+
+
+# ================================================================
+# Couche déclarative — processus-double-sources-verite, Phase 5 à 8.
+# Un fait opérationnel constaté par un humain, distinct par nature de la
+# télémétrie ci-dessus (jamais append-only au même sens : modifiable par son
+# auteur tant que `lifecycleStatus = 'declared'`, cf. Phase 5 §3). Chaque
+# type de déclaration reste sa propre table (Phase 5 §1 : jamais une table
+# générique unique) — `DeclarationMixin` ne crée aucune table partagée,
+# seulement des colonnes répétées par convention Python.
+# ================================================================
+
+
+class DeclarationMixin:
+    """Socle commun à toute déclaration opérationnelle (Phase 5 §2 de
+    processus-double-sources-verite/05-modele-declaratif.md). `stationId` est
+    résolu à la saisie depuis la portée de l'auteur, jamais redemandé (même
+    mécanisme que le scoping RBAC déjà en place pour Station/Tank/PriceHistory)
+    — la valeur est portée ici, sa résolution reste une responsabilité du
+    service, pas du modèle. `lifecycleStatus` n'a que deux valeurs stockées :
+    Phase 5 §3 précise qu'il n'existe aucun état intermédiaire "validée mais
+    encore modifiable" — le passage à `locked` est immédiat au moment du
+    rapprochement/de la validation."""
+
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True)
+    authorUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)
+    eventAt: Mapped[datetime] = mapped_column(nullable=False, index=True)
+    declaredAt: Mapped[datetime] = mapped_column(nullable=False)
+    lifecycleStatus: Mapped[str] = mapped_column(String(10), nullable=False, server_default="declared")
+    changeReason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class DeliveryDeclaration(DeclarationMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Réception de livraison déclarée par un humain (Phase 3 §12, priorité
+    1) — jamais confondue avec `DeliveryDetected` ci-dessus (télémétrique,
+    algorithmique) : les deux existent en parallèle, rapprochées seulement
+    par le mécanisme de la Phase 6, jamais fusionnées."""
+
+    __tablename__ = "zyloLiquidDeliveryDeclaration"
+    __table_args__ = (
+        CheckConstraint("\"lifecycleStatus\" IN ('declared','locked')", name="ck_zlDeliveryDeclaration_lifecycleStatus"),
+        {"comment": "Réception de livraison déclarée — distincte de DeliveryDetected (télémétrique)."},
+    )
+
+    fuelProductId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidFuelProduct.id", ondelete="RESTRICT"), nullable=False, index=True)
+    # Libellé libre conservé pour les lignes historiques et les saisies sans
+    # référence ; quand `supplierId` est renseigné, le service le fige au nom
+    # du fournisseur au moment de la saisie — snapshot documentaire (même
+    # principe que Payment.exchangeRateApplied), jamais une seconde source de
+    # vérité pour le rapprochement (Phase 6 ne raisonne que sur les volumes).
+    supplierName: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    # Références de la couche Approvisionnement (couche ci-dessus) — toutes
+    # NULLables : les lignes antérieures à l'existence de ces référentiels
+    # restent valides sans elles, le rapprochement n'en dépend pas.
+    supplierId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidSupplier.id", ondelete="RESTRICT"), nullable=True, index=True)
+    truckId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTruck.id", ondelete="RESTRICT"), nullable=True, index=True)
+    purchaseOrderId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidPurchaseOrder.id", ondelete="RESTRICT"), nullable=True, index=True)
+    declaredVolumeLiters: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
+    # Structuré (pas une simple pièce jointe) : pratique courante confirmée
+    # par la recherche externe (Phase 4 v2 §7 de 04-matrice-roles-actions-v2.md).
+    deliveryNoteReference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    correctsDeclarationId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidDeliveryDeclaration.id", ondelete="RESTRICT"), nullable=True)
+    reconciledWithId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    reconciledWithType: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
+class ShiftCashDeclaration(DeclarationMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Prise/fin de poste + caisse déclarée (Phase 3 §12) — rapprochée avec
+    `TankCashDailyAggregate` (agrégat télémétrique existant, Phase 6 §4.2),
+    jamais un nouveau calcul télémétrique."""
+
+    __tablename__ = "zyloLiquidShiftCashDeclaration"
+    __table_args__ = (
+        CheckConstraint("\"lifecycleStatus\" IN ('declared','locked')", name="ck_zlShiftCashDeclaration_lifecycleStatus"),
+        {"comment": "Prise/fin de poste et caisse déclarées, par cuve — rapprochée avec TankCashDailyAggregate."},
+    )
+
+    tankId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="RESTRICT"), nullable=False, index=True)
+    shiftStart: Mapped[datetime] = mapped_column(nullable=False)
+    shiftEnd: Mapped[datetime] = mapped_column(nullable=False)
+    openingReadingMm: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    closingReadingMm: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    declaredCashAmount: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+    currencyId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("currency.id", ondelete="RESTRICT"), nullable=False)
+    correctsDeclarationId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftCashDeclaration.id", ondelete="RESTRICT"), nullable=True)
+    reconciledWithId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    reconciledWithType: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
+class ManualGaugingDeclaration(DeclarationMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Jaugeage manuel de contrôle (Phase 3 §12) — rapproché avec la mesure
+    `TankMeasurement` la plus proche dans le temps (Phase 6 §4.1), jamais un
+    remplacement de la télémétrie."""
+
+    __tablename__ = "zyloLiquidManualGaugingDeclaration"
+    __table_args__ = (
+        CheckConstraint("\"lifecycleStatus\" IN ('declared','locked')", name="ck_zlManualGaugingDeclaration_lifecycleStatus"),
+        CheckConstraint("method IN ('dipstick','gauge_pole','other')", name="ck_zlManualGaugingDeclaration_method"),
+        {"comment": "Jaugeage manuel de contrôle — rapproché avec TankMeasurement, jamais un remplacement."},
+    )
+
+    tankId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="RESTRICT"), nullable=False, index=True)
+    declaredHeightMm: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    method: Mapped[str] = mapped_column(String(20), nullable=False)
+    correctsDeclarationId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidManualGaugingDeclaration.id", ondelete="RESTRICT"), nullable=True)
+    reconciledWithId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    reconciledWithType: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
+class QualityCheckDeclaration(DeclarationMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Contrôle qualité/eau déclaré (Phase 3 §12) — rapproché par
+    présence/absence d'une `Alert` de type `water` sur la même cuve dans une
+    fenêtre autour de l'instant déclaré (Phase 6 §4.1) : une absence
+    d'alerte ne signifie jamais que la déclaration est fausse, seulement
+    que le capteur ne l'a pas détectée à son propre seuil."""
+
+    __tablename__ = "zyloLiquidQualityCheckDeclaration"
+    __table_args__ = (
+        CheckConstraint("\"lifecycleStatus\" IN ('declared','locked')", name="ck_zlQualityCheckDeclaration_lifecycleStatus"),
+        CheckConstraint("method IN ('dipstick','water_paste','other')", name="ck_zlQualityCheckDeclaration_method"),
+        {"comment": "Contrôle qualité/eau déclaré — rapproché par présence d'une Alert de type water."},
+    )
+
+    tankId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="RESTRICT"), nullable=False, index=True)
+    waterDetected: Mapped[bool] = mapped_column(nullable=False)
+    waterHeightMm: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    method: Mapped[str] = mapped_column(String(20), nullable=False)
+    correctsDeclarationId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidQualityCheckDeclaration.id", ondelete="RESTRICT"), nullable=True)
+    reconciledWithId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    reconciledWithType: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
+class LeakTestDeclaration(DeclarationMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Test de fuite déclenché manuellement (Phase 3 §12) — distinct de
+    `LeakageRecord` ci-dessus (résultat de l'algorithme automatique, jamais
+    actionné en production à ce jour, Phase 1 de l'autre mission). Le
+    rapprochement reste théorique tant que l'algorithme n'est pas activé
+    (Phase 6 §3)."""
+
+    __tablename__ = "zyloLiquidLeakTestDeclaration"
+    __table_args__ = (
+        CheckConstraint("\"lifecycleStatus\" IN ('declared','locked')", name="ck_zlLeakTestDeclaration_lifecycleStatus"),
+        CheckConstraint("result IN ('normal','anomaly')", name="ck_zlLeakTestDeclaration_result"),
+        {"comment": "Test de fuite déclenché manuellement — distinct de LeakageRecord (algorithmique)."},
+    )
+
+    tankId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="RESTRICT"), nullable=False, index=True)
+    result: Mapped[str] = mapped_column(String(10), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    correctsDeclarationId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidLeakTestDeclaration.id", ondelete="RESTRICT"), nullable=True)
+    reconciledWithId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    reconciledWithType: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
+class IncidentDeclaration(DeclarationMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Incident/observation libre (Phase 3 §12) — volontairement générique
+    dans sa propre entité (Phase 5 §1, exception assumée à la règle "pas de
+    table générique") : seule la catégorie est contrôlée, jamais le texte."""
+
+    __tablename__ = "zyloLiquidIncidentDeclaration"
+    __table_args__ = (
+        CheckConstraint("\"lifecycleStatus\" IN ('declared','locked')", name="ck_zlIncidentDeclaration_lifecycleStatus"),
+        CheckConstraint("category IN ('safety','equipment','quality','security','other')", name="ck_zlIncidentDeclaration_category"),
+        {"comment": "Incident/observation libre — catégorie contrôlée, description toujours libre."},
+    )
+
+    tankId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="RESTRICT"), nullable=True, index=True)
+    category: Mapped[str] = mapped_column(String(20), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    correctsDeclarationId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidIncidentDeclaration.id", ondelete="RESTRICT"), nullable=True)
+    reconciledWithId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    reconciledWithType: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
+# ================================================================
+# Couche Commercial (processus-double-sources-verite, Phase 5 §5, Phase 7
+# §2-3) — Bloc 3. Jamais une quatrième source de vérité indépendante
+# (Phase 4 v2 §3 de 04-matrice-roles-actions-v2.md) : `Sale` qualifie
+# toujours une distribution déjà constatée (télémétrie ou déclaration),
+# jamais un fait nouveau. Portée organisation entière pour tout sauf
+# `Sale` (scopée station, comme les entités déclaratives) — Phase 7 §2.
+# ================================================================
+
+
+class CommercialAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Compte client/tiers commercial — nom définitif confirmé (Phase 7 §3),
+    délibérément distinct de `Organization` (le tenant, jamais le même
+    concept — Phase 4 v2 §11)."""
+
+    __tablename__ = "zyloLiquidCommercialAccount"
+    __table_args__ = ({"comment": "Compte client à crédit — jamais confondu avec Organization (le tenant)."},)
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id", ondelete="RESTRICT"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(150), nullable=False)
+    currencyId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("currency.id", ondelete="RESTRICT"), nullable=False)
+    creditLimit: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+    active: Mapped[bool] = mapped_column(nullable=False, default=True)
+
+
+class Vehicle(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Volontairement minimal — pas un module de gestion de flotte complet
+    (Phase 5 §5, Phase 4 v2 §11)."""
+
+    __tablename__ = "zyloLiquidVehicle"
+    __table_args__ = ({"comment": "Référence véhicule minimale — plaque/référence, rattachée à un compte client."},)
+
+    commercialAccountId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidCommercialAccount.id", ondelete="RESTRICT"), nullable=False, index=True)
+    plateOrReference: Mapped[str] = mapped_column(String(50), nullable=False)
+
+
+class Driver(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Jamais un `User` Zylo — un conducteur n'est pas un utilisateur du
+    système (Phase 3 §1, Phase 4 v2 §11)."""
+
+    __tablename__ = "zyloLiquidDriver"
+    __table_args__ = ({"comment": "Référence conducteur libre — jamais un compte utilisateur Zylo."},)
+
+    commercialAccountId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidCommercialAccount.id", ondelete="RESTRICT"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(150), nullable=False)
+
+
+# ================================================================
+# Couche Approvisionnement — fusion de la page prototype #/livraisons avec
+# la couche réelle (processus-double-sources-verite, Phase 5-8). Décision du
+# commanditaire : « créer toutes les tables nécessaires, même fournisseur ».
+# Ce sont des référentiels réseau (portée organisation entière, même pattern
+# que CommercialAccount) : fournisseur, transporteur, camion — et la commande
+# d'approvisionnement (prototype `commandes`, portée station comme une
+# déclaration). Les statistiques affichées par le prototype (nb livraisons,
+# taux de conformité, délai moyen d'un fournisseur) ne sont JAMAIS stockées
+# ici : calculées à la lecture depuis DeliveryDeclaration/DeliveryDetected.
+# ================================================================
+
+
+class Supplier(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Fournisseur d'approvisionnement carburant (prototype `fournisseurs`).
+    Référentiel réseau, jamais porté par les livraisons détectées (la
+    télémétrie ne connaît pas son fournisseur — attribution uniquement via
+    la déclaration, Phase 6). `type` reste un libellé libre : la taxonomie
+    métier des fournisseurs n'est pas tranchée, aucune valeur contrainte."""
+
+    __tablename__ = "zyloLiquidSupplier"
+    __table_args__ = ({"comment": "Fournisseur d'approvisionnement — référentiel réseau, stats (conformité, délai) calculées, jamais stockées."},)
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id", ondelete="RESTRICT"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(150), nullable=False)
+    type: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    active: Mapped[bool] = mapped_column(nullable=False, default=True)
+
+
+class Carrier(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Transporteur (prototype `transporteurs`) — référentiel réseau, même
+    portée que Supplier. Distinct du fournisseur : le prototype porte les
+    deux sur le bon de livraison, jamais confondus."""
+
+    __tablename__ = "zyloLiquidCarrier"
+    __table_args__ = ({"comment": "Transporteur de carburant — référentiel réseau, distinct du fournisseur."},)
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id", ondelete="RESTRICT"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(150), nullable=False)
+    active: Mapped[bool] = mapped_column(nullable=False, default=True)
+
+
+class Truck(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Camion-citerne du réseau (prototype `camions` : immatriculation,
+    nombre de compartiments, capacité). Rattachement au transporteur
+    optionnel (`carrierId` NULL = camion non attribué, souvent flotte propre
+    du fournisseur) ; la plaque reste unique par organisation. `capacityLiters`
+    et `compartmentsCount` sont purement descriptifs : aucun algorithme ne
+    s'appuie sur la capacité d'un camion aujourd'hui."""
+
+    __tablename__ = "zyloLiquidTruck"
+    __table_args__ = (
+        UniqueConstraint("organizationId", "plateNumber", name="uq_zlTruck_org_plate"),
+        {"comment": "Camion-citerne du réseau — descriptif (compartiments, capacité), rattaché optionnellement à un transporteur."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id", ondelete="RESTRICT"), nullable=False, index=True)
+    carrierId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidCarrier.id", ondelete="RESTRICT"), nullable=True, index=True)
+    plateNumber: Mapped[str] = mapped_column(String(50), nullable=False)
+    capacityLiters: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
+    compartmentsCount: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+
+
+class PurchaseOrder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Commande d'approvisionnement (prototype `commandes`, portée station
+    comme les entités déclaratives — jamais une colonne organizationId, la
+    portée passe par la station, même mécanisme que DeclarationMixin). Une
+    commande vise une cuve précise (le contrôle d'ullage de la réception se
+    fait cuve par cuve) ; le produit est celui de la cuve, jamais stocké
+    séparément (pas de double vérité). `status` n'a que deux états réels —
+    les états intermédiaires du prototype (confirmée, en transit) décrivent
+    le cycle fournisseur, hors périmètre de l'application (aucune action ne
+    les déclenche) ; le passage à 'received' se fait côté service quand les
+    volumes déclarés rattachés atteignent le volume commandé (jamais avant)."""
+
+    __tablename__ = "zyloLiquidPurchaseOrder"
+    __table_args__ = (
+        CheckConstraint("status IN ('open','received')", name="ck_zlPurchaseOrder_status"),
+        CheckConstraint('"orderedVolumeLiters" > 0', name="ck_zlPurchaseOrder_orderedVolumeLiters_positive"),
+        {"comment": "Commande d'approvisionnement d'une cuve — états open/received, transition posée par le service de réception."},
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True)
+    tankId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="RESTRICT"), nullable=False, index=True)
+    supplierId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidSupplier.id", ondelete="RESTRICT"), nullable=False, index=True)
+    authorUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)
+    orderReference: Mapped[str] = mapped_column(String(100), nullable=False)
+    orderedVolumeLiters: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
+    orderedAt: Mapped[datetime] = mapped_column(nullable=False, index=True)
+    expectedAt: Mapped[datetime | None] = mapped_column(nullable=True)
+    status: Mapped[str] = mapped_column(String(10), nullable=False, server_default="open")
+
+
+class Authorization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Autorisation rattachée à un compte, jamais à une vente individuelle a
+    priori (Phase 5 §5 — fuel voucher, Phase 4 v2 §7)."""
+
+    __tablename__ = "zyloLiquidAuthorization"
+    __table_args__ = ({"comment": "Autorisation (fuel voucher) — compte + véhicule/conducteur autorisés."},)
+
+    commercialAccountId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidCommercialAccount.id", ondelete="RESTRICT"), nullable=False, index=True)
+    vehicleId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidVehicle.id", ondelete="RESTRICT"), nullable=True)
+    driverId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidDriver.id", ondelete="RESTRICT"), nullable=True)
+    reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    active: Mapped[bool] = mapped_column(nullable=False, default=True)
+
+
+class Sale(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Qualification commerciale d'une distribution déjà constatée — jamais
+    un fait nouveau indépendant (Phase 4 v2 §3). Immuable après création
+    (pas de cycle de vie declared/locked comme les entités opérationnelles,
+    Phase 5 §4 ne lui en attribue pas un) : aucune correction en place,
+    aucun endpoint de suppression."""
+
+    __tablename__ = "zyloLiquidSale"
+    __table_args__ = (
+        # Élargi mission « vente-maintenant-reglementation » Bloc 3 (recherche
+        # métier Phase 2 §2 : mobile money dominant au Cameroun) — additif,
+        # les 4 valeurs déjà en production restent valides.
+        CheckConstraint(
+            "\"paymentMethod\" IN ('cash','card','fleet','credit','orange_money','mtn_momo','bank_transfer','cheque','other')",
+            name="ck_zlSale_paymentMethod",
+        ),
+        {"comment": "Vente — qualifie une distribution déjà constatée (télémétrie ou déclaration), jamais un fait nouveau."},
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True)
+    authorUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)
+    eventAt: Mapped[datetime] = mapped_column(nullable=False, index=True)
+    fuelProductId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidFuelProduct.id", ondelete="RESTRICT"), nullable=False)
+    quantityLiters: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
+    priceAmount: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+    currencyId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("currency.id", ondelete="RESTRICT"), nullable=False)
+    paymentMethod: Mapped[str] = mapped_column(String(20), nullable=False)
+    commercialAccountId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidCommercialAccount.id", ondelete="RESTRICT"), nullable=True)
+    vehicleId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidVehicle.id", ondelete="RESTRICT"), nullable=True)
+    driverId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidDriver.id", ondelete="RESTRICT"), nullable=True)
+    declarationType: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    declarationId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
+
+class Receivable(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Créance ouverte par une vente à crédit (Phase 5 §5) — jamais
+    convertie automatiquement dans une autre devise (principe transversal)."""
+
+    __tablename__ = "zyloLiquidReceivable"
+    __table_args__ = (
+        CheckConstraint("status IN ('open','partially_settled','settled')", name="ck_zlReceivable_status"),
+        # Exactement une origine — jamais les deux, jamais aucune (extension
+        # Phase 3 §2.2 / Phase 9 §1 du plan de mission : une créance boutique
+        # utilise `productSaleTransactionId`, une créance carburant garde
+        # `saleId`, comme avant cette extension).
+        CheckConstraint(
+            "(\"saleId\" IS NOT NULL)::int + (\"productSaleTransactionId\" IS NOT NULL)::int = 1",
+            name="ck_zlReceivable_exactly_one_origin",
+        ),
+        {"comment": "Créance ouverte par une vente à crédit (carburant ou boutique) — jamais soldée par écrasement, uniquement par des Payment successifs."},
+    )
+
+    commercialAccountId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidCommercialAccount.id", ondelete="RESTRICT"), nullable=False, index=True)
+    # Nullable depuis l'extension boutique — toutes les créances existantes
+    # (créées avant cette mission) ont déjà saleId renseigné, aucune migration
+    # de données nécessaire (Phase 9 §1 du plan de mission).
+    saleId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidSale.id", ondelete="RESTRICT"), nullable=True, index=True)
+    productSaleTransactionId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidProductSaleTransaction.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    amount: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+    currencyId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("currency.id", ondelete="RESTRICT"), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="open")
+
+
+class Payment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Événement distinct de la vente (Phase 4 v2 §2) — jamais fusionné avec
+    la créance qu'il réduit. `exchangeRateApplied` : snapshot capturé au
+    paiement, jamais une référence vivante (Phase 5 §5.1)."""
+
+    __tablename__ = "zyloLiquidPayment"
+    __table_args__ = ({"comment": "Paiement — réduit une créance, jamais confondu avec la vente elle-même."},)
+
+    receivableId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidReceivable.id", ondelete="RESTRICT"), nullable=False, index=True)
+    authorUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)
+    paidAt: Mapped[datetime] = mapped_column(nullable=False)
+    amount: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+    currencyId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("currency.id", ondelete="RESTRICT"), nullable=False)
+    exchangeRateApplied: Mapped[float | None] = mapped_column(Numeric(18, 8), nullable=True)
+    method: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+
+# ================================================================
+# Modèle documentaire (processus-double-sources-verite, Phase 5 §6, Bloc 5)
+# — association logique tranchée par le commanditaire avant la Phase 5 : un
+# fichier physique stocké une seule fois, référencé par plusieurs entités
+# via `DocumentLink`, jamais dupliqué. Le stockage effectif des octets
+# (S3/disque) est hors périmètre de ce modèle — `storageReference` est une
+# référence opaque fournie par l'appelant, jamais interprétée ici.
+# ================================================================
+
+
+class Document(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "zyloLiquidDocument"
+    __table_args__ = (
+        CheckConstraint("\"sensitivityLevel\" IN ('normal','restreint')", name="ck_zlDocument_sensitivityLevel"),
+        {"comment": "Fichier physique référencé une seule fois — jamais dupliqué (Phase 5 §6, association logique)."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id", ondelete="RESTRICT"), nullable=False, index=True)
+    storageReference: Mapped[str] = mapped_column(String(500), nullable=False)
+    fileName: Mapped[str] = mapped_column(String(255), nullable=False)
+    mimeType: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    uploadedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)
+    # Extensions mission « vente-maintenant-reglementation », Phase 5 §3-5 du
+    # plan de mission — colonnes additives, jamais une deuxième table de
+    # métadonnées documentaires.
+    sensitivityLevel: Mapped[str] = mapped_column(String(20), nullable=False, server_default="normal")
+    supersedesDocumentId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidDocument.id", ondelete="SET NULL"), nullable=True)
+    deletedAt: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class DocumentLink(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Table de liaison polymorphe — plusieurs `DocumentLink` peuvent
+    pointer vers le même `Document` (Phase 5 §6) : c'est exactement
+    l'association logique décidée par le commanditaire, jamais une copie
+    physique par entité liée."""
+
+    __tablename__ = "zyloLiquidDocumentLink"
+    __table_args__ = (
+        UniqueConstraint("documentId", "linkedEntityType", "linkedEntityId", name="uq_zlDocumentLink_document_entity"),
+        {"comment": "Association document <-> entité — plusieurs liens possibles vers un même Document, jamais de duplication."},
+    )
+
+    documentId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidDocument.id", ondelete="RESTRICT"), nullable=False, index=True)
+    linkedEntityType: Mapped[str] = mapped_column(String(40), nullable=False)
+    linkedEntityId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+
+
+# ================================================================
+# Rapprochement (processus-double-sources-verite, Phase 6, Phase 7 §1) —
+# Bloc 6 : modèles seulement, le mécanisme de calcul est la Phase 8 Bloc 7.
+# ================================================================
+
+
+class StationReconciliationSettings(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Dérogation explicite par station, repli sur les constantes réseau par
+    défaut si absente ou si un champ précis est NULL (Phase 7 §1) — même
+    pattern que `Station.currencyOverrideId` (autre mission). Chaque
+    tolérance reste une proposition de démarrage non calibrée (Phase 7
+    addendum §1) tant qu'aucune donnée réelle ne l'a validée."""
+
+    __tablename__ = "zyloLiquidStationReconciliationSettings"
+    __table_args__ = (
+        UniqueConstraint("stationId", name="uq_zlStationReconciliationSettings_station"),
+        {"comment": "Dérogation par station aux tolérances de rapprochement — NULL par champ = repli sur le défaut réseau."},
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="CASCADE"), nullable=False)
+    deliveryWindowHours: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
+    deliveryVolumeToleranceFixedLiters: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    deliveryVolumeTolerancePercent: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    gaugingHeightToleranceMm: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
+    qualityCheckWindowHours: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
+
+
+class ReconciliationRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Résultat d'un rapprochement — historisé, jamais réécrit (Phase 6 §2) :
+    une réévaluation crée un nouvel enregistrement, seuls les champs
+    pointeurs de l'entité source (`reconciledWithId`/`reconciledWithType`)
+    sont mis à jour vers le plus récent. `evaluatedByUserId` NULL = calcul
+    automatique (jamais une chaîne magique 'system')."""
+
+    __tablename__ = "zyloLiquidReconciliationRecord"
+    __table_args__ = (
+        CheckConstraint("family IN ('quantitative','consistency')", name="ck_zlReconciliationRecord_family"),
+        CheckConstraint("status IN ('matched','discrepancy','pending','insufficient_data')", name="ck_zlReconciliationRecord_status"),
+        {"comment": "Résultat historisé d'un rapprochement — jamais réécrit, une réévaluation crée une nouvelle ligne."},
+    )
+
+    subjectType: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    subjectId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    counterpartType: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # String, jamais UUID : `TankMeasurement.id` (une des contreparties
+    # possibles, rapprochement du jaugeage manuel) est un entier
+    # auto-incrémenté, pas un UUID (seule exception du schéma, journal
+    # append-only à très haut volume) — un champ texte reste correct pour
+    # toutes les autres contreparties (castées en chaîne), sans ajouter une
+    # seconde colonne pour ce seul cas particulier.
+    counterpartId: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    family: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    discrepancyValue: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
+    discrepancyUnit: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    toleranceApplied: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
+    evaluatedAt: Mapped[datetime] = mapped_column(nullable=False, index=True)
+    evaluatedByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True)
+
+
+# ================================================================
+# Mission « vente-maintenant-reglementation » — Bloc 4 (corrigé) : ventes de
+# produits boutique/non-carburant. Entité VOLONTAIREMENT séparée de `Sale`
+# — `Sale` qualifie une distribution carburant déjà constatée ailleurs
+# (télémétrie/déclaration, jamais un fait nouveau indépendant, cf. son
+# docstring) ; une vente de produit boutique EST au contraire un fait
+# nouveau et indépendant (aucune télémétrie ne la précède), elle ne doit
+# donc jamais emprunter le modèle `Sale`. Panier multi-lignes : une
+# transaction, plusieurs lignes produit (contrairement à `Sale`, toujours
+# mono-produit car calée sur un événement de distribution unique).
+# ================================================================
+
+
+class ProductSaleTransaction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Le ticket de caisse boutique — jamais réécrit après validation, une
+    annulation change `status`, ne supprime rien (même discipline que
+    `Sale`/`Receivable` : statuts, jamais de suppression physique)."""
+
+    __tablename__ = "zyloLiquidProductSaleTransaction"
+    __table_args__ = (
+        CheckConstraint(
+            "\"paymentMethod\" IN ('cash','card','orange_money','mtn_momo','bank_transfer','cheque','credit','other')",
+            name="ck_zlProductSaleTransaction_paymentMethod",
+        ),
+        CheckConstraint("status IN ('completed','cancelled')", name="ck_zlProductSaleTransaction_status"),
+        {"comment": "Vente de produit(s) boutique/non-carburant — fait nouveau et indépendant, jamais lié à une distribution déjà constatée."},
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True)
+    authorUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)
+    eventAt: Mapped[datetime] = mapped_column(nullable=False, index=True)
+    currencyId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("currency.id", ondelete="RESTRICT"), nullable=False)
+    paymentMethod: Mapped[str] = mapped_column(String(20), nullable=False)
+    totalAmount: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="completed")
+    commercialAccountId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidCommercialAccount.id", ondelete="RESTRICT"), nullable=True)
+    cancelledAt: Mapped[datetime | None] = mapped_column(nullable=True)
+    cancelledByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True)
+
+
+class ProductSaleLine(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "zyloLiquidProductSaleLine"
+    __table_args__ = ({"comment": "Une ligne produit d'un ticket de caisse boutique."},)
+
+    transactionId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidProductSaleTransaction.id", ondelete="RESTRICT"), nullable=False, index=True)
+    sellableProductId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidSellableProduct.id", ondelete="RESTRICT"), nullable=False)
+    quantity: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
+    unitPriceAmount: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+    lineTotalAmount: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+
+
+# ================================================================
+# Mission « vente-maintenant-reglementation » — Bloc 5 : catalogue de
+# produits vendables (boutique/non-carburant). Portée station optionnelle
+# (NULL = catalogue réseau), même principe que `CommercialAccount.stationId`
+# (Phase 3 §2.2 du plan de mission).
+# ================================================================
+
+
+class SellableProduct(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "zyloLiquidSellableProduct"
+    __table_args__ = (
+        UniqueConstraint("organizationId", "barcodeValue", name="uq_zlSellableProduct_org_barcode"),
+        {"comment": "Produit vendable non-carburant (boutique) — pas de gestion de stock intégrée (hors périmètre, Phase 3 §2.2 du plan de mission)."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id", ondelete="RESTRICT"), nullable=False, index=True)
+    stationId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    sku: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    barcodeValue: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    unitPriceAmount: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+    currencyId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("currency.id", ondelete="RESTRICT"), nullable=False)
+    active: Mapped[bool] = mapped_column(nullable=False, default=True)
+
+
+# ================================================================
+# Mission « vente-maintenant-reglementation » — Bloc 6 : Maintenance.
+# Hiérarchie Station -> Equipment -> Intervention (deux niveaux seulement,
+# Phase 3 §3.1 du plan de mission : pas de niveau "zone" intermédiaire, non
+# justifié pour une station-service). Une Intervention peut référencer une
+# Alert déjà existante (linkedAlertId) — réutilise le système d'alertes en
+# place plutôt que d'en recréer un second.
+# ================================================================
+
+
+class Technician(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Entité indépendante, pas nécessairement un `User` du système — un
+    technicien est souvent un prestataire externe (Phase 3 §3.3 du plan de
+    mission)."""
+
+    __tablename__ = "zyloLiquidTechnician"
+    __table_args__ = ({"comment": "Technicien de maintenance — prestataire externe ou interne, pas systématiquement un compte utilisateur."},)
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id", ondelete="RESTRICT"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    company: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    contact: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    linkedUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True)
+    active: Mapped[bool] = mapped_column(nullable=False, default=True)
+
+
+class Equipment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "zyloLiquidEquipment"
+    __table_args__ = (
+        CheckConstraint("status IN ('in_service','out_of_order','out_of_service')", name="ck_zlEquipment_status"),
+        {"comment": "Équipement d'une station — pompe, sonde, console, DTU, électrique, sécurité, autre."},
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True)
+    type: Mapped[str] = mapped_column(String(40), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    manufacturer: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    serialNumber: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="in_service")
+    installedAt: Mapped[date | None] = mapped_column(nullable=True)
+    warrantyUntil: Mapped[date | None] = mapped_column(nullable=True)
+    lastMaintenanceAt: Mapped[date | None] = mapped_column(nullable=True)
+    nextMaintenanceDueAt: Mapped[date | None] = mapped_column(nullable=True)
+
+
+class Intervention(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "zyloLiquidIntervention"
+    __table_args__ = (
+        CheckConstraint("priority IN ('critical','high','medium','low')", name="ck_zlIntervention_priority"),
+        CheckConstraint("type IN ('preventive','corrective')", name="ck_zlIntervention_type"),
+        CheckConstraint("status IN ('planned','in_progress','closed')", name="ck_zlIntervention_status"),
+        {"comment": "Intervention de maintenance sur un équipement — peut être liée à une Alert déjà existante."},
+    )
+
+    equipmentId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidEquipment.id", ondelete="RESTRICT"), nullable=False, index=True)
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True)
+    priority: Mapped[str] = mapped_column(String(20), nullable=False)
+    type: Mapped[str] = mapped_column(String(20), nullable=False)
+    description: Mapped[str] = mapped_column(Text(), nullable=False)
+    technicianId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTechnician.id", ondelete="SET NULL"), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="planned")
+    openedAt: Mapped[datetime] = mapped_column(nullable=False, index=True)
+    plannedAt: Mapped[datetime | None] = mapped_column(nullable=True)
+    closedAt: Mapped[datetime | None] = mapped_column(nullable=True)
+    cost: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
+    diagnosis: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    actionTaken: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    linkedAlertId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidAlert.id", ondelete="SET NULL"), nullable=True)
+
+
+# ================================================================
+# Mission « vente-maintenant-reglementation » — Bloc 7 : Réglementation.
+# `certaintyLevel` reprend directement la classification établie en
+# recherche métier (Phase 2 §1.7 du plan de mission) — jamais présenter
+# une obligation incertaine comme aussi sûre qu'une obligation confirmée.
+# ================================================================
+
+
+class RegulatoryDocument(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "zyloLiquidRegulatoryDocument"
+    __table_args__ = (
+        CheckConstraint("\"certaintyLevel\" IN ('high','medium','low')", name="ck_zlRegulatoryDocument_certaintyLevel"),
+        {"comment": "Document réglementaire d'une station — statut calculé depuis l'échéance, jamais saisi directement."},
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True)
+    documentType: Mapped[str] = mapped_column(String(80), nullable=False)
+    authority: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    issuedAt: Mapped[date | None] = mapped_column(nullable=True)
+    expiresAt: Mapped[date | None] = mapped_column(nullable=True, index=True)
+    sourceReference: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    certaintyLevel: Mapped[str] = mapped_column(String(10), nullable=False, server_default="medium")
+    supersededByDocumentId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidRegulatoryDocument.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class RegulatoryDeclaration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "zyloLiquidRegulatoryDeclaration"
+    __table_args__ = (
+        CheckConstraint("status IN ('to_produce','produced')", name="ck_zlRegulatoryDeclaration_status"),
+        {"comment": "Déclaration réglementaire attendue d'une station, éventuellement déclenchée par un incident."},
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True)
+    type: Mapped[str] = mapped_column(String(80), nullable=False)
+    authority: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    triggerIncidentId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidIncidentDeclaration.id", ondelete="SET NULL"), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="to_produce")
+    reserve: Mapped[str | None] = mapped_column(Text(), nullable=True)

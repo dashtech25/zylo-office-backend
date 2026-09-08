@@ -20,6 +20,23 @@ class AppError(Exception):
         super().__init__(message)
 
 
+def _jsonable_validation_errors(errors: list[dict]) -> list[dict]:
+    """`RequestValidationError.errors()` peut contenir l'exception Python
+    d'origine dans `ctx.error` (ex. un `ValueError` levé par un
+    `field_validator` métier) — jamais sérialisable telle quelle par
+    `json.dumps`, ce qui faisait planter cette réponse en 500 au lieu du 422
+    attendu (bug pré-existant, découvert via `_reject_reserved_red`)."""
+    safe_errors = []
+    for error in errors:
+        error = dict(error)
+        ctx = error.get("ctx")
+        if isinstance(ctx, dict) and isinstance(ctx.get("error"), BaseException):
+            ctx = {**ctx, "error": str(ctx["error"])}
+            error["ctx"] = ctx
+        safe_errors.append(error)
+    return safe_errors
+
+
 def _error_response(status_code: int, code: str, message: str, details: list | None = None) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
@@ -39,7 +56,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "validation_error",
             "Les données envoyées sont invalides.",
-            details=exc.errors(),
+            details=_jsonable_validation_errors(exc.errors()),
         )
 
     @app.exception_handler(Exception)

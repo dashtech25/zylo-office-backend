@@ -6,8 +6,13 @@ from app.core.config import settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import setup_logging
 from app.core.middleware import RequestIdMiddleware
+from app.audit.seed import seed_known_permissions as seed_audit_permissions
+from app.core.database import AsyncSessionLocal
+from app.identity.service import backfill_owner_default_permissions
 from app.modules.zylo_liquid.seed import seed_known_permissions
 from app.modules_registry.seed import seed_known_modules
+from app.modules_registry.service import backfill_active_module_permissions_for_owners
+from app.rbac.seed import seed_known_permissions as seed_rbac_permissions
 
 setup_logging()
 
@@ -16,6 +21,8 @@ TAGS_METADATA = [
     {"name": "auth", "description": "Authentification globale : register, login, refresh, logout, session courante."},
     {"name": "organizations", "description": "Organisations (tenants) et leurs membres — modèle Organization → User → Role → Permission."},
     {"name": "modules", "description": "Registre des modules et activation par organisation (ex: zylo_liquid)."},
+    {"name": "rbac", "description": "Rôles, permissions et grants individuels (allow/deny, scopés, délégables)."},
+    {"name": "audit", "description": "Journal d'audit — qui a fait quoi, sur quel élément, quand, filtré par portée."},
     {"name": "billing", "description": "Plans, abonnements et facturation par module (aucun prestataire de paiement réel intégré)."},
     {"name": "currencies", "description": "Référentiel des devises — Core, sans isolation tenant, réutilisable par tout module."},
     {"name": "exchange-rates", "description": "Taux de change historisés — Core, toujours une insertion, jamais une correction."},
@@ -40,7 +47,22 @@ app.include_router(api_router, prefix="/api/v1")
 @app.on_event("startup")
 async def on_startup() -> None:
     await seed_known_modules()
+    await seed_rbac_permissions()
+    await seed_audit_permissions()
     await seed_known_permissions()
+    # Répare les organisations créées avant l'ajout d'une entrée à
+    # OWNER_DEFAULT_PERMISSIONS (ex. ROLE_MANAGE/GRANT_MANAGE/AUDIT_LOG_VIEW) —
+    # idempotent, sans effet une fois toutes les organisations à jour.
+    async with AsyncSessionLocal() as db:
+        await backfill_owner_default_permissions(db)
+    # Même principe, côté permissions de module : répare les organisations
+    # dont un module était déjà actif avant l'ajout de nouvelles permissions
+    # à ce module (ex. couche déclarative/commerciale/rapprochement ajoutée
+    # à zylo_liquid après coup, processus-double-sources-verite Phase 8) —
+    # sans quoi un owner déjà actif ne reçoit jamais les permissions
+    # ajoutées après son activation initiale du module.
+    async with AsyncSessionLocal() as db:
+        await backfill_active_module_permissions_for_owners(db)
 
 
 @app.get("/")

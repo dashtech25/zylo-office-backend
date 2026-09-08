@@ -37,6 +37,13 @@ class Country(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     isoCode2: Mapped[str] = mapped_column(String(2), nullable=False)
     isoCode3: Mapped[str | None] = mapped_column(String(3), nullable=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Référence réelle (audit Configuration carburant, P1 §E.5) — remplace
+    # la résolution par chaîne libre `currencyCode` (conservé ci-dessous en
+    # cache dénormalisé, synchronisé, jamais la source de vérité) qui ne
+    # garantissait aucune intégrité référentielle vers `Currency`.
+    currencyId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("currency.id", ondelete="RESTRICT"), nullable=True
+    )
     currencyCode: Mapped[str] = mapped_column(String(3), nullable=False, default="XAF")
     currencySymbol: Mapped[str] = mapped_column(String(10), nullable=False, default="FCFA")
     phonePrefix: Mapped[str | None] = mapped_column(String(6), nullable=True)

@@ -20,7 +20,44 @@ def apply_migrations():
     seule fois pour toute la session de test."""
     alembic_cfg = Config(os.path.join(BACKEND_ROOT, "alembic.ini"))
     command.upgrade(alembic_cfg, "head")
+    _reset_test_database()
     yield
+
+
+def _reset_test_database() -> None:
+    """Vide la base de test en début de session — la base n'est jamais
+    recréée entre deux runs : les lignes laissées par les runs précédents
+    s'accumulent et saturent les petits espaces de codes (ex.
+    country.isoCode2 = 2 caractères hexa = 256 valeurs — cause des collisions
+    « duplicate key uq_country_isoCode2 » observées en suite complète, tests
+    isolés pourtant verts). Après TRUNCATE chaque run repart d'une base
+    migrée mais vide et devient déterministe.
+
+    Aucune migration ne seed country/region/city/currency (vérifié sur
+    alembic/versions/*.py) : la purge après upgrade est sûre. Alembic_version
+    est préservée (les migrations viennent d'être appliquées) ; toute
+    migration future qui seederait des données devra exempter ses tables ici."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    async def _wipe() -> None:
+        engine = create_async_engine(os.environ["DATABASE_URL"])
+        try:
+            async with engine.begin() as conn:
+                tables = (await conn.execute(text(
+                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+                ))).scalars().all()
+                tables = [t for t in tables if t != "alembic_version"]
+                if tables:
+                    quoted = ", ".join(f'"{t}"' for t in tables)
+                    # RESTART IDENTITY : séquences remises à zéro, ids déterministes.
+                    await conn.execute(text(f"TRUNCATE {quoted} RESTART IDENTITY CASCADE"))
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_wipe())
 
 
 @pytest.fixture
@@ -90,14 +127,28 @@ async def test_city() -> dict:
     """Aucun endpoint HTTP n'existe pour le référentiel géographique Core
     (Country/Region/City) — insertion directe via le service, comme pour les
     permissions avant l'existence d'un RBAC HTTP."""
+    from sqlalchemy.exc import IntegrityError
+
     from app.core.database import AsyncSessionLocal
     from app.shared.geo import City, Country, Region
 
     suffix = uuid.uuid4().hex[:8]
     async with AsyncSessionLocal() as db:
-        country = Country(isoCode2=suffix[:2].upper(), isoCode3=suffix[:3].upper(), name=f"Testland {suffix}")
-        db.add(country)
-        await db.flush()
+        # `isoCode2` est limité à 2 caractères (norme ISO 3166-1) et la base
+        # de test est persistante entre les sessions : tirage renouvelé sur
+        # violation d'unicité (même pattern que les helpers `_create_currency`
+        # des fichiers de test Zylo Liquid).
+        for _ in range(20):
+            suffix = uuid.uuid4().hex[:8]
+            country = Country(isoCode2=suffix[:2].upper(), isoCode3=suffix[:3].upper(), name=f"Testland {suffix}")
+            db.add(country)
+            try:
+                await db.flush()
+                break
+            except IntegrityError:
+                await db.rollback()
+        else:
+            raise AssertionError("impossible d'allouer un code pays unique")
         region = Region(countryId=country.id, name=f"Region {suffix}", code=f"R{suffix}")
         db.add(region)
         await db.flush()

@@ -37,6 +37,7 @@ async def list_cities(
             Region.name.label("regionName"),
             Country.id.label("countryId"),
             Country.name.label("countryName"),
+            Country.currencyId,
             Country.currencyCode,
         )
         .join(Region, Region.id == City.regionId)

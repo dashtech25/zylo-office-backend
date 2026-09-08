@@ -44,7 +44,7 @@ from app.modules.zylo_liquid.models import (  # noqa: E402
     TankSensorMapping,
     TankMeasurement,
 )
-from app.modules.zylo_liquid.service import run_alert_evaluation_for_tank  # noqa: E402
+from app.modules.zylo_liquid.service import run_alert_evaluation_for_tank, run_delivery_detection_for_tank  # noqa: E402
 
 ORG_ID = "0879158e-0e28-45d7-8688-be2c81c96b37"
 HOLY_BASE = "http://localhost:8500"
@@ -238,6 +238,10 @@ async def poll_once(db, client: httpx.AsyncClient, access_token: str, tenant_id:
                 registry.lastValue = value
                 registry.lastValueAt = now
                 registry.hkLastStatus = 1 if status == 1 else 0
+                # Une ingestion réussie EST une visibilité du capteur : sans
+                # cela, `hkLastSeenAt` (affiché « Dernière visibilité » dans
+                # l'ATG) resterait NULL à jamais — aucun autre chemin d'écriture.
+                registry.hkLastSeenAt = now
 
                 db.add(TankMeasurement(
                     hkSensorId=sensor_id, hkDeviceSerial=serial, hkSensorName=registry.hkSensorName,
@@ -245,10 +249,24 @@ async def poll_once(db, client: httpx.AsyncClient, access_token: str, tenant_id:
                 ))
                 touched_tank_ids.add(tank_id)
 
+    holy_account = (await db.execute(select(HolykellAccount).where(HolykellAccount.organizationId == ORG_ID))).scalar_one_or_none()
+    if holy_account is not None:
+        holy_account.lastSyncAt = now
+        holy_account.lastSyncStatus = "success"
+        holy_account.lastSyncError = None
+
     await db.commit()
 
     for tank_id in touched_tank_ids:
         await run_alert_evaluation_for_tank(db, tank_id)
+        # Manquait jusqu'ici : seule l'évaluation des alertes tournait en
+        # continu, jamais la détection de livraison — aucune livraison
+        # n'était donc jamais créée automatiquement, même après des heures
+        # de sync réelle. `run_delivery_detection_for_tank` est déjà
+        # idempotent (contrainte tankId+startTime) et documenté comme
+        # "traitement de fond" à brancher sur un scheduler réel (service.py) —
+        # ce point de sync est ce scheduler.
+        await run_delivery_detection_for_tank(db, tank_id)
 
 
 async def get_holykell_token(client: httpx.AsyncClient) -> tuple[str, str]:
@@ -282,9 +300,20 @@ async def main():
                     access_token, tenant_id = await get_holykell_token(client)
                 else:
                     print("Erreur HTTP:", e)
+                    await _mark_sync_failed(str(e))
             except Exception as e:
                 print("Erreur cycle de sync:", repr(e))
+                await _mark_sync_failed(repr(e))
             await asyncio.sleep(POLL_INTERVAL_SEC)
+
+
+async def _mark_sync_failed(error: str):
+    async with AsyncSessionLocal() as db:
+        holy_account = (await db.execute(select(HolykellAccount).where(HolykellAccount.organizationId == ORG_ID))).scalar_one_or_none()
+        if holy_account is not None:
+            holy_account.lastSyncStatus = "failed"
+            holy_account.lastSyncError = error[:500]
+            await db.commit()
 
 
 if __name__ == "__main__":

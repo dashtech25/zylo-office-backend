@@ -12,8 +12,21 @@ Démonstration end-to-end (délai de présentation) :
    algorithmes déjà validés (run_alert_evaluation_for_tank).
 
 Usage : .venv/bin/python scripts/sync_holykell_live.py
+
+Configuration (variables d'environnement, voir .env.example) — toutes ont un
+défaut de dev local identique au comportement précédent (URLs en dur), donc
+rien ne casse si elles ne sont pas définies ; en production/VPS, définir ces
+variables pour pointer vers les simulateurs réellement déployés au lieu de
+localhost :
+  HOLYKELL_SYNC_BASE_URL   URL de l'API holykell-simulator (ex. https://holykell-sim.<domaine>)
+  HOLYKELL_SYNC_USERNAME   identifiant du compte Holykell utilisé pour la sync
+  HOLYKELL_SYNC_PASSWORD   mot de passe du compte Holykell utilisé pour la sync
+  HOLYKELL_SYNC_ORG_ID     organisation Zylo Liquid provisionnée par ce script
+  STATION_SIM_DSN          DSN PostgreSQL direct vers la base station_sim (lecture
+                            de la géométrie/calibration réelle des cuves simulées)
 """
 import asyncio
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,8 +34,10 @@ from pathlib import Path
 import httpx
 import psycopg2
 import psycopg2.extras
+from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from sqlalchemy import select  # noqa: E402
 
@@ -46,11 +61,11 @@ from app.modules.zylo_liquid.models import (  # noqa: E402
 )
 from app.modules.zylo_liquid.service import run_alert_evaluation_for_tank, run_delivery_detection_for_tank  # noqa: E402
 
-ORG_ID = "0879158e-0e28-45d7-8688-be2c81c96b37"
-HOLY_BASE = "http://localhost:8500"
-HOLY_USERNAME = "jb.essomba"
-HOLY_PASSWORD = "test1234"
-STATION_SIM_DSN = "postgresql://zylo:zylo@localhost:5432/station_sim"
+ORG_ID = os.environ.get("HOLYKELL_SYNC_ORG_ID", "0879158e-0e28-45d7-8688-be2c81c96b37")
+HOLY_BASE = os.environ.get("HOLYKELL_SYNC_BASE_URL", "http://localhost:8500")
+HOLY_USERNAME = os.environ.get("HOLYKELL_SYNC_USERNAME", "jb.essomba")
+HOLY_PASSWORD = os.environ.get("HOLYKELL_SYNC_PASSWORD", "test1234")
+STATION_SIM_DSN = os.environ.get("STATION_SIM_DSN", "postgresql://zylo:zylo@localhost:5432/station_sim")
 
 KIND_TO_MEASUREMENT_TYPE = {"product": "product_level", "water": "water_level", "temp": "temperature"}
 FUEL_NAMES = {"SP": "Super sans plomb", "GO": "Gasoil", "GOI": "Gasoil Industriel"}

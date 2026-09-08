@@ -89,3 +89,54 @@ async def test_duplicate_link_is_rejected(client: AsyncClient, registered_user: 
     )
     assert second.status_code == 409
     assert second.json()["error"]["code"] == "document_link_already_exists"
+
+
+async def test_document_download_url_uses_storage_service(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
+    """L'upload réel passe par le service de stockage générique
+    (`POST /storage/upload`, hors module zylo_liquid) — ce test couvre le
+    bout `zylo_liquid` : une fois le Document créé (avec une `storageReference`
+    déjà obtenue par upload), l'endpoint dédié retourne un lien signé et
+    temporaire, jamais un accès direct au fichier."""
+    headers = _headers(registered_user, zylo_liquid_organization)
+    upload = await client.post(
+        "/api/v1/storage/upload",
+        files={"file": ("rapport.pdf", b"%PDF-1.4 contenu de test", "application/pdf")},
+        headers=headers,
+    )
+    assert upload.status_code == 200, upload.text
+    storage_reference = upload.json()["storageReference"]
+    assert upload.json()["fileName"] == "rapport.pdf"
+
+    doc_res = await client.post(
+        "/api/v1/zylo-liquid/documents",
+        json={"storageReference": storage_reference, "fileName": "rapport.pdf", "mimeType": "application/pdf"},
+        headers=headers,
+    )
+    assert doc_res.status_code == 201, doc_res.text
+    document_id = doc_res.json()["id"]
+
+    download = await client.get(f"/api/v1/zylo-liquid/documents/{document_id}/download-url", headers=headers)
+    assert download.status_code == 200, download.text
+    url = download.json()["url"]
+    assert storage_reference in url
+    assert "signature=" in url
+
+    fetched = await client.get(url, headers=headers)
+    assert fetched.status_code == 200
+    assert fetched.content == b"%PDF-1.4 contenu de test"
+
+
+async def test_document_download_url_restricted_requires_sensitive_permission(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
+    headers = _headers(registered_user, zylo_liquid_organization)
+    doc_res = await client.post(
+        "/api/v1/zylo-liquid/documents",
+        json={"storageReference": "s3://bucket/confidentiel.pdf", "fileName": "confidentiel.pdf", "sensitivityLevel": "restreint"},
+        headers=headers,
+    )
+    assert doc_res.status_code == 201, doc_res.text
+    document_id = doc_res.json()["id"]
+
+    # L'owner a DOCUMENT_READ_SENSITIVE (toutes permissions du module) — le
+    # lien doit donc réussir même pour un document restreint.
+    download = await client.get(f"/api/v1/zylo-liquid/documents/{document_id}/download-url", headers=headers)
+    assert download.status_code == 200, download.text

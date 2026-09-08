@@ -67,6 +67,12 @@ from app.modules.zylo_liquid.permissions import (
     SHIFT_CASH_DECLARATION_CREATE,
     SHIFT_CASH_DECLARATION_READ,
     STATION_READ,
+    SECURITY_EQUIPMENT_MANAGE,
+    SECURITY_EQUIPMENT_READ,
+    STATION_SUPPLIER_MANAGE,
+    STATION_SUPPLIER_READ,
+    STATION_FINANCIAL_MANAGE,
+    STATION_FINANCIAL_READ,
     SUPPLIER_MANAGE,
     SUPPLIER_READ,
     TANK_READ,
@@ -120,11 +126,13 @@ from app.modules.zylo_liquid.models import (
     RegulatoryDeclaration,
     RegulatoryDocument,
     Sale,
+    SecurityEquipment,
     SellableProduct,
     StationReconciliationSettings,
     ShiftCashDeclaration,
     Station,
     StationFuelProduct,
+    StationSupplier,
     Supplier,
     Tank,
     TankCalibrationPoint,
@@ -189,6 +197,14 @@ from app.modules.zylo_liquid.schemas import (
     QualityCheckDeclarationResponse,
     ReceivableResponse,
     ReplaceTankCalibrationPointsRequest,
+    CreateSecurityEquipmentRequest,
+    UpdateSecurityEquipmentRequest,
+    SecurityEquipmentResponse,
+    CreateStationSupplierRequest,
+    UpdateStationSupplierRequest,
+    StationSupplierResponse,
+    UpdateStationFinancialRequest,
+    StationFinancialResponse,
     SaleResponse,
     ShiftCashDeclarationResponse,
     StationCashDetailResponse,
@@ -3902,6 +3918,26 @@ async def list_document_links_for_entity(db: AsyncSession, organization_id: uuid
     return [DocumentResponse.model_validate(r) for r in result.scalars().all()]
 
 
+async def get_document_download_url(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, document_id: uuid.UUID) -> str:
+    """Lien signé et temporaire (`StorageBackend.get_download_url`, déjà
+    construit pour cet usage exact côté service générique de stockage
+    `app/shared/storage.py`) — jamais un lien public permanent. Un document
+    'restreint' exige `DOCUMENT_READ_SENSITIVE`, même contrôle que la liste
+    par entité."""
+    await _check_org_scope(db, organization_id, actor_user_id, DOCUMENT_READ)
+    document = await db.get(Document, document_id)
+    if document is None or document.organizationId != organization_id or document.deletedAt is not None:
+        raise AppError(code="document_not_found", message="Document introuvable.", status_code=404)
+    if document.sensitivityLevel == "restreint":
+        can_read_sensitive = await user_has_permission(db, actor_user_id, organization_id, DOCUMENT_READ_SENSITIVE)
+        if not can_read_sensitive:
+            raise AppError(code="permission_denied", message=f"Permission manquante : {DOCUMENT_READ_SENSITIVE}.", status_code=403)
+    from app.shared.storage import get_storage_backend
+
+    backend = get_storage_backend()
+    return backend.get_download_url(document.storageReference)
+
+
 # ================================================================
 # Rapprochement (processus-double-sources-verite, Phase 6, Phase 7 §1) —
 # Bloc 6 : configuration des tolérances par station + lecture des résultats.
@@ -4474,6 +4510,120 @@ async def update_equipment(db: AsyncSession, organization_id: uuid.UUID, actor_u
 async def list_equipment(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, pagination: PaginationParams, station_id: uuid.UUID | None) -> Page:
     rows, total = await _list_station_scoped(db, Equipment, organization_id, actor_user_id, EQUIPMENT_READ, pagination, station_id, Equipment.createdAt)
     return Page(data=[EquipmentResponse.model_validate(r) for r in rows], meta=PageMeta(total=total, limit=pagination.limit, offset=pagination.offset))
+
+
+# ================================================================
+# Centre administratif et opérationnel de la station — Sécurité
+# (SecurityEquipment), Fournisseurs par station (StationSupplier), Finances
+# (sous-ressource dédiée sur Station).
+# ================================================================
+
+
+async def create_security_equipment(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateSecurityEquipmentRequest) -> SecurityEquipmentResponse:
+    station = await db.get(Station, data.stationId)
+    if station is None or station.organizationId != organization_id:
+        raise AppError(code="station_not_found", message="Station introuvable.", status_code=404)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, SECURITY_EQUIPMENT_MANAGE)
+    instance = SecurityEquipment(
+        stationId=data.stationId, category=data.category, label=data.label, lastControlAt=data.lastControlAt,
+        nextControlDueAt=data.nextControlDueAt, conformityStatus=data.conformityStatus, notes=data.notes,
+    )
+    db.add(instance)
+    await db.commit()
+    await db.refresh(instance)
+    return SecurityEquipmentResponse.model_validate(instance)
+
+
+async def update_security_equipment(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, security_equipment_id: uuid.UUID, data: UpdateSecurityEquipmentRequest) -> SecurityEquipmentResponse:
+    instance = await db.get(SecurityEquipment, security_equipment_id)
+    if instance is None:
+        raise AppError(code="security_equipment_not_found", message="Équipement de sécurité introuvable.", status_code=404)
+    station = await db.get(Station, instance.stationId)
+    if station is None or station.organizationId != organization_id:
+        raise AppError(code="security_equipment_not_found", message="Équipement de sécurité introuvable.", status_code=404)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, SECURITY_EQUIPMENT_MANAGE)
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(instance, field, value)
+    await db.commit()
+    await db.refresh(instance)
+    return SecurityEquipmentResponse.model_validate(instance)
+
+
+async def list_security_equipment(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, pagination: PaginationParams, station_id: uuid.UUID | None) -> Page:
+    rows, total = await _list_station_scoped(db, SecurityEquipment, organization_id, actor_user_id, SECURITY_EQUIPMENT_READ, pagination, station_id, SecurityEquipment.createdAt)
+    return Page(data=[SecurityEquipmentResponse.model_validate(r) for r in rows], meta=PageMeta(total=total, limit=pagination.limit, offset=pagination.offset))
+
+
+async def create_station_supplier(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateStationSupplierRequest) -> StationSupplierResponse:
+    station = await db.get(Station, data.stationId)
+    if station is None or station.organizationId != organization_id:
+        raise AppError(code="station_not_found", message="Station introuvable.", status_code=404)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_SUPPLIER_MANAGE)
+    await _get_supplier_or_404(db, organization_id, data.supplierId)
+    existing = await db.execute(
+        select(StationSupplier).where(StationSupplier.stationId == data.stationId, StationSupplier.supplierId == data.supplierId)
+    )
+    row = existing.scalar_one_or_none()
+    if row is not None:
+        if not row.active:
+            row.active = True
+            row.notes = data.notes
+            await db.commit()
+            await db.refresh(row)
+            return StationSupplierResponse.model_validate(row)
+        raise AppError(code="station_supplier_already_linked", message="Ce fournisseur est déjà associé à cette station.", status_code=409)
+    instance = StationSupplier(stationId=data.stationId, supplierId=data.supplierId, notes=data.notes)
+    db.add(instance)
+    await db.commit()
+    await db.refresh(instance)
+    return StationSupplierResponse.model_validate(instance)
+
+
+async def update_station_supplier(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_supplier_id: uuid.UUID, data: UpdateStationSupplierRequest) -> StationSupplierResponse:
+    instance = await db.get(StationSupplier, station_supplier_id)
+    if instance is None:
+        raise AppError(code="station_supplier_not_found", message="Association station/fournisseur introuvable.", status_code=404)
+    station = await db.get(Station, instance.stationId)
+    if station is None or station.organizationId != organization_id:
+        raise AppError(code="station_supplier_not_found", message="Association station/fournisseur introuvable.", status_code=404)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_SUPPLIER_MANAGE)
+    for field, value in data.model_dump(exclude_unset=True).items():
+        if value is not None:
+            setattr(instance, field, value)
+    await db.commit()
+    await db.refresh(instance)
+    return StationSupplierResponse.model_validate(instance)
+
+
+async def list_station_suppliers(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, pagination: PaginationParams, station_id: uuid.UUID | None) -> Page:
+    rows, total = await _list_station_scoped(db, StationSupplier, organization_id, actor_user_id, STATION_SUPPLIER_READ, pagination, station_id, StationSupplier.createdAt)
+    return Page(data=[StationSupplierResponse.model_validate(r) for r in rows], meta=PageMeta(total=total, limit=pagination.limit, offset=pagination.offset))
+
+
+def _station_financial_response(station: Station) -> StationFinancialResponse:
+    # `Station.id` (clé primaire) doit devenir `stationId` dans cette
+    # sous-ressource — model_validate ne peut pas le dériver automatiquement
+    # (il n'existe pas de colonne `stationId` sur Station elle-même).
+    return StationFinancialResponse(
+        stationId=station.id, taxId=station.taxId, billingAddress=station.billingAddress,
+        costCenterCode=station.costCenterCode, bankAccountInfo=station.bankAccountInfo,
+    )
+
+
+async def get_station_financial(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_id: uuid.UUID) -> StationFinancialResponse:
+    station = await get_station(db, organization_id, station_id)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_FINANCIAL_READ)
+    return _station_financial_response(station)
+
+
+async def update_station_financial(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_id: uuid.UUID, data: UpdateStationFinancialRequest) -> StationFinancialResponse:
+    station = await get_station(db, organization_id, station_id)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_FINANCIAL_MANAGE)
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(station, field, value)
+    await db.commit()
+    await db.refresh(station)
+    return _station_financial_response(station)
 
 
 async def create_intervention(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateInterventionRequest) -> InterventionResponse:

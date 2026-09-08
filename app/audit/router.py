@@ -23,6 +23,8 @@ router = APIRouter()
 async def list_audit_logs(
     organization_id: uuid.UUID,
     actionPrefix: str | None = None,
+    scopeResourceType: str | None = None,
+    scopeResourceId: uuid.UUID | None = None,
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -31,9 +33,13 @@ async def list_audit_logs(
     `audit.log.view` (§17) — un propriétaire voit tout, un gérant de station
     ne voit que les évènements de ses stations autorisées, un utilisateur
     sans la permission reçoit un 403 explicite plutôt qu'une liste vide
-    silencieuse."""
+    silencieuse. `scopeResourceType`/`scopeResourceId` (Centre administratif
+    et opérationnel de la station, domaine « Historique ») filtrent en plus
+    sur une entité précise, ex. `station`/<stationId> — jamais un
+    contournement de la restriction de portée ci-dessus."""
     rows, total = await service.list_audit_logs(
-        db, organization_id, current_user.id, actionPrefix, pagination.limit, pagination.offset
+        db, organization_id, current_user.id, actionPrefix, pagination.limit, pagination.offset,
+        scope_resource_type=scopeResourceType, scope_resource_id=scopeResourceId,
     )
     return Page(
         data=[AuditLogResponse.model_validate(row) for row in rows],

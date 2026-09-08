@@ -110,6 +110,25 @@ PURCHASE_ORDER_READ = "zyloLiquid.purchaseOrder.read"
 PURCHASE_ORDER_MANAGE = "zyloLiquid.purchaseOrder.manage"
 
 # ================================================================
+# Centre administratif et opérationnel de la station — domaines Sécurité,
+# Fournisseurs (par station) et Finances, absents jusqu'ici de tout modèle
+# (audit fait avant d'écrire une ligne de code, voir le plan de mission).
+# ================================================================
+
+SECURITY_EQUIPMENT_READ = "zyloLiquid.securityEquipment.read"
+SECURITY_EQUIPMENT_MANAGE = "zyloLiquid.securityEquipment.manage"
+
+# Portée station (StationSupplier) — distincte de SUPPLIER_READ/MANAGE
+# ci-dessus, qui porte sur le référentiel réseau.
+STATION_SUPPLIER_READ = "zyloLiquid.stationSupplier.read"
+STATION_SUPPLIER_MANAGE = "zyloLiquid.stationSupplier.manage"
+
+# Même principe que PRICE_HISTORY_READ : une permission dédiée pour un champ
+# sensible (bankAccountInfo), distincte de STATION_READ général.
+STATION_FINANCIAL_READ = "zyloLiquid.stationFinancial.read"
+STATION_FINANCIAL_MANAGE = "zyloLiquid.stationFinancial.manage"
+
+# ================================================================
 # Mission « vente-maintenant-reglementation » (06-permissions-par-domaine.md
 # de la mission) — nouvelles permissions par domaine, jamais un second
 # système de permissions.

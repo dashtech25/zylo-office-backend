@@ -106,3 +106,31 @@ async def test_create_station_without_permission_is_denied(client: AsyncClient, 
     res = await client.post("/api/v1/zylo-liquid/stations", json={"name": "Station Y", "code": "Y-01"}, headers=headers)
     assert res.status_code == 403
     assert res.json()["error"]["code"] == "module_inactive"
+
+
+async def test_closed_weekdays_roundtrip_and_validation(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
+    """`closedWeekdays` (mission « amélioration zylo liquid », page de
+    station.docx) — CSV normalisé (dédoublonné, trié) de jours ISO
+    1..7, NULL explicite pour rouvrir tous les jours."""
+    headers = _headers(registered_user, zylo_liquid_organization)
+    res = await client.post(
+        "/api/v1/zylo-liquid/stations",
+        json={"name": "Station Fermeture", "code": "FRM-01", "closedWeekdays": "7,6,7"},
+        headers=headers,
+    )
+    assert res.status_code == 201, res.text
+    station_id = res.json()["id"]
+    assert res.json()["closedWeekdays"] == "6,7"  # dédoublonné + trié
+
+    invalid = await client.post(
+        "/api/v1/zylo-liquid/stations",
+        json={"name": "Station Invalide", "code": "FRM-02", "closedWeekdays": "0,8"},
+        headers=headers,
+    )
+    assert invalid.status_code == 422
+
+    clear_res = await client.patch(
+        f"/api/v1/zylo-liquid/stations/{station_id}", json={"closedWeekdays": None}, headers=headers
+    )
+    assert clear_res.status_code == 200, clear_res.text
+    assert clear_res.json()["closedWeekdays"] is None

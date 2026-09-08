@@ -72,6 +72,7 @@ from app.modules.zylo_liquid.schemas import (
     CreatePriceHistoryRequest,
     DeliveryDeclarationResponse,
     DeliveryDetectedResponse,
+    DocumentDownloadUrlResponse,
     DocumentLinkResponse,
     DocumentResponse,
     DriverResponse,
@@ -141,6 +142,14 @@ from app.modules.zylo_liquid.schemas import (
     TechnicianResponse,
     UpdateEquipmentRequest,
     UpdateSellableProductRequest,
+    CreateSecurityEquipmentRequest,
+    UpdateSecurityEquipmentRequest,
+    SecurityEquipmentResponse,
+    CreateStationSupplierRequest,
+    UpdateStationSupplierRequest,
+    StationSupplierResponse,
+    UpdateStationFinancialRequest,
+    StationFinancialResponse,
 )
 from app.modules_registry.service import require_module_active
 from app.rbac.service import get_current_organization_id, require_permission, require_permission_scoped, require_permission_scoped_via
@@ -1429,6 +1438,17 @@ async def delete_document(
     return await service.delete_document(db, organization_id, current_user.id, document_id)
 
 
+@router.get("/documents/{document_id}/download-url", response_model=DocumentDownloadUrlResponse)
+async def get_document_download_url(
+    document_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> DocumentDownloadUrlResponse:
+    url = await service.get_document_download_url(db, organization_id, current_user.id, document_id)
+    return DocumentDownloadUrlResponse(url=url)
+
+
 # ================================================================
 # Mission « vente-maintenant-reglementation » — Bloc 5 : catalogue de
 # produits vendables.
@@ -1560,6 +1580,95 @@ async def list_equipment(
     db: AsyncSession = Depends(get_db),
 ) -> Page:
     return await service.list_equipment(db, organization_id, current_user.id, pagination, stationId)
+
+
+# Centre administratif et opérationnel de la station — Sécurité
+# (SecurityEquipment), Fournisseurs par station (StationSupplier), Finances.
+
+
+@router.post("/security-equipment", response_model=SecurityEquipmentResponse, status_code=201)
+async def create_security_equipment(
+    data: CreateSecurityEquipmentRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> SecurityEquipmentResponse:
+    return await service.create_security_equipment(db, organization_id, current_user.id, data)
+
+
+@router.patch("/security-equipment/{security_equipment_id}", response_model=SecurityEquipmentResponse)
+async def update_security_equipment(
+    security_equipment_id: uuid.UUID,
+    data: UpdateSecurityEquipmentRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> SecurityEquipmentResponse:
+    return await service.update_security_equipment(db, organization_id, current_user.id, security_equipment_id, data)
+
+
+@router.get("/security-equipment", response_model=Page[SecurityEquipmentResponse])
+async def list_security_equipment(
+    pagination: PaginationParams = Depends(),
+    stationId: uuid.UUID | None = None,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    return await service.list_security_equipment(db, organization_id, current_user.id, pagination, stationId)
+
+
+@router.post("/station-suppliers", response_model=StationSupplierResponse, status_code=201)
+async def create_station_supplier(
+    data: CreateStationSupplierRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> StationSupplierResponse:
+    return await service.create_station_supplier(db, organization_id, current_user.id, data)
+
+
+@router.patch("/station-suppliers/{station_supplier_id}", response_model=StationSupplierResponse)
+async def update_station_supplier(
+    station_supplier_id: uuid.UUID,
+    data: UpdateStationSupplierRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> StationSupplierResponse:
+    return await service.update_station_supplier(db, organization_id, current_user.id, station_supplier_id, data)
+
+
+@router.get("/station-suppliers", response_model=Page[StationSupplierResponse])
+async def list_station_suppliers(
+    pagination: PaginationParams = Depends(),
+    stationId: uuid.UUID | None = None,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    return await service.list_station_suppliers(db, organization_id, current_user.id, pagination, stationId)
+
+
+@router.get("/stations/{station_id}/financial", response_model=StationFinancialResponse)
+async def get_station_financial(
+    station_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> StationFinancialResponse:
+    return await service.get_station_financial(db, organization_id, current_user.id, station_id)
+
+
+@router.patch("/stations/{station_id}/financial", response_model=StationFinancialResponse)
+async def update_station_financial(
+    station_id: uuid.UUID,
+    data: UpdateStationFinancialRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> StationFinancialResponse:
+    return await service.update_station_financial(db, organization_id, current_user.id, station_id, data)
 
 
 @router.post("/interventions", response_model=InterventionResponse, status_code=201)

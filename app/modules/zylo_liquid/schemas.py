@@ -86,6 +86,21 @@ class StationFuelProductResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+def _validate_closed_weekdays(value: str | None) -> str | None:
+    """CSV de jours ISO (1=lundi..7=dimanche), ex. "7" ou "6,7". `None`/chaîne
+    vide = ouvert tous les jours. Normalisé (dédoublonné, trié) pour que deux
+    saisies équivalentes ("7,6" et "6,7") produisent la même valeur stockée."""
+    if value is None or value.strip() == "":
+        return None
+    parts = [p.strip() for p in value.split(",") if p.strip() != ""]
+    days: set[int] = set()
+    for p in parts:
+        if not p.isdigit() or not (1 <= int(p) <= 7):
+            raise ValueError("closedWeekdays doit être une liste de jours ISO (1=lundi..7=dimanche) séparés par des virgules.")
+        days.add(int(p))
+    return ",".join(str(d) for d in sorted(days))
+
+
 class CreateStationRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     code: str = Field(min_length=1, max_length=20)
@@ -99,8 +114,24 @@ class CreateStationRequest(BaseModel):
     openingTime: str = "06:00"
     closingTime: str = "22:00"
     is24h: bool = False
+    closedWeekdays: str | None = None
     notes: str | None = None
     currencyOverrideId: uuid.UUID | None = None
+    # Champs commerce/amenities — présents sur le modèle Station depuis le
+    # début (phase-1-database.md §5) mais jamais exposés par aucun schéma
+    # jusqu'ici (Centre administratif et opérationnel de la station, domaines
+    # Exploitation/Infrastructure).
+    exploitationType: str = Field(default="propre", max_length=20)
+    hasShop: bool = False
+    shopName: str | None = Field(default=None, max_length=120)
+    shopSurfaceM2: float | None = None
+    hasLavage: bool = False
+    hasVidange: bool = False
+    hasGazDomestique: bool = False
+    nbPistes: int | None = Field(default=None, ge=0)
+    surfaceTotaleM2: float | None = None
+
+    _validate_closed_weekdays = field_validator("closedWeekdays")(_validate_closed_weekdays)
 
 
 class UpdateStationRequest(BaseModel):
@@ -115,8 +146,20 @@ class UpdateStationRequest(BaseModel):
     openingTime: str | None = None
     closingTime: str | None = None
     is24h: bool | None = None
+    closedWeekdays: str | None = None
     notes: str | None = None
     currencyOverrideId: uuid.UUID | None = None
+    exploitationType: str | None = Field(default=None, max_length=20)
+    hasShop: bool | None = None
+    shopName: str | None = Field(default=None, max_length=120)
+    shopSurfaceM2: float | None = None
+    hasLavage: bool | None = None
+    hasVidange: bool | None = None
+    hasGazDomestique: bool | None = None
+    nbPistes: int | None = Field(default=None, ge=0)
+    surfaceTotaleM2: float | None = None
+
+    _validate_closed_weekdays = field_validator("closedWeekdays")(_validate_closed_weekdays)
 
 
 class StationResponse(BaseModel):
@@ -134,11 +177,21 @@ class StationResponse(BaseModel):
     openingTime: str
     closingTime: str
     is24h: bool
+    closedWeekdays: str | None = None
     status: str
     integrationDate: date | None
     notes: str | None
     activeTankCount: int = 0
     currencyOverrideId: uuid.UUID | None = None
+    exploitationType: str = "propre"
+    hasShop: bool = False
+    shopName: str | None = None
+    shopSurfaceM2: float | None = None
+    hasLavage: bool = False
+    hasVidange: bool = False
+    hasGazDomestique: bool = False
+    nbPistes: int | None = None
+    surfaceTotaleM2: float | None = None
 
     model_config = {"from_attributes": True}
 
@@ -1050,6 +1103,10 @@ class DocumentLinkResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DocumentDownloadUrlResponse(BaseModel):
+    url: str
+
+
 # ================================================================
 # Rapprochement (Phase 6, Phase 7 §1) — Bloc 6 : modèles/schémas seulement,
 # le mécanisme de calcul est le Bloc 7.
@@ -1191,6 +1248,113 @@ class PurchaseOrderResponse(BaseModel):
     orderedAt: datetime
     expectedAt: datetime | None
     status: str
+
+    model_config = {"from_attributes": True}
+
+
+# ================================================================
+# Centre administratif et opérationnel de la station — domaines Sécurité
+# (SecurityEquipment), Fournisseurs par station (StationSupplier) et
+# Finances (sous-ressource dédiée sur Station, jamais dans StationResponse
+# standard — voir plus bas).
+# ================================================================
+
+
+_SECURITY_EQUIPMENT_CATEGORIES = ("extincteur", "systeme_incendie", "arret_urgence", "point_evacuation", "zone_atex", "autre")
+_SECURITY_EQUIPMENT_CONFORMITY_STATUSES = ("conforme", "non_conforme", "a_controler")
+
+
+def _validate_security_equipment_category(value: str | None) -> str | None:
+    if value is not None and value not in _SECURITY_EQUIPMENT_CATEGORIES:
+        raise ValueError(f"category doit être l'un de {_SECURITY_EQUIPMENT_CATEGORIES}.")
+    return value
+
+
+def _validate_security_equipment_conformity_status(value: str | None) -> str | None:
+    if value is not None and value not in _SECURITY_EQUIPMENT_CONFORMITY_STATUSES:
+        raise ValueError(f"conformityStatus doit être l'un de {_SECURITY_EQUIPMENT_CONFORMITY_STATUSES}.")
+    return value
+
+
+class CreateSecurityEquipmentRequest(BaseModel):
+    stationId: uuid.UUID
+    category: str = Field(min_length=1, max_length=30)
+    label: str = Field(min_length=1, max_length=150)
+    lastControlAt: date | None = None
+    nextControlDueAt: date | None = None
+    conformityStatus: str = "a_controler"
+    notes: str | None = None
+
+    _validate_category = field_validator("category")(_validate_security_equipment_category)
+    _validate_conformity_status = field_validator("conformityStatus")(_validate_security_equipment_conformity_status)
+
+
+class UpdateSecurityEquipmentRequest(BaseModel):
+    category: str | None = Field(default=None, min_length=1, max_length=30)
+    label: str | None = Field(default=None, min_length=1, max_length=150)
+    lastControlAt: date | None = None
+    nextControlDueAt: date | None = None
+    conformityStatus: str | None = None
+    notes: str | None = None
+
+    _validate_category = field_validator("category")(_validate_security_equipment_category)
+    _validate_conformity_status = field_validator("conformityStatus")(_validate_security_equipment_conformity_status)
+
+
+class SecurityEquipmentResponse(BaseModel):
+    id: uuid.UUID
+    stationId: uuid.UUID
+    category: str
+    label: str
+    lastControlAt: date | None
+    nextControlDueAt: date | None
+    conformityStatus: str
+    notes: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class CreateStationSupplierRequest(BaseModel):
+    stationId: uuid.UUID
+    supplierId: uuid.UUID
+    notes: str | None = None
+
+
+class UpdateStationSupplierRequest(BaseModel):
+    active: bool | None = None
+    notes: str | None = None
+
+
+class StationSupplierResponse(BaseModel):
+    id: uuid.UUID
+    stationId: uuid.UUID
+    supplierId: uuid.UUID
+    active: bool
+    notes: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class UpdateStationFinancialRequest(BaseModel):
+    taxId: str | None = None
+    billingAddress: str | None = None
+    costCenterCode: str | None = None
+    bankAccountInfo: str | None = None
+
+
+class StationFinancialResponse(BaseModel):
+    """Sous-ressource dédiée, jamais fusionnée dans StationResponse — gardée
+    intégralement derrière STATION_FINANCIAL_READ (y compris taxId/
+    billingAddress/costCenterCode, pas seulement bankAccountInfo : une
+    seule frontière de permission pour tout le domaine Finances, plus
+    simple à garantir qu'un mélange de champs publics/sensibles sur le
+    même schéma)."""
+
+    stationId: uuid.UUID
+    taxId: str | None
+    billingAddress: str | None
+    costCenterCode: str | None
+    bankAccountInfo: str | None
 
     model_config = {"from_attributes": True}
 

@@ -279,6 +279,12 @@ class Station(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     openingTime: Mapped[str] = mapped_column(String(8), nullable=False, default="06:00")
     closingTime: Mapped[str] = mapped_column(String(8), nullable=False, default="22:00")
     is24h: Mapped[bool] = mapped_column(nullable=False, default=False)
+    # Jours de fermeture hebdomadaire — CSV de jours ISO (1=lundi..7=dimanche),
+    # ex. "7" (fermé le dimanche) ou "6,7" (fermé le week-end). NULL/vide =
+    # ouvert tous les jours, jamais une valeur inventée par défaut (mission
+    # « amélioration zylo liquid », page de station.docx : champ absent avant
+    # ce commit, seules les heures quotidiennes existaient).
+    closedWeekdays: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     email: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -298,6 +304,17 @@ class Station(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     hasGazDomestique: Mapped[bool] = mapped_column(nullable=False, default=False)
     nbPistes: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     surfaceTotaleM2: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+
+    # Informations administratives/fiscales — Centre administratif et
+    # opérationnel de la station (domaine « Finances »). `bankAccountInfo`
+    # est délibérément séparé du reste dans les schémas Pydantic et gardé
+    # derrière une permission dédiée `STATION_FINANCIAL_READ` (même principe
+    # que `PRICE_HISTORY_READ` déjà utilisé pour masquer une valorisation à
+    # certains rôles) — jamais exposé par le StationResponse standard.
+    taxId: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    billingAddress: Mapped[str | None] = mapped_column(Text, nullable=True)
+    costCenterCode: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    bankAccountInfo: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Tank(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -863,6 +880,31 @@ class PurchaseOrder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(10), nullable=False, server_default="open")
 
 
+class StationSupplier(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Lien station↔fournisseur — Centre administratif et opérationnel de la
+    station (domaine « Fournisseurs & partenaires »). `Supplier` reste un
+    référentiel réseau (voir plus haut) ; cette table déclare explicitement
+    quels fournisseurs desservent une station donnée, jamais déduit
+    implicitement des commandes déjà passées (même philosophie que
+    `StationFuelProduct` — association explicite, `active=false` retire le
+    fournisseur de la station sans perdre l'historique de commandes)."""
+
+    __tablename__ = "zyloLiquidStationSupplier"
+    __table_args__ = (
+        UniqueConstraint("stationId", "supplierId", name="uq_zlStationSupplier_station_supplier"),
+        {"comment": "Association explicite station <-> fournisseur du référentiel réseau."},
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    supplierId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidSupplier.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    active: Mapped[bool] = mapped_column(nullable=False, default=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class Authorization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Autorisation rattachée à un compte, jamais à une vente individuelle a
     priori (Phase 5 §5 — fuel voucher, Phase 4 v2 §7)."""
@@ -1212,6 +1254,39 @@ class Intervention(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     diagnosis: Mapped[str | None] = mapped_column(Text(), nullable=True)
     actionTaken: Mapped[str | None] = mapped_column(Text(), nullable=True)
     linkedAlertId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidAlert.id", ondelete="SET NULL"), nullable=True)
+
+
+class SecurityEquipment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Équipement de sécurité incendie / zone ATEX d'une station — Centre
+    administratif et opérationnel de la station (domaine « Sécurité »).
+    Reprend le format déjà validé par le prototype (`pageStation`, onglet
+    `conformite`, tableau « Sécurité incendie et zones ATEX ») : label,
+    dernier contrôle, prochain contrôle, statut de conformité. Distinct
+    d'`Equipment` (équipement d'exploitation général) et d'`IncidentDeclaration`
+    (un fait constaté, pas un inventaire récurrent à contrôler)."""
+
+    __tablename__ = "zyloLiquidSecurityEquipment"
+    __table_args__ = (
+        CheckConstraint(
+            "category IN ('extincteur','systeme_incendie','arret_urgence','point_evacuation','zone_atex','autre')",
+            name="ck_zlSecurityEquipment_category",
+        ),
+        CheckConstraint(
+            "\"conformityStatus\" IN ('conforme','non_conforme','a_controler')",
+            name="ck_zlSecurityEquipment_conformityStatus",
+        ),
+        {"comment": "Équipement de sécurité incendie / zone ATEX d'une station, avec suivi de contrôle périodique."},
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    category: Mapped[str] = mapped_column(String(30), nullable=False)
+    label: Mapped[str] = mapped_column(String(150), nullable=False)
+    lastControlAt: Mapped[date | None] = mapped_column(nullable=True)
+    nextControlDueAt: Mapped[date | None] = mapped_column(nullable=True)
+    conformityStatus: Mapped[str] = mapped_column(String(20), nullable=False, server_default="a_controler")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 # ================================================================

@@ -75,6 +75,12 @@ from app.modules.zylo_liquid.permissions import (
     SUPPLIER_MANAGE,
     TRUCK_READ,
     TRUCK_MANAGE,
+    SECURITY_EQUIPMENT_READ,
+    SECURITY_EQUIPMENT_MANAGE,
+    STATION_SUPPLIER_READ,
+    STATION_SUPPLIER_MANAGE,
+    STATION_FINANCIAL_READ,
+    STATION_FINANCIAL_MANAGE,
 )
 from app.rbac.service import get_or_create_permission
 
@@ -171,6 +177,16 @@ KNOWN_PERMISSIONS = [
     (TRUCK_MANAGE, "Créer/modifier le référentiel des camions."),
     (PURCHASE_ORDER_READ, "Consulter les commandes d'approvisionnement."),
     (PURCHASE_ORDER_MANAGE, "Créer/modifier les commandes d'approvisionnement."),
+    # Centre administratif et opérationnel de la station — domaines Sécurité,
+    # Fournisseurs (par station) et Finances, ajoutés après l'activation
+    # initiale du module par des organisations existantes — couverts par
+    # `backfill_active_module_permissions_for_owners` au prochain démarrage.
+    (SECURITY_EQUIPMENT_READ, "Consulter les équipements de sécurité incendie/ATEX d'une station."),
+    (SECURITY_EQUIPMENT_MANAGE, "Créer/modifier les équipements de sécurité incendie/ATEX d'une station."),
+    (STATION_SUPPLIER_READ, "Consulter les fournisseurs associés à une station."),
+    (STATION_SUPPLIER_MANAGE, "Associer/retirer un fournisseur d'une station."),
+    (STATION_FINANCIAL_READ, "Consulter les informations administratives/fiscales d'une station, y compris les coordonnées bancaires."),
+    (STATION_FINANCIAL_MANAGE, "Modifier les informations administratives/fiscales d'une station."),
 ]
 
 

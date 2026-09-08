@@ -75,6 +75,10 @@ from app.modules.zylo_liquid.permissions import (
     TANK_SENSOR_MAPPING_MANAGE,
     TANK_SENSOR_MAPPING_READ,
     TRUCK_READ,
+    SECURITY_EQUIPMENT_READ,
+    SECURITY_EQUIPMENT_MANAGE,
+    STATION_SUPPLIER_READ,
+    STATION_SUPPLIER_MANAGE,
 )
 
 # Les 6 permissions "create" de la couche déclarative, accordées ensemble au
@@ -132,6 +136,15 @@ _DOCUMENT_FULL_PERMISSIONS = [DOCUMENT_READ, DOCUMENT_CREATE, DOCUMENT_MANAGE, D
 # La gestion des référentiels eux-mêmes (SUPPLIER_MANAGE...) n'est accordée
 # à aucun rôle par défaut : aucune vue réseau de gestion n'existe encore.
 _APPRO_READ_PERMISSIONS = [SUPPLIER_READ, CARRIER_READ, TRUCK_READ, PURCHASE_ORDER_READ]
+
+# Centre administratif et opérationnel de la station — domaines Sécurité
+# (SecurityEquipment) et Fournisseurs par station (StationSupplier), tous
+# deux scopés station comme Equipment/RegulatoryDocument. STATION_FINANCIAL_*
+# volontairement absent de tout rôle par défaut (donnée sensible incl.
+# bankAccountInfo — owner-only, même principe que les permissions *_MANAGE
+# des référentiels réseau ci-dessus).
+_SECURITY_READ_PERMISSIONS = [SECURITY_EQUIPMENT_READ]
+_STATION_SUPPLIER_READ_PERMISSIONS = [STATION_SUPPLIER_READ]
 
 from app.rbac.models import Role, RolePermission
 from app.rbac.service import get_or_create_permission
@@ -225,6 +238,13 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
             REGULATORY_DOCUMENT_ARCHIVE,
             REGULATORY_DECLARATION_READ,
             REGULATORY_DECLARATION_MANAGE,
+            # Centre administratif et opérationnel de la station — le
+            # responsable de station gère l'intégralité de ces 2 domaines
+            # sur sa station (même logique que EQUIPMENT_MANAGE ci-dessus).
+            SECURITY_EQUIPMENT_READ,
+            SECURITY_EQUIPMENT_MANAGE,
+            STATION_SUPPLIER_READ,
+            STATION_SUPPLIER_MANAGE,
         ],
     ),
     (
@@ -244,6 +264,8 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
             INTERVENTION_ASSIGN,
             *_REGULATORY_READ_PERMISSIONS,
             *_DOCUMENT_PERMISSIONS,
+            *_SECURITY_READ_PERMISSIONS,
+            *_STATION_SUPPLIER_READ_PERMISSIONS,
         ],
     ),
     (
@@ -322,6 +344,8 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
             RECONCILIATION_READ,
             DOCUMENT_READ,
             DOCUMENT_READ_SENSITIVE,
+            *_SECURITY_READ_PERMISSIONS,
+            *_STATION_SUPPLIER_READ_PERMISSIONS,
         ],
     ),
     (
@@ -343,6 +367,11 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
             REGULATORY_DECLARATION_MANAGE,
             *_DOCUMENT_PERMISSIONS,
             DOCUMENT_READ_SENSITIVE,
+            # Centre administratif et opérationnel de la station — le
+            # domaine Sécurité (extincteurs, ATEX) relève directement du
+            # rôle HSE.
+            SECURITY_EQUIPMENT_READ,
+            SECURITY_EQUIPMENT_MANAGE,
         ],
     ),
 ]

@@ -100,7 +100,16 @@ async def list_audit_logs(
     action_prefix: str | None,
     limit: int,
     offset: int,
+    scope_resource_type: str | None = None,
+    scope_resource_id: uuid.UUID | None = None,
 ) -> tuple[list[AuditLog], int]:
+    """`scope_resource_type`/`scope_resource_id` (Centre administratif et
+    opérationnel de la station, domaine « Historique ») — filtre additif sur
+    la même colonne dénormalisée déjà utilisée pour la visibilité
+    (`AuditLog.scopeResourceType/scopeResourceId`), jamais un contournement :
+    s'applique EN PLUS de la restriction de portée ci-dessous, jamais à sa
+    place (un gérant ne peut pas demander l'historique d'une station qu'il
+    ne voit pas)."""
     sees_all, visible_scopes = await _audit_visibility(db, organization_id, requesting_user_id)
     if not sees_all and not visible_scopes:
         raise AppError(code="permission_denied", message=f"Permission manquante : {AUDIT_LOG_VIEW}.", status_code=403)
@@ -108,6 +117,10 @@ async def list_audit_logs(
     stmt = select(AuditLog).where(AuditLog.organizationId == organization_id)
     if action_prefix:
         stmt = stmt.where(AuditLog.action.like(f"{action_prefix}%"))
+    if scope_resource_type is not None:
+        stmt = stmt.where(AuditLog.scopeResourceType == scope_resource_type)
+    if scope_resource_id is not None:
+        stmt = stmt.where(AuditLog.scopeResourceId == scope_resource_id)
     if not sees_all:
         # Un gérant de station ne voit que les évènements scopés à ses
         # stations autorisées — jamais les évènements sans portée (org

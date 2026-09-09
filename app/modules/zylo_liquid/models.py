@@ -235,6 +235,60 @@ class StationFuelProduct(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     active: Mapped[bool] = mapped_column(nullable=False, default=True)
 
+    # Page Exploitation (Centre administratif de la station) — seuils
+    # commerciaux de réassort, jamais un seuil inventé par défaut (NULL =
+    # non défini, jamais un statut "critique" calculé à partir d'une valeur
+    # inventée). Distincts des seuils physiques de `Tank`
+    # (heightAlarmMm/heightAlertMm/lowAlarmMm, en mm, par cuve, alarme
+    # capteur) — ici en litres, par produit et par station, décision
+    # commerciale de réapprovisionnement.
+    minThresholdLiters: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    criticalThresholdLiters: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    safetyStockLiters: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+
+
+class StationService(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Catalogue des services proposés par une station (page Exploitation,
+    onglet Services) — remplace, pour cette page, les 4 booléens de
+    `Station` (hasShop/hasLavage/hasVidange/hasGazDomestique), qui restent
+    en place ailleurs (jamais retirés, jamais une migration destructive).
+    `type` en texte libre (comme `Station.exploitationType`) : la maquette
+    montre un bouton « + Ajouter un service » — liste ouverte, jamais figée
+    à une énumération fermée."""
+
+    __tablename__ = "zyloLiquidStationService"
+    __table_args__ = ({"comment": "Service proposé par une station — type libre, disponibilité togglée."},)
+
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="CASCADE"), nullable=False, index=True)
+    type: Mapped[str] = mapped_column(String(40), nullable=False)
+    label: Mapped[str] = mapped_column(String(150), nullable=False)
+    available: Mapped[bool] = mapped_column(nullable=False, default=True)
+
+
+class StationProductPricingPolicy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Politique commerciale d'un produit à une station (page Exploitation,
+    onglet Configuration commerciale) — par (station, produit), aligné sur
+    la portée de `PriceHistory` (décision commanditaire confirmée). Distinct
+    de `PriceHistory` elle-même : ceci décrit COMMENT le prix est fixé
+    (type/période/promotions/règles), jamais une valeur de prix."""
+
+    __tablename__ = "zyloLiquidStationProductPricingPolicy"
+    __table_args__ = (
+        UniqueConstraint("stationId", "fuelProductId", name="uq_zlStationProductPricingPolicy_station_product"),
+        {"comment": "Politique commerciale (type/période/promotions/règles) d'un produit à une station — jamais une valeur de prix, voir PriceHistory."},
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="CASCADE"), nullable=False, index=True)
+    fuelProductId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidFuelProduct.id", ondelete="CASCADE"), nullable=False, index=True)
+    policyType: Mapped[str] = mapped_column(String(30), nullable=False, server_default="prix_fixe")
+    applicationPeriod: Mapped[str] = mapped_column(String(30), nullable=False, server_default="toujours_actif")
+    promotionsEnabled: Mapped[bool] = mapped_column(nullable=False, default=False)
+    # Les 3 règles spéciales fixes de la maquette — jamais un texte libre
+    # pour ces 3-là, la maquette montre exactement 3 cases à cocher.
+    differentPriceByPeriod: Mapped[bool] = mapped_column(nullable=False, default=False)
+    volumeDiscount: Mapped[bool] = mapped_column(nullable=False, default=False)
+    corporateRate: Mapped[bool] = mapped_column(nullable=False, default=False)
+
 
 class Station(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "zyloLiquidStation"
@@ -808,12 +862,29 @@ class Supplier(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     métier des fournisseurs n'est pas tranchée, aucune valeur contrainte."""
 
     __tablename__ = "zyloLiquidSupplier"
-    __table_args__ = ({"comment": "Fournisseur d'approvisionnement — référentiel réseau, stats (conformité, délai) calculées, jamais stockées."},)
+    __table_args__ = (
+        CheckConstraint(
+            "category IS NULL OR category IN ('carburant','equipement','maintenance','securite','service','autre')",
+            name="ck_zlSupplier_category",
+        ),
+        {"comment": "Fournisseur d'approvisionnement — référentiel réseau, stats (conformité, délai) calculées, jamais stockées."},
+    )
 
     organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id", ondelete="RESTRICT"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     type: Mapped[str | None] = mapped_column(String(60), nullable=True)
     active: Mapped[bool] = mapped_column(nullable=False, default=True)
+    # Refonte page Fournisseurs (amelioration/reglementation... maquette
+    # fournie pour Fournisseurs) — coordonnées et contact du fournisseur,
+    # jamais stockés avant : colonnes additives, `Supplier` reste le
+    # référentiel réseau unique, jamais une deuxième table de coordonnées.
+    category: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    contactName: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    contactRole: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    contactPhone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    contactEmail: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    website: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Carrier(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -903,6 +974,21 @@ class StationSupplier(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     active: Mapped[bool] = mapped_column(nullable=False, default=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Refonte page Fournisseurs — contrat et périmètre d'intervention
+    # propres à CE lien station<->fournisseur (un même fournisseur réseau
+    # peut avoir un contrat différent par station) : colonnes directement
+    # sur `StationSupplier`, jamais une table de contrats séparée (un seul
+    # contrat courant par lien, pas d'historique de contrats à ce stade —
+    # limite assumée, signalée à l'implémentation plutôt que masquée).
+    contractReference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    contractType: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    contractStartDate: Mapped[date | None] = mapped_column(nullable=True)
+    contractEndDate: Mapped[date | None] = mapped_column(nullable=True, index=True)
+    # CSV libre (ex. "Cuves,Pompes,Distributeurs,AdBlue") — simplification
+    # assumée plutôt qu'une table de liaison vers les équipements réels de
+    # la station : le périmètre d'intervention d'un fournisseur est
+    # descriptif, aucun algorithme ne s'appuie dessus aujourd'hui.
+    equipmentTags: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Authorization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -1211,6 +1297,33 @@ class Technician(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     active: Mapped[bool] = mapped_column(nullable=False, default=True)
 
 
+class StationStaffProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Informations de poste d'un membre du personnel (Centre administratif
+    et opérationnel de la station, domaine « Personnel ») — un profil par
+    personne et par organisation (pas par station : `assignedStationId` est
+    un champ descriptif, la portée RBAC réelle reste `UserRole.resourceId`).
+    Distinct de `Technician` (souvent un prestataire externe, pas
+    nécessairement un `User`) : ce profil complète un compte `User` déjà
+    membre de l'organisation (`OrganizationUser`), jamais une identité
+    séparée."""
+
+    __tablename__ = "zyloLiquidStationStaffProfile"
+    __table_args__ = (
+        UniqueConstraint("organizationId", "userId", name="uq_zlStationStaffProfile_org_user"),
+        {"comment": "Informations de poste d'un membre du personnel — numéro d'employé, contrat, station affectée, responsable direct."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id", ondelete="CASCADE"), nullable=False, index=True)
+    userId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    employeeNumber: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Texte libre, même principe que Station.exploitationType — pas d'enum
+    # inventé sans référentiel RH réel (ex. CDI, CDD, Stage, Intérim).
+    contractType: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    assignedStationId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="SET NULL"), nullable=True, index=True)
+    directManagerUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True)
+    assignedAt: Mapped[date] = mapped_column(nullable=False)
+
+
 class Equipment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "zyloLiquidEquipment"
     __table_args__ = (
@@ -1314,6 +1427,14 @@ class RegulatoryDocument(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     supersededByDocumentId: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("zyloLiquidRegulatoryDocument.id", ondelete="SET NULL"), nullable=True
     )
+    # Refonte de l'onglet Réglementation (amelioration/reglementation,
+    # maquettes fournies) — champs additifs, jamais une deuxième table :
+    # notes libres et responsable désigné, corrigeables via une vraie
+    # UPDATE (jamais un renouvellement pour une simple faute de frappe,
+    # contrairement à documentType/issuedAt/expiresAt/certaintyLevel qui
+    # restent gouvernés par `renew_regulatory_document`).
+    notes: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    responsibleUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True)
 
 
 class RegulatoryDeclaration(UUIDPrimaryKeyMixin, TimestampMixin, Base):

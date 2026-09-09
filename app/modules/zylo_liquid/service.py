@@ -1,3 +1,4 @@
+import secrets
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 
@@ -7,6 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import record_audit_event
 from app.core.errors import AppError
+from app.core.security import hash_password
+from app.identity.models import OrganizationUser, User
+from app.identity.service import build_user, check_email_available
+from app.rbac.service import assign_role
 from app.modules.zylo_liquid.permissions import (
     ALERT_READ,
     CARRIER_MANAGE,
@@ -73,6 +78,14 @@ from app.modules.zylo_liquid.permissions import (
     STATION_SUPPLIER_READ,
     STATION_FINANCIAL_MANAGE,
     STATION_FINANCIAL_READ,
+    STATION_STAFF_MANAGE,
+    STATION_STAFF_READ,
+    STATION_SERVICE_MANAGE,
+    STATION_SERVICE_READ,
+    PRICING_POLICY_MANAGE,
+    PRICING_POLICY_READ,
+    STATION_FUEL_PRODUCT_MANAGE,
+    STATION_FUEL_PRODUCT_READ,
     SUPPLIER_MANAGE,
     SUPPLIER_READ,
     TANK_READ,
@@ -132,6 +145,9 @@ from app.modules.zylo_liquid.models import (
     ShiftCashDeclaration,
     Station,
     StationFuelProduct,
+    StationProductPricingPolicy,
+    StationService,
+    StationStaffProfile,
     StationSupplier,
     Supplier,
     Tank,
@@ -205,6 +221,17 @@ from app.modules.zylo_liquid.schemas import (
     StationSupplierResponse,
     UpdateStationFinancialRequest,
     StationFinancialResponse,
+    CreateStationStaffRequest,
+    UpdateStationStaffRequest,
+    StationStaffResponse,
+    CreateStationStaffResponse,
+    UpdateStationFuelProductThresholdsRequest,
+    StationFuelProductOverviewResponse,
+    CreateStationServiceRequest,
+    UpdateStationServiceRequest,
+    StationServiceResponse,
+    UpdatePricingPolicyRequest,
+    PricingPolicyResponse,
     SaleResponse,
     ShiftCashDeclarationResponse,
     StationCashDetailResponse,
@@ -254,6 +281,7 @@ from app.modules.zylo_liquid.schemas import (
     SellableProductResponse,
     TechnicianResponse,
     UpdateEquipmentRequest,
+    UpdateRegulatoryDocumentRequest,
     UpdateSellableProductRequest,
 )
 from app.shared.currency import Currency
@@ -401,6 +429,192 @@ async def update_station_fuel_product(
     await db.commit()
     await db.refresh(association)
     return association
+
+
+# ================================================================
+# Page Exploitation (Centre administratif de la station) — vue d'ensemble
+# carburants (seuils + stock agrégé + prix courant), catalogue de services,
+# politique commerciale par produit.
+# ================================================================
+
+
+async def update_station_fuel_product_thresholds(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, association_id: uuid.UUID, data: UpdateStationFuelProductThresholdsRequest
+) -> StationFuelProductResponse:
+    result = await db.execute(
+        select(StationFuelProduct, Station)
+        .join(Station, Station.id == StationFuelProduct.stationId)
+        .where(StationFuelProduct.id == association_id, Station.organizationId == organization_id)
+    )
+    row = result.one_or_none()
+    if row is None:
+        raise AppError(code="station_fuel_product_not_found", message="Association station/produit introuvable.", status_code=404)
+    association, station = row
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_FUEL_PRODUCT_MANAGE)
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(association, field, value)
+    await record_audit_event(
+        db, organization_id, actor_user_id,
+        action="zyloLiquid.stationFuelProduct.update", entity_type="StationFuelProduct", entity_id=association.id,
+        summary="Modification des seuils de réassort", scope_resource_type="station", scope_resource_id=station.id,
+    )
+    await db.commit()
+    await db.refresh(association)
+    return StationFuelProductResponse.model_validate(association)
+
+
+def _compute_stock_status(current_liters: float | None, min_threshold: float | None, critical_threshold: float | None) -> str:
+    """Jamais un statut inventé quand aucun seuil n'est défini — 'inconnu'
+    explicite plutôt qu'un 'normal' par défaut trompeur."""
+    if current_liters is None or (min_threshold is None and critical_threshold is None):
+        return "inconnu"
+    if critical_threshold is not None and current_liters <= critical_threshold:
+        return "critique"
+    if min_threshold is not None and current_liters <= min_threshold:
+        return "attention"
+    return "normal"
+
+
+async def list_station_fuel_products_overview(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_id: uuid.UUID) -> list[StationFuelProductOverviewResponse]:
+    station = await get_station(db, organization_id, station_id)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_FUEL_PRODUCT_READ)
+
+    result = await db.execute(
+        select(StationFuelProduct, FuelProduct)
+        .join(FuelProduct, FuelProduct.id == StationFuelProduct.fuelProductId)
+        .where(StationFuelProduct.stationId == station_id)
+        .order_by(FuelProduct.name)
+    )
+    associations = result.all()
+
+    tanks_result = await db.execute(select(Tank).where(Tank.stationId == station_id, Tank.active.is_(True)))
+    tanks_by_product: dict[uuid.UUID, list[Tank]] = {}
+    for tank in tanks_result.scalars().all():
+        tanks_by_product.setdefault(tank.fuelProductId, []).append(tank)
+
+    rows: list[StationFuelProductOverviewResponse] = []
+    for association, fuel_product in associations:
+        tanks = tanks_by_product.get(fuel_product.id, [])
+        capacity_liters = sum(float(t.calibratedCapacityLiters or t.capacityLiters) for t in tanks)
+        current_volume: float | None = None
+        if tanks:
+            states = [await get_tank_current_state(db, t) for t in tanks]
+            volumes = [s.volumeLiters for s in states if s.volumeLiters is not None]
+            current_volume = sum(volumes) if volumes else None
+
+        price_result = await db.execute(
+            select(PriceHistory, Currency.code)
+            .join(Currency, Currency.id == PriceHistory.currencyId)
+            .where(
+                PriceHistory.fuelProductId == fuel_product.id,
+                PriceHistory.stationId == station_id,
+                PriceHistory.effectiveFrom <= datetime.now(timezone.utc).replace(tzinfo=None),
+            )
+            .order_by(PriceHistory.effectiveFrom.desc())
+            .limit(1)
+        )
+        price_row = price_result.first()
+        current_price, currency_code, price_effective_from = (
+            (float(price_row[0].priceAmount), price_row[1], price_row[0].effectiveFrom) if price_row else (None, None, None)
+        )
+
+        rows.append(StationFuelProductOverviewResponse(
+            id=association.id, stationId=station_id, fuelProductId=fuel_product.id,
+            fuelProductName=fuel_product.name, fuelProductCode=fuel_product.code, displayColor=fuel_product.displayColor,
+            active=association.active,
+            minThresholdLiters=association.minThresholdLiters, criticalThresholdLiters=association.criticalThresholdLiters,
+            safetyStockLiters=association.safetyStockLiters,
+            capacityLiters=capacity_liters, currentVolumeLiters=current_volume,
+            status=_compute_stock_status(current_volume, association.minThresholdLiters, association.criticalThresholdLiters),
+            currentPriceAmount=current_price, currencyCode=currency_code, priceEffectiveFrom=price_effective_from,
+        ))
+    return rows
+
+
+async def create_station_service(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateStationServiceRequest) -> StationServiceResponse:
+    station = await get_station(db, organization_id, data.stationId)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_SERVICE_MANAGE)
+    instance = StationService(stationId=data.stationId, type=data.type, label=data.label, available=data.available)
+    db.add(instance)
+    await db.flush()
+    await record_audit_event(
+        db, organization_id, actor_user_id,
+        action="zyloLiquid.stationService.create", entity_type="StationService", entity_id=instance.id,
+        summary=f"Ajout du service {data.label}", scope_resource_type="station", scope_resource_id=station.id,
+    )
+    await db.commit()
+    await db.refresh(instance)
+    return StationServiceResponse.model_validate(instance)
+
+
+async def update_station_service(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, service_id: uuid.UUID, data: UpdateStationServiceRequest) -> StationServiceResponse:
+    result = await db.execute(
+        select(StationService, Station)
+        .join(Station, Station.id == StationService.stationId)
+        .where(StationService.id == service_id, Station.organizationId == organization_id)
+    )
+    row = result.one_or_none()
+    if row is None:
+        raise AppError(code="station_service_not_found", message="Service introuvable.", status_code=404)
+    instance, station = row
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_SERVICE_MANAGE)
+    for field, value in data.model_dump(exclude_unset=True).items():
+        if value is not None:
+            setattr(instance, field, value)
+    await record_audit_event(
+        db, organization_id, actor_user_id,
+        action="zyloLiquid.stationService.update", entity_type="StationService", entity_id=instance.id,
+        summary=f"Modification du service {instance.label}", scope_resource_type="station", scope_resource_id=station.id,
+    )
+    await db.commit()
+    await db.refresh(instance)
+    return StationServiceResponse.model_validate(instance)
+
+
+async def list_station_services(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_id: uuid.UUID) -> list[StationServiceResponse]:
+    station = await get_station(db, organization_id, station_id)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_SERVICE_READ)
+    result = await db.execute(select(StationService).where(StationService.stationId == station_id).order_by(StationService.label))
+    return [StationServiceResponse.model_validate(r) for r in result.scalars().all()]
+
+
+async def get_pricing_policy(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_id: uuid.UUID, fuel_product_id: uuid.UUID) -> PricingPolicyResponse | None:
+    station = await get_station(db, organization_id, station_id)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, PRICING_POLICY_READ)
+    result = await db.execute(
+        select(StationProductPricingPolicy).where(
+            StationProductPricingPolicy.stationId == station_id, StationProductPricingPolicy.fuelProductId == fuel_product_id
+        )
+    )
+    instance = result.scalar_one_or_none()
+    return PricingPolicyResponse.model_validate(instance) if instance is not None else None
+
+
+async def update_pricing_policy(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_id: uuid.UUID, fuel_product_id: uuid.UUID, data: UpdatePricingPolicyRequest) -> PricingPolicyResponse:
+    station = await get_station(db, organization_id, station_id)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, PRICING_POLICY_MANAGE)
+    await get_fuel_product(db, organization_id, fuel_product_id)
+    result = await db.execute(
+        select(StationProductPricingPolicy).where(
+            StationProductPricingPolicy.stationId == station_id, StationProductPricingPolicy.fuelProductId == fuel_product_id
+        )
+    )
+    instance = result.scalar_one_or_none()
+    if instance is None:
+        instance = StationProductPricingPolicy(stationId=station_id, fuelProductId=fuel_product_id)
+        db.add(instance)
+        await db.flush()
+    for field, value in data.model_dump(exclude_unset=True).items():
+        if value is not None:
+            setattr(instance, field, value)
+    await record_audit_event(
+        db, organization_id, actor_user_id,
+        action="zyloLiquid.pricingPolicy.update", entity_type="StationProductPricingPolicy", entity_id=instance.id,
+        summary="Modification de la politique commerciale", scope_resource_type="station", scope_resource_id=station.id,
+    )
+    await db.commit()
+    await db.refresh(instance)
+    return PricingPolicyResponse.model_validate(instance)
 
 
 async def _assert_city_exists(db: AsyncSession, city_id: uuid.UUID) -> None:
@@ -3408,8 +3622,14 @@ async def _get_purchase_order_or_404(db: AsyncSession, organization_id: uuid.UUI
 
 async def create_supplier(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateSupplierRequest) -> SupplierResponse:
     await _check_org_scope(db, organization_id, actor_user_id, SUPPLIER_MANAGE)
-    instance = Supplier(organizationId=organization_id, name=data.name, type=data.type)
+    instance = Supplier(organizationId=organization_id, **data.model_dump())
     db.add(instance)
+    await db.flush()
+    await record_audit_event(
+        db, organization_id, actor_user_id,
+        action="zyloLiquid.supplier.create", entity_type="Supplier", entity_id=instance.id,
+        summary=f"Création du fournisseur {instance.name}",
+    )
     await db.commit()
     await db.refresh(instance)
     return SupplierResponse.model_validate(instance)
@@ -3418,9 +3638,17 @@ async def create_supplier(db: AsyncSession, organization_id: uuid.UUID, actor_us
 async def update_supplier(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, supplier_id: uuid.UUID, data: UpdateSupplierRequest) -> SupplierResponse:
     await _check_org_scope(db, organization_id, actor_user_id, SUPPLIER_MANAGE)
     supplier = await _get_supplier_or_404(db, organization_id, supplier_id)
-    for field, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+    before = {field: getattr(supplier, field) for field in updates}
+    for field, value in updates.items():
         if value is not None:
             setattr(supplier, field, value)
+    await record_audit_event(
+        db, organization_id, actor_user_id,
+        action="zyloLiquid.supplier.update", entity_type="Supplier", entity_id=supplier.id,
+        summary=f"Modification du fournisseur {supplier.name}",
+        changes={field: {"before": str(before[field]), "after": str(updates[field])} for field in updates},
+    )
     await db.commit()
     await db.refresh(supplier)
     return SupplierResponse.model_validate(supplier)
@@ -3916,6 +4144,36 @@ async def list_document_links_for_entity(db: AsyncSession, organization_id: uuid
         stmt = stmt.where(Document.sensitivityLevel != "restreint")
     result = await db.execute(stmt)
     return [DocumentResponse.model_validate(r) for r in result.scalars().all()]
+
+
+async def count_documents_by_entity(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, linked_entity_type: str, linked_entity_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, int]:
+    """Nombre de pièces jointes pour plusieurs entités en UNE requête —
+    remplace un `listDocumentsByEntity` par ligne de tableau (audit
+    performance : un écran Réglementation/Fournisseurs avec N lignes
+    faisait N+1 requêtes vers une base parfois distante). Un identifiant
+    absent du résultat n'a simplement aucun document (jamais une erreur)."""
+    await _check_org_scope(db, organization_id, actor_user_id, DOCUMENT_READ)
+    if not linked_entity_ids:
+        return {}
+    can_read_sensitive = await user_has_permission(db, actor_user_id, organization_id, DOCUMENT_READ_SENSITIVE)
+    stmt = (
+        select(DocumentLink.linkedEntityId, func.count())
+        .select_from(DocumentLink)
+        .join(Document, Document.id == DocumentLink.documentId)
+        .where(
+            Document.organizationId == organization_id,
+            Document.deletedAt.is_(None),
+            DocumentLink.linkedEntityType == linked_entity_type,
+            DocumentLink.linkedEntityId.in_(linked_entity_ids),
+        )
+        .group_by(DocumentLink.linkedEntityId)
+    )
+    if not can_read_sensitive:
+        stmt = stmt.where(Document.sensitivityLevel != "restreint")
+    result = await db.execute(stmt)
+    return {row[0]: row[1] for row in result.all()}
 
 
 async def get_document_download_url(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, document_id: uuid.UUID) -> str:
@@ -4554,12 +4812,31 @@ async def list_security_equipment(db: AsyncSession, organization_id: uuid.UUID, 
     return Page(data=[SecurityEquipmentResponse.model_validate(r) for r in rows], meta=PageMeta(total=total, limit=pagination.limit, offset=pagination.offset))
 
 
+def _compute_contract_status(contract_end_date: date | None) -> str:
+    """Même sémantique que `_compute_regulatory_document_status` (refonte
+    page Fournisseurs) — jamais un statut saisi directement."""
+    if contract_end_date is None:
+        return "unknown"
+    days_left = (contract_end_date - date.today()).days
+    if days_left < 0:
+        return "expired"
+    if days_left <= 45:
+        return "renew_soon"
+    return "valid"
+
+
+def _station_supplier_to_response(instance: StationSupplier) -> StationSupplierResponse:
+    response = StationSupplierResponse.model_validate(instance)
+    response.contractStatus = _compute_contract_status(instance.contractEndDate)
+    return response
+
+
 async def create_station_supplier(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateStationSupplierRequest) -> StationSupplierResponse:
     station = await db.get(Station, data.stationId)
     if station is None or station.organizationId != organization_id:
         raise AppError(code="station_not_found", message="Station introuvable.", status_code=404)
     await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_SUPPLIER_MANAGE)
-    await _get_supplier_or_404(db, organization_id, data.supplierId)
+    supplier = await _get_supplier_or_404(db, organization_id, data.supplierId)
     existing = await db.execute(
         select(StationSupplier).where(StationSupplier.stationId == data.stationId, StationSupplier.supplierId == data.supplierId)
     )
@@ -4567,16 +4844,30 @@ async def create_station_supplier(db: AsyncSession, organization_id: uuid.UUID, 
     if row is not None:
         if not row.active:
             row.active = True
-            row.notes = data.notes
+            for field, value in data.model_dump(exclude={"stationId", "supplierId"}).items():
+                setattr(row, field, value)
+            await record_audit_event(
+                db, organization_id, actor_user_id,
+                action="zyloLiquid.stationSupplier.reactivate", entity_type="StationSupplier", entity_id=row.id,
+                summary=f"Réactivation du fournisseur {supplier.name} sur la station",
+                scope_resource_type="station", scope_resource_id=station.id,
+            )
             await db.commit()
             await db.refresh(row)
-            return StationSupplierResponse.model_validate(row)
+            return _station_supplier_to_response(row)
         raise AppError(code="station_supplier_already_linked", message="Ce fournisseur est déjà associé à cette station.", status_code=409)
-    instance = StationSupplier(stationId=data.stationId, supplierId=data.supplierId, notes=data.notes)
+    instance = StationSupplier(**data.model_dump())
     db.add(instance)
+    await db.flush()
+    await record_audit_event(
+        db, organization_id, actor_user_id,
+        action="zyloLiquid.stationSupplier.create", entity_type="StationSupplier", entity_id=instance.id,
+        summary=f"Ajout du fournisseur {supplier.name} à la station",
+        scope_resource_type="station", scope_resource_id=station.id,
+    )
     await db.commit()
     await db.refresh(instance)
-    return StationSupplierResponse.model_validate(instance)
+    return _station_supplier_to_response(instance)
 
 
 async def update_station_supplier(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_supplier_id: uuid.UUID, data: UpdateStationSupplierRequest) -> StationSupplierResponse:
@@ -4587,17 +4878,28 @@ async def update_station_supplier(db: AsyncSession, organization_id: uuid.UUID, 
     if station is None or station.organizationId != organization_id:
         raise AppError(code="station_supplier_not_found", message="Association station/fournisseur introuvable.", status_code=404)
     await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_SUPPLIER_MANAGE)
-    for field, value in data.model_dump(exclude_unset=True).items():
+    supplier = await db.get(Supplier, instance.supplierId)
+    updates = data.model_dump(exclude_unset=True)
+    before = {field: getattr(instance, field) for field in updates}
+    for field, value in updates.items():
         if value is not None:
             setattr(instance, field, value)
+    await record_audit_event(
+        db, organization_id, actor_user_id,
+        action="zyloLiquid.stationSupplier.update", entity_type="StationSupplier", entity_id=instance.id,
+        summary=f"Modification du fournisseur {supplier.name if supplier else '?'} sur la station",
+        changes={field: {"before": str(before[field]), "after": str(updates[field])} for field in updates},
+        scope_resource_type="station", scope_resource_id=station.id,
+    )
     await db.commit()
     await db.refresh(instance)
-    return StationSupplierResponse.model_validate(instance)
+    return _station_supplier_to_response(instance)
 
 
 async def list_station_suppliers(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, pagination: PaginationParams, station_id: uuid.UUID | None) -> Page:
     rows, total = await _list_station_scoped(db, StationSupplier, organization_id, actor_user_id, STATION_SUPPLIER_READ, pagination, station_id, StationSupplier.createdAt)
-    return Page(data=[StationSupplierResponse.model_validate(r) for r in rows], meta=PageMeta(total=total, limit=pagination.limit, offset=pagination.offset))
+    data = [_station_supplier_to_response(r) for r in rows]
+    return Page(data=data, meta=PageMeta(total=total, limit=pagination.limit, offset=pagination.offset))
 
 
 def _station_financial_response(station: Station) -> StationFinancialResponse:
@@ -4624,6 +4926,145 @@ async def update_station_financial(db: AsyncSession, organization_id: uuid.UUID,
     await db.commit()
     await db.refresh(station)
     return _station_financial_response(station)
+
+
+# ================================================================
+# Module Personnel — création de compte + profil de poste pour un membre du
+# personnel d'une station (mockup emalioration/personnel/). Le rôle
+# lui-même reste géré par le RBAC existant (assign_role), jamais dupliqué.
+# ================================================================
+
+
+def _station_staff_response(profile: StationStaffProfile, user: User) -> StationStaffResponse:
+    photo_url = None
+    if user.photoStorageReference:
+        from app.shared.storage import get_storage_backend
+
+        photo_url = get_storage_backend().get_download_url(user.photoStorageReference)
+    return StationStaffResponse(
+        id=profile.id, userId=user.id, organizationId=profile.organizationId,
+        email=user.email, fullName=user.fullName, firstName=user.firstName, lastName=user.lastName,
+        phone=user.phone, photoUrl=photo_url, status=user.status,
+        employeeNumber=profile.employeeNumber, contractType=profile.contractType,
+        assignedStationId=profile.assignedStationId, directManagerUserId=profile.directManagerUserId,
+        assignedAt=profile.assignedAt,
+    )
+
+
+async def create_station_staff_member(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateStationStaffRequest) -> CreateStationStaffResponse:
+    station = await get_station(db, organization_id, data.stationId)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_MANAGE)
+    await check_email_available(db, data.email)
+
+    # Mot de passe temporaire — généré côté serveur, jamais choisi par la
+    # personne (aucune infrastructure d'invitation par email aujourd'hui,
+    # décision validée avec le commanditaire). Affiché UNE SEULE fois dans
+    # cette réponse, jamais stocké en clair, jamais rejoué ailleurs.
+    temporary_password = secrets.token_urlsafe(9)
+    full_name = f"{data.firstName} {data.lastName}".strip()
+    user = build_user(
+        email=data.email, full_name=full_name, hashed_password=hash_password(temporary_password),
+        must_change_password=True, first_name=data.firstName, last_name=data.lastName, phone=data.phone,
+    )
+    if data.photoStorageReference:
+        user.photoStorageReference = data.photoStorageReference
+    db.add(user)
+    await db.flush()
+
+    db.add(OrganizationUser(organizationId=organization_id, userId=user.id))
+    profile = StationStaffProfile(
+        organizationId=organization_id, userId=user.id, employeeNumber=data.employeeNumber,
+        contractType=data.contractType, assignedStationId=data.stationId,
+        directManagerUserId=data.directManagerUserId, assignedAt=date.today(),
+    )
+    db.add(profile)
+    await record_audit_event(
+        db, organization_id, actor_user_id,
+        action="zyloLiquid.stationStaff.create", entity_type="User", entity_id=user.id,
+        summary=f"Création du membre du personnel {full_name} ({data.email})",
+        scope_resource_type="station", scope_resource_id=data.stationId,
+    )
+    await db.commit()
+    await db.refresh(user)
+    await db.refresh(profile)
+
+    if data.roleId is not None:
+        # Étape distincte, déjà auditée par `assign_role` lui-même — jamais
+        # une logique d'assignation dupliquée ici.
+        await assign_role(db, organization_id, actor_user_id, user.id, data.roleId, resource_type="station", resource_id=data.stationId)
+
+    return CreateStationStaffResponse(staff=_station_staff_response(profile, user), temporaryPassword=temporary_password)
+
+
+async def _get_station_staff_or_404(db: AsyncSession, organization_id: uuid.UUID, user_id: uuid.UUID) -> tuple[StationStaffProfile, User]:
+    result = await db.execute(select(StationStaffProfile).where(StationStaffProfile.organizationId == organization_id, StationStaffProfile.userId == user_id))
+    profile = result.scalar_one_or_none()
+    if profile is None:
+        raise AppError(code="station_staff_not_found", message="Membre du personnel introuvable.", status_code=404)
+    user = await db.get(User, user_id)
+    if user is None:
+        raise AppError(code="station_staff_not_found", message="Membre du personnel introuvable.", status_code=404)
+    return profile, user
+
+
+async def update_station_staff_profile(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, user_id: uuid.UUID, data: UpdateStationStaffRequest) -> StationStaffResponse:
+    profile, user = await _get_station_staff_or_404(db, organization_id, user_id)
+    # Portée : la station ACTUELLEMENT affectée (avant modification) — un
+    # gérant ne peut modifier que le personnel de sa propre station, y
+    # compris pour le réaffecter ailleurs.
+    if profile.assignedStationId is not None:
+        station = await get_station(db, organization_id, profile.assignedStationId)
+        await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_MANAGE)
+    else:
+        await _check_org_scope(db, organization_id, actor_user_id, STATION_STAFF_MANAGE)
+
+    updates = data.model_dump(exclude_unset=True)
+    name_changed = "firstName" in updates or "lastName" in updates
+    for field in ("firstName", "lastName", "phone", "photoStorageReference"):
+        if field in updates:
+            setattr(user, field, updates.pop(field))
+    if name_changed:
+        # `fullName` reste le nom affiché ailleurs dans l'app (audit,
+        # sélecteurs) — toujours recalculé depuis prénom/nom à jour.
+        user.fullName = f"{user.firstName or ''} {user.lastName or ''}".strip() or user.fullName
+    for field, value in updates.items():
+        setattr(profile, field, value)
+    await db.commit()
+    await db.refresh(profile)
+    await db.refresh(user)
+    return _station_staff_response(profile, user)
+
+
+async def deactivate_station_staff_access(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, user_id: uuid.UUID) -> StationStaffResponse:
+    profile, user = await _get_station_staff_or_404(db, organization_id, user_id)
+    if profile.assignedStationId is not None:
+        station = await get_station(db, organization_id, profile.assignedStationId)
+        await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_MANAGE)
+    else:
+        await _check_org_scope(db, organization_id, actor_user_id, STATION_STAFF_MANAGE)
+    user.status = "suspended"
+    await record_audit_event(
+        db, organization_id, actor_user_id,
+        action="zyloLiquid.stationStaff.deactivate", entity_type="User", entity_id=user.id,
+        summary=f"Désactivation de l'accès de {user.fullName}",
+        scope_resource_type="station", scope_resource_id=profile.assignedStationId,
+    )
+    await db.commit()
+    await db.refresh(profile)
+    await db.refresh(user)
+    return _station_staff_response(profile, user)
+
+
+async def list_station_staff_profiles(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_id: uuid.UUID) -> list[StationStaffResponse]:
+    station = await get_station(db, organization_id, station_id)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_READ)
+    result = await db.execute(
+        select(StationStaffProfile, User)
+        .join(User, User.id == StationStaffProfile.userId)
+        .where(StationStaffProfile.organizationId == organization_id, StationStaffProfile.assignedStationId == station_id)
+        .order_by(User.fullName)
+    )
+    return [_station_staff_response(profile, user) for profile, user in result.all()]
 
 
 async def create_intervention(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateInterventionRequest) -> InterventionResponse:
@@ -4716,9 +5157,14 @@ def _compute_regulatory_document_status(expires_at: date | None) -> str:
     return "valid"
 
 
-def _regulatory_document_to_response(document: RegulatoryDocument) -> RegulatoryDocumentResponse:
+async def _regulatory_document_to_response(db: AsyncSession, document: RegulatoryDocument) -> RegulatoryDocumentResponse:
     response = RegulatoryDocumentResponse.model_validate(document)
     response.computedStatus = _compute_regulatory_document_status(document.expiresAt)
+    if document.responsibleUserId is not None:
+        responsible = await db.get(User, document.responsibleUserId)
+        if responsible is not None:
+            response.responsibleUserName = responsible.fullName
+            response.responsibleUserEmail = responsible.email
     return response
 
 
@@ -4731,11 +5177,12 @@ async def create_regulatory_document(db: AsyncSession, organization_id: uuid.UUI
     document = RegulatoryDocument(
         stationId=data.stationId, documentType=data.documentType, authority=data.authority,
         issuedAt=data.issuedAt, expiresAt=data.expiresAt, sourceReference=data.sourceReference, certaintyLevel=data.certaintyLevel,
+        notes=data.notes, responsibleUserId=data.responsibleUserId,
     )
     db.add(document)
     await db.commit()
     await db.refresh(document)
-    return _regulatory_document_to_response(document)
+    return await _regulatory_document_to_response(db, document)
 
 
 async def renew_regulatory_document(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, document_id: uuid.UUID, data: CreateRegulatoryDocumentRequest) -> RegulatoryDocumentResponse:
@@ -4751,13 +5198,33 @@ async def renew_regulatory_document(db: AsyncSession, organization_id: uuid.UUID
     new_document = RegulatoryDocument(
         stationId=old_document.stationId, documentType=data.documentType, authority=data.authority,
         issuedAt=data.issuedAt, expiresAt=data.expiresAt, sourceReference=data.sourceReference, certaintyLevel=data.certaintyLevel,
+        notes=data.notes, responsibleUserId=data.responsibleUserId,
     )
     db.add(new_document)
     await db.flush()
     old_document.supersededByDocumentId = new_document.id
     await db.commit()
     await db.refresh(new_document)
-    return _regulatory_document_to_response(new_document)
+    return await _regulatory_document_to_response(db, new_document)
+
+
+async def update_regulatory_document(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, document_id: uuid.UUID, data: UpdateRegulatoryDocumentRequest
+) -> RegulatoryDocumentResponse:
+    """Correction de métadonnées (autorité, référence, notes, responsable) —
+    jamais les dates ni le type, qui passent par `renew_regulatory_document`
+    (refonte onglet Réglementation)."""
+    document = await db.get(RegulatoryDocument, document_id)
+    if document is None:
+        raise AppError(code="regulatory_document_not_found", message="Document réglementaire introuvable.", status_code=404)
+    station = await db.get(Station, document.stationId)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, REGULATORY_DOCUMENT_MANAGE)
+    updates = data.model_dump(exclude_unset=True)
+    for field, value in updates.items():
+        setattr(document, field, value)
+    await db.commit()
+    await db.refresh(document)
+    return await _regulatory_document_to_response(db, document)
 
 
 async def list_regulatory_documents(
@@ -4769,7 +5236,8 @@ async def list_regulatory_documents(
     rows, total = await _list_station_scoped(db, RegulatoryDocument, organization_id, actor_user_id, REGULATORY_DOCUMENT_READ, pagination, station_id, RegulatoryDocument.expiresAt)
     if needs_action_only:
         rows = [r for r in rows if _compute_regulatory_document_status(r.expiresAt) in ("expired", "renew_soon")]
-    return Page(data=[_regulatory_document_to_response(r) for r in rows], meta=PageMeta(total=total, limit=pagination.limit, offset=pagination.offset))
+    data = [await _regulatory_document_to_response(db, r) for r in rows]
+    return Page(data=data, meta=PageMeta(total=total, limit=pagination.limit, offset=pagination.offset))
 
 
 async def create_regulatory_declaration(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateRegulatoryDeclarationRequest) -> RegulatoryDeclarationResponse:

@@ -42,6 +42,36 @@ OWNER_DEFAULT_PERMISSIONS = [
 ]
 
 
+async def check_email_available(db: AsyncSession, email: str) -> None:
+    """Même contrôle que `register_user` (app/auth/service.py) — factorisé
+    ici pour être réutilisé par tout flux de création de compte (ex. module
+    Personnel, un gérant créant un compte pour un employé), jamais dupliqué."""
+    existing = await db.execute(select(User).where(User.email == email))
+    if existing.scalar_one_or_none() is not None:
+        raise AppError(code="email_already_used", message="Cet email est déjà utilisé.", status_code=409)
+
+
+def build_user(
+    email: str,
+    full_name: str,
+    hashed_password: str,
+    status: str = "active",
+    must_change_password: bool = False,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    phone: str | None = None,
+) -> User:
+    """Construit (sans `db.add`/commit) l'instance `User` — l'appelant reste
+    responsable de la transaction (ex. le module Personnel crée `User` +
+    `OrganizationUser` + un profil de poste en une seule transaction).
+    `register_user` (auto-inscription) reste l'unique appelant qui commite
+    immédiatement, comportement inchangé."""
+    return User(
+        email=email, hashedPassword=hashed_password, fullName=full_name, status=status,
+        mustChangePassword=must_change_password, firstName=first_name, lastName=last_name, phone=phone,
+    )
+
+
 async def create_organization(db: AsyncSession, owner: User, data: CreateOrganizationRequest) -> Organization:
     existing = await db.execute(select(Organization).where(Organization.slug == data.slug))
     if existing.scalar_one_or_none() is not None:

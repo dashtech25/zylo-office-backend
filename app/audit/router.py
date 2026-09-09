@@ -25,6 +25,7 @@ async def list_audit_logs(
     actionPrefix: str | None = None,
     scopeResourceType: str | None = None,
     scopeResourceId: uuid.UUID | None = None,
+    actorUserId: uuid.UUID | None = None,
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -35,11 +36,12 @@ async def list_audit_logs(
     sans la permission reçoit un 403 explicite plutôt qu'une liste vide
     silencieuse. `scopeResourceType`/`scopeResourceId` (Centre administratif
     et opérationnel de la station, domaine « Historique ») filtrent en plus
-    sur une entité précise, ex. `station`/<stationId> — jamais un
-    contournement de la restriction de portée ci-dessus."""
+    sur une entité précise, ex. `station`/<stationId>. `actorUserId` (module
+    Personnel, activité récente d'une fiche membre) filtre sur l'auteur —
+    jamais un contournement de la restriction de portée ci-dessus."""
     rows, total = await service.list_audit_logs(
         db, organization_id, current_user.id, actionPrefix, pagination.limit, pagination.offset,
-        scope_resource_type=scopeResourceType, scope_resource_id=scopeResourceId,
+        scope_resource_type=scopeResourceType, scope_resource_id=scopeResourceId, actor_user_id=actorUserId,
     )
     return Page(
         data=[AuditLogResponse.model_validate(row) for row in rows],

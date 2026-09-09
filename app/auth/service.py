@@ -18,13 +18,25 @@ def _hash_token(token: str) -> str:
 
 
 async def register_user(db: AsyncSession, data: RegisterRequest) -> User:
-    existing = await db.execute(select(User).where(User.email == data.email))
-    if existing.scalar_one_or_none() is not None:
-        raise AppError(code="email_already_used", message="Cet email est déjà utilisé.", status_code=409)
+    from app.identity.service import build_user, check_email_available
 
-    user = User(email=data.email, hashedPassword=hash_password(data.password), fullName=data.fullName)
+    await check_email_available(db, data.email)
+    user = build_user(email=data.email, full_name=data.fullName, hashed_password=hash_password(data.password))
     db.add(user)
     await db.flush()
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def change_password(db: AsyncSession, user: User, current_password: str, new_password: str) -> User:
+    """Vérifie le mot de passe actuel (temporaire ou non) avant de le
+    remplacer — jamais un changement sans preuve de connaissance de
+    l'ancien, même pour lever `mustChangePassword`."""
+    if not verify_password(current_password, user.hashedPassword):
+        raise AppError(code="invalid_credentials", message="Mot de passe actuel incorrect.", status_code=401)
+    user.hashedPassword = hash_password(new_password)
+    user.mustChangePassword = False
     await db.commit()
     await db.refresh(user)
     return user

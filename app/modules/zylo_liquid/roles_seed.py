@@ -79,6 +79,12 @@ from app.modules.zylo_liquid.permissions import (
     SECURITY_EQUIPMENT_MANAGE,
     STATION_SUPPLIER_READ,
     STATION_SUPPLIER_MANAGE,
+    STATION_STAFF_READ,
+    STATION_STAFF_MANAGE,
+    STATION_SERVICE_READ,
+    STATION_SERVICE_MANAGE,
+    PRICING_POLICY_READ,
+    PRICING_POLICY_MANAGE,
 )
 
 # Les 6 permissions "create" de la couche déclarative, accordées ensemble au
@@ -145,6 +151,9 @@ _APPRO_READ_PERMISSIONS = [SUPPLIER_READ, CARRIER_READ, TRUCK_READ, PURCHASE_ORD
 # des référentiels réseau ci-dessus).
 _SECURITY_READ_PERMISSIONS = [SECURITY_EQUIPMENT_READ]
 _STATION_SUPPLIER_READ_PERMISSIONS = [STATION_SUPPLIER_READ]
+_STATION_STAFF_READ_PERMISSIONS = [STATION_STAFF_READ]
+_STATION_SERVICE_READ_PERMISSIONS = [STATION_SERVICE_READ]
+_PRICING_POLICY_READ_PERMISSIONS = [PRICING_POLICY_READ]
 
 from app.rbac.models import Role, RolePermission
 from app.rbac.service import get_or_create_permission
@@ -245,6 +254,12 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
             SECURITY_EQUIPMENT_MANAGE,
             STATION_SUPPLIER_READ,
             STATION_SUPPLIER_MANAGE,
+            STATION_STAFF_READ,
+            STATION_STAFF_MANAGE,
+            STATION_SERVICE_READ,
+            STATION_SERVICE_MANAGE,
+            PRICING_POLICY_READ,
+            PRICING_POLICY_MANAGE,
         ],
     ),
     (
@@ -266,6 +281,9 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
             *_DOCUMENT_PERMISSIONS,
             *_SECURITY_READ_PERMISSIONS,
             *_STATION_SUPPLIER_READ_PERMISSIONS,
+            *_STATION_STAFF_READ_PERMISSIONS,
+            *_STATION_SERVICE_READ_PERMISSIONS,
+            *_PRICING_POLICY_READ_PERMISSIONS,
         ],
     ),
     (
@@ -346,6 +364,9 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
             DOCUMENT_READ_SENSITIVE,
             *_SECURITY_READ_PERMISSIONS,
             *_STATION_SUPPLIER_READ_PERMISSIONS,
+            *_STATION_STAFF_READ_PERMISSIONS,
+            *_STATION_SERVICE_READ_PERMISSIONS,
+            *_PRICING_POLICY_READ_PERMISSIONS,
         ],
     ),
     (

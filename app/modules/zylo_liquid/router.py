@@ -72,6 +72,7 @@ from app.modules.zylo_liquid.schemas import (
     CreatePriceHistoryRequest,
     DeliveryDeclarationResponse,
     DeliveryDetectedResponse,
+    DocumentCountsResponse,
     DocumentDownloadUrlResponse,
     DocumentLinkResponse,
     DocumentResponse,
@@ -90,6 +91,13 @@ from app.modules.zylo_liquid.schemas import (
     SaleResponse,
     ShiftCashDeclarationResponse,
     StationFuelProductResponse,
+    UpdateStationFuelProductThresholdsRequest,
+    StationFuelProductOverviewResponse,
+    CreateStationServiceRequest,
+    UpdateStationServiceRequest,
+    StationServiceResponse,
+    UpdatePricingPolicyRequest,
+    PricingPolicyResponse,
     SupplierResponse,
     TruckResponse,
     UpdateCarrierRequest,
@@ -141,6 +149,7 @@ from app.modules.zylo_liquid.schemas import (
     SellableProductResponse,
     TechnicianResponse,
     UpdateEquipmentRequest,
+    UpdateRegulatoryDocumentRequest,
     UpdateSellableProductRequest,
     CreateSecurityEquipmentRequest,
     UpdateSecurityEquipmentRequest,
@@ -150,6 +159,10 @@ from app.modules.zylo_liquid.schemas import (
     StationSupplierResponse,
     UpdateStationFinancialRequest,
     StationFinancialResponse,
+    CreateStationStaffRequest,
+    UpdateStationStaffRequest,
+    StationStaffResponse,
+    CreateStationStaffResponse,
 )
 from app.modules_registry.service import require_module_active
 from app.rbac.service import get_current_organization_id, require_permission, require_permission_scoped, require_permission_scoped_via
@@ -306,6 +319,88 @@ async def update_station_fuel_product(
     db: AsyncSession = Depends(get_db),
 ):
     return await service.update_station_fuel_product(db, organization_id, association_id, data)
+
+
+# Page Exploitation (Centre administratif de la station) — vue d'ensemble
+# carburants, seuils, services, politique commerciale par produit. Portée
+# vérifiée dans le service (_check_declaration_scope), pas de dépendance
+# require_permission ici — même convention que le reste du Centre
+# administratif (SecurityEquipment, StationSupplier...).
+
+
+@router.patch("/station-fuel-products/{association_id}/thresholds", response_model=StationFuelProductResponse)
+async def update_station_fuel_product_thresholds(
+    association_id: uuid.UUID,
+    data: UpdateStationFuelProductThresholdsRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> StationFuelProductResponse:
+    return await service.update_station_fuel_product_thresholds(db, organization_id, current_user.id, association_id, data)
+
+
+@router.get("/stations/{station_id}/fuel-products-overview", response_model=list[StationFuelProductOverviewResponse])
+async def list_station_fuel_products_overview(
+    station_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[StationFuelProductOverviewResponse]:
+    return await service.list_station_fuel_products_overview(db, organization_id, current_user.id, station_id)
+
+
+@router.post("/station-services", response_model=StationServiceResponse, status_code=201)
+async def create_station_service(
+    data: CreateStationServiceRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> StationServiceResponse:
+    return await service.create_station_service(db, organization_id, current_user.id, data)
+
+
+@router.patch("/station-services/{service_id}", response_model=StationServiceResponse)
+async def update_station_service(
+    service_id: uuid.UUID,
+    data: UpdateStationServiceRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> StationServiceResponse:
+    return await service.update_station_service(db, organization_id, current_user.id, service_id, data)
+
+
+@router.get("/station-services", response_model=list[StationServiceResponse])
+async def list_station_services(
+    stationId: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[StationServiceResponse]:
+    return await service.list_station_services(db, organization_id, current_user.id, stationId)
+
+
+@router.get("/station-product-pricing-policy", response_model=PricingPolicyResponse | None)
+async def get_pricing_policy(
+    stationId: uuid.UUID,
+    fuelProductId: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> PricingPolicyResponse | None:
+    return await service.get_pricing_policy(db, organization_id, current_user.id, stationId, fuelProductId)
+
+
+@router.patch("/station-product-pricing-policy", response_model=PricingPolicyResponse)
+async def update_pricing_policy(
+    stationId: uuid.UUID,
+    fuelProductId: uuid.UUID,
+    data: UpdatePricingPolicyRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> PricingPolicyResponse:
+    return await service.update_pricing_policy(db, organization_id, current_user.id, stationId, fuelProductId, data)
 
 
 @router.post(
@@ -1428,6 +1523,22 @@ async def list_documents_for_entity(
     return await service.list_document_links_for_entity(db, organization_id, current_user.id, linkedEntityType, linkedEntityId)
 
 
+@router.get("/documents/counts-by-entity", response_model=DocumentCountsResponse)
+async def count_documents_for_entities(
+    linkedEntityType: str,
+    linkedEntityIds: str,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> DocumentCountsResponse:
+    """`linkedEntityIds` : identifiants séparés par des virgules (audit
+    performance — un seul appel réseau au lieu d'un par ligne de tableau
+    dans les écrans Réglementation/Fournisseurs)."""
+    ids = [uuid.UUID(raw) for raw in linkedEntityIds.split(",") if raw.strip()]
+    counts = await service.count_documents_by_entity(db, organization_id, current_user.id, linkedEntityType, ids)
+    return DocumentCountsResponse(counts=counts)
+
+
 @router.delete("/documents/{document_id}", response_model=DocumentResponse)
 async def delete_document(
     document_id: uuid.UUID,
@@ -1671,6 +1782,47 @@ async def update_station_financial(
     return await service.update_station_financial(db, organization_id, current_user.id, station_id, data)
 
 
+@router.post("/station-staff", response_model=CreateStationStaffResponse, status_code=201)
+async def create_station_staff_member(
+    data: CreateStationStaffRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> CreateStationStaffResponse:
+    return await service.create_station_staff_member(db, organization_id, current_user.id, data)
+
+
+@router.patch("/station-staff/{user_id}", response_model=StationStaffResponse)
+async def update_station_staff_member(
+    user_id: uuid.UUID,
+    data: UpdateStationStaffRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> StationStaffResponse:
+    return await service.update_station_staff_profile(db, organization_id, current_user.id, user_id, data)
+
+
+@router.post("/station-staff/{user_id}/deactivate", response_model=StationStaffResponse)
+async def deactivate_station_staff_member(
+    user_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> StationStaffResponse:
+    return await service.deactivate_station_staff_access(db, organization_id, current_user.id, user_id)
+
+
+@router.get("/station-staff", response_model=list[StationStaffResponse])
+async def list_station_staff_members(
+    stationId: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[StationStaffResponse]:
+    return await service.list_station_staff_profiles(db, organization_id, current_user.id, stationId)
+
+
 @router.post("/interventions", response_model=InterventionResponse, status_code=201)
 async def create_intervention(
     data: CreateInterventionRequest,
@@ -1738,6 +1890,17 @@ async def renew_regulatory_document(
     db: AsyncSession = Depends(get_db),
 ) -> RegulatoryDocumentResponse:
     return await service.renew_regulatory_document(db, organization_id, current_user.id, document_id, data)
+
+
+@router.patch("/regulatory-documents/{document_id}", response_model=RegulatoryDocumentResponse)
+async def update_regulatory_document(
+    document_id: uuid.UUID,
+    data: UpdateRegulatoryDocumentRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> RegulatoryDocumentResponse:
+    return await service.update_regulatory_document(db, organization_id, current_user.id, document_id, data)
 
 
 @router.get("/regulatory-documents", response_model=Page[RegulatoryDocumentResponse])

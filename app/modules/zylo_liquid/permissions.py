@@ -128,6 +128,21 @@ STATION_SUPPLIER_MANAGE = "zyloLiquid.stationSupplier.manage"
 STATION_FINANCIAL_READ = "zyloLiquid.stationFinancial.read"
 STATION_FINANCIAL_MANAGE = "zyloLiquid.stationFinancial.manage"
 
+# Module Personnel — création de compte + profil de poste pour un membre du
+# personnel d'une station (mockup emalioration/personnel/).
+STATION_STAFF_READ = "zyloLiquid.stationStaff.read"
+STATION_STAFF_MANAGE = "zyloLiquid.stationStaff.manage"
+
+# Page Exploitation (Centre administratif de la station) — catalogue de
+# services et politique commerciale par produit. Les seuils de réassort
+# vivent sur StationFuelProduct, gardés par STATION_FUEL_PRODUCT_READ/MANAGE
+# déjà existant, aucune nouvelle permission nécessaire pour eux.
+STATION_SERVICE_READ = "zyloLiquid.stationService.read"
+STATION_SERVICE_MANAGE = "zyloLiquid.stationService.manage"
+
+PRICING_POLICY_READ = "zyloLiquid.pricingPolicy.read"
+PRICING_POLICY_MANAGE = "zyloLiquid.pricingPolicy.manage"
+
 # ================================================================
 # Mission « vente-maintenant-reglementation » (06-permissions-par-domaine.md
 # de la mission) — nouvelles permissions par domaine, jamais un second

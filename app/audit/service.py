@@ -102,6 +102,7 @@ async def list_audit_logs(
     offset: int,
     scope_resource_type: str | None = None,
     scope_resource_id: uuid.UUID | None = None,
+    actor_user_id: uuid.UUID | None = None,
 ) -> tuple[list[AuditLog], int]:
     """`scope_resource_type`/`scope_resource_id` (Centre administratif et
     opérationnel de la station, domaine « Historique ») — filtre additif sur
@@ -109,7 +110,10 @@ async def list_audit_logs(
     (`AuditLog.scopeResourceType/scopeResourceId`), jamais un contournement :
     s'applique EN PLUS de la restriction de portée ci-dessous, jamais à sa
     place (un gérant ne peut pas demander l'historique d'une station qu'il
-    ne voit pas)."""
+    ne voit pas). `actor_user_id` (module Personnel, « Activité récente »
+    d'une fiche membre) — même principe, filtre additif sur une colonne déjà
+    existante (`AuditLog.actorUserId`), jamais un contournement de la
+    restriction de portée ci-dessous."""
     sees_all, visible_scopes = await _audit_visibility(db, organization_id, requesting_user_id)
     if not sees_all and not visible_scopes:
         raise AppError(code="permission_denied", message=f"Permission manquante : {AUDIT_LOG_VIEW}.", status_code=403)
@@ -121,6 +125,8 @@ async def list_audit_logs(
         stmt = stmt.where(AuditLog.scopeResourceType == scope_resource_type)
     if scope_resource_id is not None:
         stmt = stmt.where(AuditLog.scopeResourceId == scope_resource_id)
+    if actor_user_id is not None:
+        stmt = stmt.where(AuditLog.actorUserId == actor_user_id)
     if not sees_all:
         # Un gérant de station ne voit que les évènements scopés à ses
         # stations autorisées — jamais les évènements sans portée (org

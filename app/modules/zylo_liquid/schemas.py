@@ -2,7 +2,7 @@ import colorsys
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 # Reflète exactement ck_zlSale_paymentMethod / ck_zlProductSaleTransaction_paymentMethod
 # (app/modules/zylo_liquid/models.py) — élargi mission
@@ -82,6 +82,43 @@ class StationFuelProductResponse(BaseModel):
     stationId: uuid.UUID
     fuelProductId: uuid.UUID
     active: bool
+    minThresholdLiters: float | None = None
+    criticalThresholdLiters: float | None = None
+    safetyStockLiters: float | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class UpdateStationFuelProductThresholdsRequest(BaseModel):
+    minThresholdLiters: float | None = Field(default=None, ge=0)
+    criticalThresholdLiters: float | None = Field(default=None, ge=0)
+    safetyStockLiters: float | None = Field(default=None, ge=0)
+
+
+class StationFuelProductOverviewResponse(BaseModel):
+    """Ligne de la table « Carburants » (page Exploitation) — jointure
+    StationFuelProduct + FuelProduct + agrégation des cuves de ce produit à
+    cette station (jamais un stock/une capacité stockés en double) + dernier
+    prix PriceHistory non-futur. `status` est calculé à partir du stock
+    actuel et des seuils — 'inconnu' si aucun seuil n'a jamais été défini
+    (jamais un statut inventé par défaut)."""
+
+    id: uuid.UUID
+    stationId: uuid.UUID
+    fuelProductId: uuid.UUID
+    fuelProductName: str
+    fuelProductCode: str
+    displayColor: str | None
+    active: bool
+    minThresholdLiters: float | None
+    criticalThresholdLiters: float | None
+    safetyStockLiters: float | None
+    capacityLiters: float
+    currentVolumeLiters: float | None
+    status: str
+    currentPriceAmount: float | None
+    currencyCode: str | None
+    priceEffectiveFrom: datetime | None
 
     model_config = {"from_attributes": True}
 
@@ -1107,6 +1144,14 @@ class DocumentDownloadUrlResponse(BaseModel):
     url: str
 
 
+class DocumentCountsResponse(BaseModel):
+    """Nombre de pièces jointes par entité (audit performance — remplace
+    un appel par ligne de tableau). Une entité absente des clés n'a
+    simplement aucun document, jamais une erreur."""
+
+    counts: dict[uuid.UUID, int]
+
+
 # ================================================================
 # Rapprochement (Phase 6, Phase 7 §1) — Bloc 6 : modèles/schémas seulement,
 # le mécanisme de calcul est le Bloc 7.
@@ -1164,15 +1209,42 @@ class ReconciliationRecordResponse(BaseModel):
 # ================================================================
 
 
+SUPPLIER_CATEGORIES = ("carburant", "equipement", "maintenance", "securite", "service", "autre")
+
+
+def _validate_supplier_category(value: str | None) -> str | None:
+    if value is not None and value not in SUPPLIER_CATEGORIES:
+        raise ValueError(f"category doit être l'une de {SUPPLIER_CATEGORIES}.")
+    return value
+
+
 class CreateSupplierRequest(BaseModel):
     name: str = Field(min_length=1, max_length=150)
     type: str | None = Field(default=None, max_length=60)
+    category: str | None = None
+    contactName: str | None = Field(default=None, max_length=150)
+    contactRole: str | None = Field(default=None, max_length=100)
+    contactPhone: str | None = Field(default=None, max_length=30)
+    contactEmail: str | None = Field(default=None, max_length=255)
+    website: str | None = Field(default=None, max_length=255)
+    address: str | None = None
+
+    _validate_category = field_validator("category")(_validate_supplier_category)
 
 
 class UpdateSupplierRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=150)
     type: str | None = Field(default=None, max_length=60)
+    category: str | None = None
+    contactName: str | None = Field(default=None, max_length=150)
+    contactRole: str | None = Field(default=None, max_length=100)
+    contactPhone: str | None = Field(default=None, max_length=30)
+    contactEmail: str | None = Field(default=None, max_length=255)
+    website: str | None = Field(default=None, max_length=255)
+    address: str | None = None
     active: bool | None = None
+
+    _validate_category = field_validator("category")(_validate_supplier_category)
 
 
 class SupplierResponse(BaseModel):
@@ -1180,6 +1252,13 @@ class SupplierResponse(BaseModel):
     organizationId: uuid.UUID
     name: str
     type: str | None
+    category: str | None = None
+    contactName: str | None = None
+    contactRole: str | None = None
+    contactPhone: str | None = None
+    contactEmail: str | None = None
+    website: str | None = None
+    address: str | None = None
     active: bool
 
     model_config = {"from_attributes": True}
@@ -1318,11 +1397,21 @@ class CreateStationSupplierRequest(BaseModel):
     stationId: uuid.UUID
     supplierId: uuid.UUID
     notes: str | None = None
+    contractReference: str | None = Field(default=None, max_length=100)
+    contractType: str | None = Field(default=None, max_length=60)
+    contractStartDate: date | None = None
+    contractEndDate: date | None = None
+    equipmentTags: str | None = None
 
 
 class UpdateStationSupplierRequest(BaseModel):
     active: bool | None = None
     notes: str | None = None
+    contractReference: str | None = Field(default=None, max_length=100)
+    contractType: str | None = Field(default=None, max_length=60)
+    contractStartDate: date | None = None
+    contractEndDate: date | None = None
+    equipmentTags: str | None = None
 
 
 class StationSupplierResponse(BaseModel):
@@ -1331,6 +1420,15 @@ class StationSupplierResponse(BaseModel):
     supplierId: uuid.UUID
     active: bool
     notes: str | None
+    contractReference: str | None = None
+    contractType: str | None = None
+    contractStartDate: date | None = None
+    contractEndDate: date | None = None
+    equipmentTags: str | None = None
+    # Calculé côté service depuis contractEndDate (jamais saisi), même
+    # sémantique que `RegulatoryDocumentResponse.computedStatus` : 'valid' /
+    # 'renew_soon' / 'expired' / 'unknown' (pas de date de fin connue).
+    contractStatus: str = "unknown"
 
     model_config = {"from_attributes": True}
 
@@ -1355,6 +1453,118 @@ class StationFinancialResponse(BaseModel):
     billingAddress: str | None
     costCenterCode: str | None
     bankAccountInfo: str | None
+
+    model_config = {"from_attributes": True}
+
+
+# ================================================================
+# Module Personnel — création de compte + profil de poste pour un membre du
+# personnel d'une station (mockup emalioration/personnel/). Le rôle
+# lui-même reste géré par le RBAC existant (assign_role), jamais dupliqué.
+# ================================================================
+
+
+class CreateStationStaffRequest(BaseModel):
+    stationId: uuid.UUID
+    firstName: str = Field(min_length=1, max_length=120)
+    lastName: str = Field(min_length=1, max_length=120)
+    email: EmailStr
+    phone: str | None = Field(default=None, max_length=20)
+    photoStorageReference: str | None = None
+    roleId: uuid.UUID | None = None
+    employeeNumber: str | None = Field(default=None, max_length=50)
+    contractType: str | None = Field(default=None, max_length=50)
+    directManagerUserId: uuid.UUID | None = None
+
+
+class UpdateStationStaffRequest(BaseModel):
+    firstName: str | None = Field(default=None, min_length=1, max_length=120)
+    lastName: str | None = Field(default=None, min_length=1, max_length=120)
+    phone: str | None = Field(default=None, max_length=20)
+    photoStorageReference: str | None = None
+    employeeNumber: str | None = Field(default=None, max_length=50)
+    contractType: str | None = Field(default=None, max_length=50)
+    assignedStationId: uuid.UUID | None = None
+    directManagerUserId: uuid.UUID | None = None
+
+
+class StationStaffResponse(BaseModel):
+    id: uuid.UUID
+    userId: uuid.UUID
+    organizationId: uuid.UUID
+    email: str
+    fullName: str
+    firstName: str | None
+    lastName: str | None
+    phone: str | None
+    photoUrl: str | None
+    status: str
+    employeeNumber: str | None
+    contractType: str | None
+    assignedStationId: uuid.UUID | None
+    directManagerUserId: uuid.UUID | None
+    assignedAt: date
+
+    model_config = {"from_attributes": True}
+
+
+class CreateStationStaffResponse(BaseModel):
+    """Le mot de passe temporaire n'apparaît QUE dans cette réponse, une
+    seule fois, à la création — jamais stocké en clair, jamais rejoué par
+    aucun autre endpoint (StationStaffResponse ne le porte pas)."""
+
+    staff: StationStaffResponse
+    temporaryPassword: str
+
+
+# ================================================================
+# Page Exploitation (Centre administratif de la station) — catalogue de
+# services et politique commerciale par produit. Les seuils/l'overview des
+# carburants sont définis plus haut, avec StationFuelProductResponse.
+# ================================================================
+
+
+class CreateStationServiceRequest(BaseModel):
+    stationId: uuid.UUID
+    type: str = Field(min_length=1, max_length=40)
+    label: str = Field(min_length=1, max_length=150)
+    available: bool = True
+
+
+class UpdateStationServiceRequest(BaseModel):
+    label: str | None = Field(default=None, min_length=1, max_length=150)
+    available: bool | None = None
+
+
+class StationServiceResponse(BaseModel):
+    id: uuid.UUID
+    stationId: uuid.UUID
+    type: str
+    label: str
+    available: bool
+
+    model_config = {"from_attributes": True}
+
+
+class UpdatePricingPolicyRequest(BaseModel):
+    policyType: str | None = Field(default=None, max_length=30)
+    applicationPeriod: str | None = Field(default=None, max_length=30)
+    promotionsEnabled: bool | None = None
+    differentPriceByPeriod: bool | None = None
+    volumeDiscount: bool | None = None
+    corporateRate: bool | None = None
+
+
+class PricingPolicyResponse(BaseModel):
+    id: uuid.UUID
+    stationId: uuid.UUID
+    fuelProductId: uuid.UUID
+    policyType: str
+    applicationPeriod: str
+    promotionsEnabled: bool
+    differentPriceByPeriod: bool
+    volumeDiscount: bool
+    corporateRate: bool
 
     model_config = {"from_attributes": True}
 
@@ -1593,6 +1803,8 @@ class CreateRegulatoryDocumentRequest(BaseModel):
     expiresAt: date | None = None
     sourceReference: str | None = None
     certaintyLevel: str = "medium"
+    notes: str | None = None
+    responsibleUserId: uuid.UUID | None = None
 
     @field_validator("certaintyLevel")
     @classmethod
@@ -1600,6 +1812,17 @@ class CreateRegulatoryDocumentRequest(BaseModel):
         if value not in ("high", "medium", "low"):
             raise ValueError("certaintyLevel doit être 'high', 'medium' ou 'low'.")
         return value
+
+
+class UpdateRegulatoryDocumentRequest(BaseModel):
+    """Correction de métadonnées uniquement (refonte onglet Réglementation) —
+    jamais `documentType`/`issuedAt`/`expiresAt`/`certaintyLevel`, qui
+    restent gouvernés par `renew_regulatory_document` (un vrai changement
+    de date est un renouvellement, jamais une correction silencieuse)."""
+    authority: str | None = Field(default=None, max_length=200)
+    sourceReference: str | None = None
+    notes: str | None = None
+    responsibleUserId: uuid.UUID | None = None
 
 
 class RegulatoryDocumentResponse(BaseModel):
@@ -1612,6 +1835,12 @@ class RegulatoryDocumentResponse(BaseModel):
     sourceReference: str | None
     certaintyLevel: str
     supersededByDocumentId: uuid.UUID | None
+    notes: str | None = None
+    responsibleUserId: uuid.UUID | None = None
+    # Résolus côté service depuis `responsibleUserId` (jamais stockés en
+    # double) — `None` tant qu'aucun responsable n'est désigné.
+    responsibleUserName: str | None = None
+    responsibleUserEmail: str | None = None
     # Calculé côté service (jamais un attribut du modèle ORM, jamais saisi —
     # Phase 4 §3.1 de la mission), assigné après `model_validate` : valeur
     # par défaut ici uniquement pour permettre cette validation en 2 temps.

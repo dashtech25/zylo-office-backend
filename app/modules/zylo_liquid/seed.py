@@ -81,6 +81,12 @@ from app.modules.zylo_liquid.permissions import (
     STATION_SUPPLIER_MANAGE,
     STATION_FINANCIAL_READ,
     STATION_FINANCIAL_MANAGE,
+    STATION_STAFF_READ,
+    STATION_STAFF_MANAGE,
+    STATION_SERVICE_READ,
+    STATION_SERVICE_MANAGE,
+    PRICING_POLICY_READ,
+    PRICING_POLICY_MANAGE,
 )
 from app.rbac.service import get_or_create_permission
 
@@ -187,6 +193,12 @@ KNOWN_PERMISSIONS = [
     (STATION_SUPPLIER_MANAGE, "Associer/retirer un fournisseur d'une station."),
     (STATION_FINANCIAL_READ, "Consulter les informations administratives/fiscales d'une station, y compris les coordonnées bancaires."),
     (STATION_FINANCIAL_MANAGE, "Modifier les informations administratives/fiscales d'une station."),
+    (STATION_STAFF_READ, "Consulter le personnel affecté à une station."),
+    (STATION_STAFF_MANAGE, "Créer un compte de membre du personnel, modifier son profil de poste, désactiver son accès."),
+    (STATION_SERVICE_READ, "Consulter les services proposés par une station."),
+    (STATION_SERVICE_MANAGE, "Créer/modifier/désactiver les services proposés par une station."),
+    (PRICING_POLICY_READ, "Consulter la politique commerciale d'un produit à une station."),
+    (PRICING_POLICY_MANAGE, "Modifier la politique commerciale d'un produit à une station."),
 ]
 
 

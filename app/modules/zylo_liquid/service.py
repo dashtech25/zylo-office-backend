@@ -1387,8 +1387,18 @@ async def get_network_summary(db: AsyncSession, organization_id: uuid.UUID, from
         entry["stations"].add(tank.stationId)
         entry["tanks"] += 1
         entry["volume"] += state.volumeLiters
+        # Volume vendable (cartes stock, audit validé) : toujours calculable
+        # dès que `volumeLiters` l'est (même table de calibration pour le
+        # seuil bas) — jamais gaté par la disponibilité du prix, contrairement
+        # à sa valeur monétaire juste en dessous.
+        entry["sellableVolume"] += state.sellableVolumeLiters or 0.0
         all_stations_with_data.add(tank.stationId)
-        _accumulate_monetary(entry, state.monetaryValue, state.currencyCode)
+        sellable_monetary = (
+            state.sellableVolumeLiters * state.unitPriceAmount
+            if state.sellableVolumeLiters is not None and state.unitPriceAmount is not None
+            else None
+        )
+        _accumulate_monetary(entry, state.monetaryValue, sellable_monetary, state.currencyCode)
 
     products = _build_product_lines(per_product, fuel_products_by_id)
 
@@ -1397,20 +1407,23 @@ async def get_network_summary(db: AsyncSession, organization_id: uuid.UUID, from
         totalVolumeLiters=sum(p.totalVolumeLiters for p in products),
         totalStationCount=len(all_stations_with_data),
         totalTankCount=sum(p.tankCount for p in products),
+        totalSellableVolumeLiters=sum(p.totalSellableVolumeLiters for p in products),
     )
 
 
 def _init_product_entry(per_product: dict, fuel_product_id: uuid.UUID) -> dict:
     return per_product.setdefault(
-        fuel_product_id, {"stations": set(), "tanks": 0, "volume": 0.0, "monetary": 0.0, "currencies": set(), "incomplete_pricing": False}
+        fuel_product_id,
+        {"stations": set(), "tanks": 0, "volume": 0.0, "sellableVolume": 0.0, "monetary": 0.0, "sellableMonetary": 0.0, "currencies": set(), "incomplete_pricing": False},
     )
 
 
-def _accumulate_monetary(entry: dict, monetary_value: float | None, currency_code: str | None) -> None:
+def _accumulate_monetary(entry: dict, monetary_value: float | None, sellable_monetary_value: float | None, currency_code: str | None) -> None:
     if monetary_value is None:
         entry["incomplete_pricing"] = True
         return
     entry["monetary"] += monetary_value
+    entry["sellableMonetary"] += sellable_monetary_value or 0.0
     if currency_code is not None:
         entry["currencies"].add(currency_code)
 
@@ -1420,17 +1433,20 @@ def _build_product_lines(per_product: dict, fuel_products_by_id: dict) -> list[N
     de ce produit ont un prix applicable dans une seule et même devise —
     sinon la réponse l'indique explicitement, jamais une somme erronée
     entre devises différentes ou une valeur partielle silencieuse
-    (Point 2 §7.6, niveau_1_...md §20)."""
+    (Point 2 §7.6, niveau_1_...md §20). La valeur monétaire du volume
+    vendable partage exactement la même porte (même prix/devise résolus par
+    cuve) — jamais une deuxième résolution de prix, jamais une raison de
+    non-calcul distincte."""
     lines = []
     for fuel_product_id, entry in per_product.items():
         if entry["incomplete_pricing"]:
-            monetary_value, currency_code, reason = None, None, "incomplete_pricing"
+            monetary_value, sellable_monetary_value, currency_code, reason = None, None, None, "incomplete_pricing"
         elif len(entry["currencies"]) > 1:
-            monetary_value, currency_code, reason = None, None, "mixed_currencies"
+            monetary_value, sellable_monetary_value, currency_code, reason = None, None, None, "mixed_currencies"
         elif len(entry["currencies"]) == 1:
-            monetary_value, currency_code, reason = entry["monetary"], next(iter(entry["currencies"])), None
+            monetary_value, sellable_monetary_value, currency_code, reason = entry["monetary"], entry["sellableMonetary"], next(iter(entry["currencies"])), None
         else:
-            monetary_value, currency_code, reason = None, None, "no_applicable_price"
+            monetary_value, sellable_monetary_value, currency_code, reason = None, None, None, "no_applicable_price"
 
         lines.append(
             NetworkSummaryProductLine(
@@ -1442,6 +1458,8 @@ def _build_product_lines(per_product: dict, fuel_products_by_id: dict) -> list[N
                 totalMonetaryValue=monetary_value,
                 currencyCode=currency_code,
                 monetaryValueNotCalculableReason=reason,
+                totalSellableVolumeLiters=entry["sellableVolume"],
+                totalSellableMonetaryValue=sellable_monetary_value,
             )
         )
     return lines
@@ -2105,9 +2123,19 @@ async def get_network_snapshot(db: AsyncSession, organization_id: uuid.UUID, at)
         all_stations_with_data.add(tank.stationId)
 
         monetary_value, currency_code, _, _ = await _resolve_tank_monetary_value(db, tank, volume_net, at)
-        _accumulate_monetary(entry, monetary_value, currency_code)
+        # Volume vendable non calculé pour un instantané historique (pas de
+        # seuil bas interpolé ici) — hors périmètre de cet endpoint, jamais
+        # une valeur inventée : les lignes produit du snapshot gardent
+        # `totalSellableVolumeLiters=0`/`totalSellableMonetaryValue=None`.
+        _accumulate_monetary(entry, monetary_value, None, currency_code)
 
     products = _build_product_lines(per_product, fuel_products_by_id)
+    # Le volume vendable à un instant passé n'est pas calculé par ce
+    # snapshot (pas d'interpolation du seuil bas ici) — `0` serait un
+    # mensonge ("rien de vendable") plutôt qu'une absence de calcul :
+    # forcé à `None` plutôt que la fausse valeur `0.0` que produirait
+    # `_build_product_lines` faute de mieux.
+    products = [p.model_copy(update={"totalSellableMonetaryValue": None}) for p in products]
 
     return NetworkSummaryResponse(
         products=products,

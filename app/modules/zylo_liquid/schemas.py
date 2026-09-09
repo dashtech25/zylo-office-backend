@@ -396,6 +396,15 @@ class NetworkSummaryProductLine(BaseModel):
     totalMonetaryValue: float | None = None
     currencyCode: str | None = None
     monetaryValueNotCalculableReason: str | None = None
+    # Volume vendable (audit "cartes stock", validé) : volume net moins le
+    # seuil bas de chaque cuve (jamais rien de vendable sous ce seuil) —
+    # toujours calculable dès que `totalVolumeLiters` l'est (même table de
+    # calibration), donc jamais de raison de non-calcul séparée. Sa valeur
+    # monétaire réutilise exactement le même prix/devise/raison que
+    # `totalMonetaryValue` (même résolution de prix par cuve) — jamais une
+    # deuxième résolution de prix.
+    totalSellableVolumeLiters: float = 0.0
+    totalSellableMonetaryValue: float | None = None
 
 
 class NetworkSummaryResponse(BaseModel):
@@ -403,6 +412,11 @@ class NetworkSummaryResponse(BaseModel):
     totalVolumeLiters: float
     totalStationCount: int
     totalTankCount: int
+    # Somme pure, toujours calculable (comme `totalVolumeLiters`) — la
+    # valeur monétaire totale vendable, elle, reste calculée côté frontend
+    # à partir des lignes produit (`useNetworkDashboard.ts`), exactement
+    # comme `totalMonetaryValue` l'est déjà aujourd'hui pour le stock total.
+    totalSellableVolumeLiters: float = 0.0
 
 
 class DeliveryDetectedResponse(BaseModel):

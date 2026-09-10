@@ -1,3 +1,6 @@
+import asyncio
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -10,6 +13,7 @@ from app.audit.seed import seed_known_permissions as seed_audit_permissions
 from app.core.database import AsyncSessionLocal
 from app.identity.service import backfill_owner_default_permissions
 from app.modules.zylo_liquid.seed import seed_known_permissions
+from app.modules.zylo_liquid.telemetry_sync import sync_loop as holykell_sync_loop
 from app.modules_registry.seed import seed_known_modules
 from app.modules_registry.service import backfill_active_module_permissions_for_owners
 from app.rbac.seed import seed_known_permissions as seed_rbac_permissions
@@ -63,6 +67,29 @@ async def on_startup() -> None:
     # ajoutées après son activation initiale du module.
     async with AsyncSessionLocal() as db:
         await backfill_active_module_permissions_for_owners(db)
+
+    # Refonte alertes Étape 2 (décision D1) : la boucle de sondage Holykell
+    # tourne dans ce process, plus jamais dépendante d'un script externe.
+    # Vide par défaut (HOLYKELL_SYNC_BASE_URL non défini) = désactivée, sans
+    # effet sur le dev local qui n'a pas de simulateur Holykell en ligne.
+    if settings.HOLYKELL_SYNC_BASE_URL:
+        app.state.holykell_sync_task = asyncio.create_task(holykell_sync_loop())
+    else:
+        app.state.holykell_sync_task = None
+        logging.getLogger("zylo_office.holykell_sync").info(
+            "HOLYKELL_SYNC_BASE_URL non défini — sondage Holykell désactivé."
+        )
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    task = getattr(app.state, "holykell_sync_task", None)
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 @app.get("/")

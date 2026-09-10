@@ -65,7 +65,12 @@ async def test_create_delivery_declaration(client: AsyncClient, registered_user:
     body = res.json()
     assert body["lifecycleStatus"] == "declared"
     assert body["declaredVolumeLiters"] == 5000
-    assert body["reconciledWithId"] is None
+    # Rapprochement automatique déclenché dès la création (mission « flux de
+    # livraison station ») — aucune DeliveryDetected n'existe encore pour
+    # cette cuve, donc le résultat est "pending", jamais None (avant cette
+    # mission, la déclaration restait non évaluée tant que personne
+    # n'appelait /reconcile manuellement).
+    assert body["reconciledWithId"] is not None
 
 
 async def test_delivery_declaration_can_be_updated_by_author_while_declared(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):

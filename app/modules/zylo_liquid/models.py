@@ -514,12 +514,21 @@ class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     en Phase 1 (Point 2 §7), créé à la construction de l'endpoint 12
     (issue #45). 5 déclencheurs distincts (niveau haut/pré-alarme/bas, eau,
     fuite, sonde déconnectée) partagent cette table unique et son cycle de
-    vie actif/résolue (Point 2 §4.1-4.6)."""
+    vie actif/résolue (Point 2 §4.1-4.6).
+
+    Étendue (mission « flux de livraison station ») avec 3 déclencheurs de
+    rapprochement livraison — mêmes colonnes, jamais un second modèle
+    d'alerte : `delivery_discrepancy` (écart de volume déclaré/détecté hors
+    tolérance), `delivery_undeclared` (livraison détectée par télémétrie
+    sans déclaration correspondante), `delivery_declaration_pending`
+    (déclaration toujours sans détection après la fenêtre de rapprochement
+    — signal plus léger, jamais confondu avec un écart avéré)."""
 
     __tablename__ = "zyloLiquidAlert"
     __table_args__ = (
         CheckConstraint(
-            "type IN ('level_high','level_high_pre_alarm','level_low','water','leak','sensor_offline')",
+            "type IN ('level_high','level_high_pre_alarm','level_low','water','leak','sensor_offline',"
+            "'delivery_discrepancy','delivery_undeclared','delivery_declaration_pending')",
             name="ck_zlAlert_type",
         ),
         CheckConstraint("status IN ('active','resolved')", name="ck_zlAlert_status"),

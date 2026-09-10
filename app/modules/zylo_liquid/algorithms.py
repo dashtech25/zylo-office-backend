@@ -33,6 +33,12 @@ CASH_MAX_PLAUSIBLE_RATE_LPH = 6000.0
 RECONCILIATION_DELIVERY_WINDOW_HOURS_DEFAULT = 2.0
 RECONCILIATION_DELIVERY_VOLUME_TOLERANCE_FIXED_LITERS_DEFAULT = 50.0
 RECONCILIATION_DELIVERY_VOLUME_TOLERANCE_PERCENT_DEFAULT = 0.5
+# Alerte « déclaration en attente » (mission « flux de livraison station ») —
+# volontairement pas un champ de StationReconciliationSettings (non demandé,
+# pas de besoin de réglage par station exprimé) : une constante fixe, plus
+# large que la fenêtre de rapprochement elle-même (2h) pour ne jamais
+# signaler une déclaration simplement pas encore rapprochée.
+RECONCILIATION_DELIVERY_STALE_PENDING_HOURS_DEFAULT = 24.0
 RECONCILIATION_GAUGING_HEIGHT_TOLERANCE_MM_DEFAULT = 10.0
 RECONCILIATION_QUALITY_CHECK_WINDOW_HOURS_DEFAULT = 1.0
 

@@ -649,10 +649,38 @@ class CurrencyCashBlock(BaseModel):
     stations: list[StationCashSummaryLine]
 
 
+class NetworkProductCashLine(BaseModel):
+    """Ventes du jour agrégées par produit sur tout le réseau (cartes de la
+    page Caisse, même esprit que NetworkSummaryProductLine pour le stock) —
+    le volume s'additionne toujours, le montant seulement si toutes les
+    stations contributrices partagent la même devise (même garde que
+    CurrencyCashBlock, jamais une somme entre devises différentes)."""
+
+    fuelProductId: uuid.UUID
+    fuelProductName: str
+    displayColor: str | None
+    tankCount: int
+    stationCount: int
+    volumeSoldLiters: float
+    monetaryValue: float | None
+    currencyCode: str | None
+    monetaryValueNotCalculableReason: str | None
+    confidence: str
+    stations: list[StationCashSummaryLine]
+
+
 class NetworkCashSummaryResponse(BaseModel):
     periodStart: datetime
     periodEnd: datetime
     currencyBlocks: list[CurrencyCashBlock]
+    productBlocks: list[NetworkProductCashLine]
+    # Toutes les stations actives ayant au moins une cuve, y compris celles
+    # dont le montant n'est pas calculable (raison explicite) — contrairement
+    # à `currencyBlocks[].stations`, qui n'inclut que les stations dont la
+    # devise a pu être résolue. Nécessaire pour un tableau/filtrage par
+    # station qui ne doit jamais faire disparaître silencieusement une
+    # station en délai de prix.
+    stationLines: list[StationCashSummaryLine]
     volumeSoldLitersTotal: float
     stationsWithDataCount: int
     stationsTotalCount: int

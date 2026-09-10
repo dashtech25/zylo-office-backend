@@ -93,6 +93,7 @@ from app.modules.zylo_liquid.permissions import (
 from app.rbac.service import list_visible_resource_ids, user_has_permission
 from app.modules.zylo_liquid.algorithms import (
     LEAK_THRESHOLD_LPH,
+    RECONCILIATION_DELIVERY_STALE_PENDING_HOURS_DEFAULT,
     RECONCILIATION_DELIVERY_VOLUME_TOLERANCE_FIXED_LITERS_DEFAULT,
     RECONCILIATION_DELIVERY_VOLUME_TOLERANCE_PERCENT_DEFAULT,
     RECONCILIATION_DELIVERY_WINDOW_HOURS_DEFAULT,
@@ -204,6 +205,7 @@ from app.modules.zylo_liquid.schemas import (
     LeakTestDeclarationResponse,
     ManualGaugingDeclarationResponse,
     NetworkCashSummaryResponse,
+    NetworkProductCashLine,
     NetworkSummaryProductLine,
     NetworkSummaryResponse,
     PaymentResponse,
@@ -1527,6 +1529,19 @@ async def run_delivery_detection_for_tank(db: AsyncSession, tank_id: uuid.UUID) 
         await db.commit()
         for delivery in created:
             await db.refresh(delivery)
+
+        # Retour de rapprochement automatique (mission « flux de livraison
+        # station », point 3 : « dès qu'une livraison est détectée ») —
+        # best-effort, une détection reste valide même si ce retour échoue.
+        try:
+            tank = await db.get(Tank, tank_id)
+            if tank is not None:
+                for delivery in created:
+                    await _reverse_match_delivery_detected(db, delivery, tank)
+                await _sweep_stale_pending_delivery_declarations(db, tank.stationId)
+        except Exception:
+            await db.rollback()
+
     return created
 
 
@@ -2708,6 +2723,17 @@ async def _compute_tank_cash(db: AsyncSession, tank: Tank, period_start: datetim
     }
 
 
+# Tolérance avant de rejeter une période comme "future" : le `toDate` d'une
+# requête "Aujourd'hui" est calculé côté navigateur (`new Date()`), puis
+# comparé ici à l'horloge serveur — un léger décalage d'horloge entre les
+# deux hôtes (ou simplement la latence réseau de la requête) suffit sinon à
+# déclencher un rejet pourtant illégitime (aucune marge n'existait avant ce
+# correctif). Une valeur légèrement future est de toute façon sans
+# conséquence pour le calcul : aucune mesure ne peut exister au-delà de
+# l'instant réel, la période se contente d'inclure une fenêtre vide.
+_CASH_FUTURE_TOLERANCE = timedelta(minutes=5)
+
+
 def _validate_cash_period(from_date, to_date) -> tuple[datetime, datetime]:
     period_start = _to_naive_utc(from_date)
     period_end = _to_naive_utc(to_date)
@@ -2716,9 +2742,9 @@ def _validate_cash_period(from_date, to_date) -> tuple[datetime, datetime]:
     if period_start >= period_end:
         raise AppError(code="invalid_date_range", message="from_date doit être strictement antérieure à to_date.", status_code=422)
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    if period_end > now:
+    if period_end > now + _CASH_FUTURE_TOLERANCE:
         raise AppError(code="cash_period_in_future", message="La période demandée ne peut pas se terminer dans le futur.", status_code=422)
-    return period_start, period_end
+    return period_start, min(period_end, now)
 
 
 def _operational_period_start(station: Station, requested_start: datetime, requested_end: datetime) -> datetime:
@@ -3056,6 +3082,8 @@ async def get_network_cash_summary(
     stations = stations_result.scalars().all()
 
     currency_blocks: dict[str, dict] = {}
+    product_totals: dict[uuid.UUID, dict] = {}
+    station_lines: list[StationCashSummaryLine] = []
     stations_with_data = 0
     incomplete_pricing_stations = 0
     product_ids: set[uuid.UUID] = set()
@@ -3094,6 +3122,38 @@ async def get_network_cash_summary(
                     station_incomplete = True
                 station_currency = cash["currencyCode"]
 
+            product_entry = product_totals.setdefault(
+                tank.fuelProductId,
+                {"tankIds": set(), "stationIds": set(), "volume": 0.0, "monetary": 0.0, "currencies": set(), "incomplete": False, "confidence": "reliable", "stations": {}},
+            )
+            product_entry["tankIds"].add(tank.id)
+            product_entry["stationIds"].add(station.id)
+            product_entry["confidence"] = _worse_cash_confidence(product_entry["confidence"], cash["confidence"])
+
+            product_station_entry = product_entry["stations"].setdefault(
+                station.id,
+                {"stationName": station.name, "tankCount": 0, "volume": 0.0, "monetary": 0.0, "currencies": set(), "incomplete": False, "confidence": "reliable"},
+            )
+            product_station_entry["tankCount"] += 1
+            product_station_entry["confidence"] = _worse_cash_confidence(product_station_entry["confidence"], cash["confidence"])
+            if cash["volumeSoldLiters"] is not None:
+                product_station_entry["volume"] += cash["volumeSoldLiters"]
+            if cash["monetaryValue"] is None:
+                product_station_entry["incomplete"] = True
+            else:
+                product_station_entry["monetary"] += cash["monetaryValue"]
+                if cash["currencyCode"] is not None:
+                    product_station_entry["currencies"].add(cash["currencyCode"])
+
+            if cash["volumeSoldLiters"] is not None:
+                product_entry["volume"] += cash["volumeSoldLiters"]
+            if cash["monetaryValue"] is None:
+                product_entry["incomplete"] = True
+            else:
+                product_entry["monetary"] += cash["monetaryValue"]
+                if cash["currencyCode"] is not None:
+                    product_entry["currencies"].add(cash["currencyCode"])
+
         if station_has_data:
             stations_with_data += 1
         if station_incomplete:
@@ -3110,6 +3170,8 @@ async def get_network_cash_summary(
             monetaryValueNotCalculableReason=None if block_currency is not None else ("mixed_currencies" if station_incomplete and station_currency else "incomplete_pricing" if station_incomplete else "no_applicable_price"),
             confidence=station_confidence,
         )
+
+        station_lines.append(line)
 
         key = block_currency or "__uncalculable__"
         block = currency_blocks.setdefault(key, {"currencyCode": block_currency, "monetary": 0.0, "volume": 0.0, "stations": []})
@@ -3131,10 +3193,66 @@ async def get_network_cash_summary(
     ]
     uncalculable_block = currency_blocks.get("__uncalculable__")
 
+    fuel_products_result = await db.execute(select(FuelProduct).where(FuelProduct.organizationId == organization_id))
+    fuel_products_by_id = {fp.id: fp for fp in fuel_products_result.scalars().all()}
+
+    product_blocks: list[NetworkProductCashLine] = []
+    for fuel_product_id, entry in product_totals.items():
+        if entry["incomplete"]:
+            p_monetary, p_currency, p_reason = None, None, "incomplete_pricing"
+        elif len(entry["currencies"]) > 1:
+            p_monetary, p_currency, p_reason = None, None, "mixed_currencies"
+        elif len(entry["currencies"]) == 1:
+            p_monetary, p_currency, p_reason = entry["monetary"], next(iter(entry["currencies"])), None
+        else:
+            p_monetary, p_currency, p_reason = None, None, "no_applicable_price"
+        fuel_product = fuel_products_by_id.get(fuel_product_id)
+
+        product_station_lines: list[StationCashSummaryLine] = []
+        for station_id, station_entry in entry["stations"].items():
+            if station_entry["incomplete"]:
+                s_monetary, s_currency, s_reason = None, None, "incomplete_pricing"
+            elif len(station_entry["currencies"]) > 1:
+                s_monetary, s_currency, s_reason = None, None, "mixed_currencies"
+            elif len(station_entry["currencies"]) == 1:
+                s_monetary, s_currency, s_reason = station_entry["monetary"], next(iter(station_entry["currencies"])), None
+            else:
+                s_monetary, s_currency, s_reason = None, None, "no_applicable_price"
+            product_station_lines.append(
+                StationCashSummaryLine(
+                    stationId=station_id,
+                    stationName=station_entry["stationName"],
+                    tankCount=station_entry["tankCount"],
+                    volumeSoldLiters=station_entry["volume"],
+                    monetaryValue=s_monetary,
+                    currencyCode=s_currency,
+                    monetaryValueNotCalculableReason=s_reason,
+                    confidence=station_entry["confidence"],
+                )
+            )
+
+        product_blocks.append(
+            NetworkProductCashLine(
+                fuelProductId=fuel_product_id,
+                fuelProductName=fuel_product.name if fuel_product else "?",
+                displayColor=fuel_product.displayColor if fuel_product else None,
+                tankCount=len(entry["tankIds"]),
+                stationCount=len(entry["stationIds"]),
+                volumeSoldLiters=entry["volume"],
+                monetaryValue=p_monetary,
+                currencyCode=p_currency,
+                monetaryValueNotCalculableReason=p_reason,
+                confidence=entry["confidence"],
+                stations=product_station_lines,
+            )
+        )
+
     return NetworkCashSummaryResponse(
         periodStart=period_start,
         periodEnd=period_end,
         currencyBlocks=blocks,
+        productBlocks=product_blocks,
+        stationLines=station_lines,
         volumeSoldLitersTotal=sum(b.volumeSoldLiters for b in blocks) + (uncalculable_block["volume"] if uncalculable_block else 0.0),
         stationsWithDataCount=stations_with_data,
         stationsTotalCount=len(stations),
@@ -3329,6 +3447,19 @@ async def create_delivery_declaration(db: AsyncSession, organization_id: uuid.UU
     db.add(instance)
     await db.commit()
     await db.refresh(instance)
+
+    # Déclenchement automatique du rapprochement (mission « flux de
+    # livraison station », point 3 : « dès qu'une livraison est déclarée »)
+    # — best-effort, ne doit jamais faire échouer la déclaration elle-même
+    # si le rapprochement rencontre un problème imprévu.
+    try:
+        await _evaluate_delivery_declaration_reconciliation_core(db, instance)
+        await _sweep_stale_pending_delivery_declarations(db, station.id)
+        await db.refresh(instance)
+    except Exception:
+        await db.rollback()
+        await db.refresh(instance)
+
     return DeliveryDeclarationResponse.model_validate(instance)
 
 
@@ -4330,14 +4461,19 @@ async def _record_reconciliation(
     return record
 
 
-async def evaluate_delivery_declaration_reconciliation(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, declaration_id: uuid.UUID) -> ReconciliationRecordResponse:
-    """Rapprochement opérationnel (Phase 5 §4) : livraison déclarée <->
-    `DeliveryDetected` (télémétrique). Fenêtre temporelle + tolérance de
-    volume `max(fixe, pourcentage du volume déclaré)` (Phase 7 addendum §1)."""
-    declaration = await _get_declaration_or_404(db, DeliveryDeclaration, organization_id, declaration_id)
-    station = await db.get(Station, declaration.stationId)
-    await _check_declaration_scope(db, organization_id, actor_user_id, station, RECONCILIATION_READ)
-
+async def _evaluate_delivery_declaration_reconciliation_core(db: AsyncSession, declaration: DeliveryDeclaration) -> ReconciliationRecord:
+    """Cœur du rapprochement livraison déclarée <-> `DeliveryDetected`,
+    sans vérification de permission — appelé à la fois par l'endpoint
+    manuel (`evaluate_delivery_declaration_reconciliation`, ci-dessous) et
+    par les déclenchements automatiques (mission « flux de livraison
+    station ») : à la création d'une déclaration, et en retour depuis une
+    détection nouvellement créée (`run_delivery_detection_for_tank`).
+    Fenêtre temporelle + tolérance de volume `max(fixe, pourcentage du
+    volume déclaré)` (Phase 7 addendum §1) — logique de recherche du
+    meilleur candidat inchangée. Crée en plus l'alerte `delivery_discrepancy`
+    quand l'écart dépasse la tolérance (mission « flux de livraison
+    station » — jamais créée avant, la Phase 6/7 ne faisait que calculer le
+    statut sans alerter)."""
     settings = await _get_reconciliation_settings(db, declaration.stationId)
     window_hours = _tolerance(settings, "deliveryWindowHours", RECONCILIATION_DELIVERY_WINDOW_HOURS_DEFAULT)
     fixed_tolerance = _tolerance(settings, "deliveryVolumeToleranceFixedLiters", RECONCILIATION_DELIVERY_VOLUME_TOLERANCE_FIXED_LITERS_DEFAULT)
@@ -4382,9 +4518,92 @@ async def evaluate_delivery_declaration_reconciliation(db: AsyncSession, organiz
     )
     declaration.reconciledWithId = record.id
     declaration.reconciledWithType = "ReconciliationRecord"
+
+    if status == "discrepancy" and best is not None:
+        await _create_alert_if_not_already_active(
+            db, best.tankId, "delivery_discrepancy", declaration.eventAt, discrepancy_value, tolerance_applied
+        )
+
     await db.commit()
     await db.refresh(record)
+    return record
+
+
+async def evaluate_delivery_declaration_reconciliation(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, declaration_id: uuid.UUID) -> ReconciliationRecordResponse:
+    """Rapprochement opérationnel (Phase 5 §4), déclenchable manuellement
+    (« action rapide » du commanditaire — bouton de ré-évaluation sur une
+    déclaration/alerte) en plus des déclenchements automatiques."""
+    declaration = await _get_declaration_or_404(db, DeliveryDeclaration, organization_id, declaration_id)
+    station = await db.get(Station, declaration.stationId)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, RECONCILIATION_READ)
+    record = await _evaluate_delivery_declaration_reconciliation_core(db, declaration)
     return ReconciliationRecordResponse.model_validate(record)
+
+
+async def _stations_tanks_for_fuel_product(db: AsyncSession, station_id: uuid.UUID, fuel_product_id: uuid.UUID) -> list[Tank]:
+    result = await db.execute(select(Tank).where(Tank.stationId == station_id, Tank.fuelProductId == fuel_product_id, Tank.active == True))  # noqa: E712
+    return list(result.scalars().all())
+
+
+async def _sweep_stale_pending_delivery_declarations(db: AsyncSession, station_id: uuid.UUID) -> None:
+    """Signale (alerte `delivery_declaration_pending`, plus légère qu'un
+    écart avéré) toute déclaration de livraison de cette station toujours
+    `pending` (aucune détection trouvée) après la fenêtre de tolérance
+    étendue — appelé en best-effort depuis les deux points de déclenchement
+    automatique (mission « flux de livraison station »), jamais depuis un
+    scheduler dédié (aucun n'existe dans ce backend, cf. audit)."""
+    stale_before = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=RECONCILIATION_DELIVERY_STALE_PENDING_HOURS_DEFAULT)
+    declarations_result = await db.execute(
+        select(DeliveryDeclaration)
+        .join(ReconciliationRecord, ReconciliationRecord.id == DeliveryDeclaration.reconciledWithId)
+        .where(
+            DeliveryDeclaration.stationId == station_id,
+            ReconciliationRecord.status == "pending",
+            DeliveryDeclaration.eventAt < stale_before,
+        )
+    )
+    for declaration in declarations_result.scalars().all():
+        tanks = await _stations_tanks_for_fuel_product(db, station_id, declaration.fuelProductId)
+        for tank in tanks:
+            await _create_alert_if_not_already_active(
+                db, tank.id, "delivery_declaration_pending", declaration.eventAt, None, None
+            )
+    await db.commit()
+
+
+async def _reverse_match_delivery_detected(db: AsyncSession, detected: DeliveryDetected, tank: Tank) -> None:
+    """Retour de rapprochement depuis une détection nouvellement créée
+    (mission « flux de livraison station », sens inverse de la fonction
+    ci-dessus) : cherche une déclaration non encore appariée dans la même
+    fenêtre ; si trouvée, relance le rapprochement de cette déclaration
+    (qui trouvera maintenant cette détection) ; sinon, la livraison
+    physique n'a aucune trace administrative — alerte `delivery_undeclared`,
+    le cas explicitement désigné comme le plus important à signaler."""
+    settings = await _get_reconciliation_settings(db, tank.stationId)
+    window_hours = _tolerance(settings, "deliveryWindowHours", RECONCILIATION_DELIVERY_WINDOW_HOURS_DEFAULT)
+    window_start = detected.startTime - timedelta(hours=window_hours)
+    window_end = detected.startTime + timedelta(hours=window_hours)
+
+    candidates_result = await db.execute(
+        select(DeliveryDeclaration).where(
+            DeliveryDeclaration.stationId == tank.stationId,
+            DeliveryDeclaration.fuelProductId == tank.fuelProductId,
+            DeliveryDeclaration.eventAt >= window_start,
+            DeliveryDeclaration.eventAt <= window_end,
+        )
+    )
+    best, best_delta = None, None
+    for candidate in candidates_result.scalars().all():
+        delta = abs((candidate.eventAt - detected.startTime).total_seconds())
+        if best_delta is None or delta < best_delta:
+            best, best_delta = candidate, delta
+
+    if best is not None:
+        await _evaluate_delivery_declaration_reconciliation_core(db, best)
+        return
+
+    await _create_alert_if_not_already_active(db, tank.id, "delivery_undeclared", detected.startTime, detected.volumeLiters, None)
+    await db.commit()
 
 
 async def evaluate_manual_gauging_declaration_reconciliation(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, declaration_id: uuid.UUID) -> ReconciliationRecordResponse:

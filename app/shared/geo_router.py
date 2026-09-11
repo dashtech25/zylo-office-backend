@@ -15,8 +15,17 @@ from app.shared.geo_schemas import CityResponse
 from app.shared.pagination import PaginationParams
 from app.shared.permissions import GEO_READ
 from app.shared.schemas import Page, PageMeta
+from app.shared.simple_cache import TTLCache
 
 geo_router = APIRouter()
+
+# Cache TTL 60s : référentiel géographique global (pas de organizationId sur
+# City/Region/Country), quasi statique (Phase 1 audit, pb #3). Aucun
+# endpoint d'écriture n'existe pour City/Region/Country dans l'app
+# (vérifié par grep) : pas d'invalidation à câbler, le TTL suffit à borner
+# toute dérive si la donnée change un jour par un autre canal (migration,
+# accès direct DB).
+_city_list_cache = TTLCache(default_ttl_seconds=60.0)
 
 
 @geo_router.get("", response_model=Page[CityResponse], dependencies=[Depends(require_permission(GEO_READ))])
@@ -25,6 +34,10 @@ async def list_cities(
     pagination: PaginationParams = Depends(),
     db: AsyncSession = Depends(get_db),
 ) -> Page:
+    cache_key = f"q:{q or ''}:limit:{pagination.limit}:offset:{pagination.offset}"
+    cached = _city_list_cache.get(cache_key)
+    if cached is not None:
+        return cached
     # Requête à colonnes multiples (jointure ville/région/pays) : le helper
     # générique `paginate()` appelle `.scalars()`, qui ne garderait que la
     # première colonne de chaque ligne — inadapté ici, pagination réécrite
@@ -51,7 +64,9 @@ async def list_cities(
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
     result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
     rows = result.all()
-    return Page(
+    page = Page(
         data=[CityResponse.model_validate(row, from_attributes=True) for row in rows],
         meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset),
     )
+    _city_list_cache.set(cache_key, page)
+    return page

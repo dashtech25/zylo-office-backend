@@ -1364,6 +1364,84 @@ class TruckResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ================================================================
+# Tracking GPS des camions-citernes (mission « tracking », étape 1)
+# ================================================================
+
+
+class CreateGpsDeviceRequest(BaseModel):
+    truckId: uuid.UUID | None = None
+    deviceIdentifier: str = Field(min_length=1, max_length=50)
+    label: str | None = Field(default=None, max_length=150)
+
+
+class UpdateGpsDeviceRequest(BaseModel):
+    truckId: uuid.UUID | None = None
+    label: str | None = Field(default=None, max_length=150)
+    active: bool | None = None
+
+
+class GpsDeviceResponse(BaseModel):
+    id: uuid.UUID
+    organizationId: uuid.UUID
+    truckId: uuid.UUID | None
+    deviceIdentifier: str
+    label: str | None
+    active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class IngestTruckPositionRequest(BaseModel):
+    """Contrat d'ingestion contrôlé par Zylo Liquid — `deviceIdentifier`
+    doit correspondre à celui enregistré sur un `GpsDevice` (le
+    rapprochement exact avec le champ envoyé par Traccar, deviceId ou
+    uniqueId selon la configuration, est un réglage fait à la passerelle,
+    pas ici)."""
+
+    deviceIdentifier: str = Field(min_length=1, max_length=50)
+    recordedAt: datetime
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    channel: str | None = None
+    accuracyMeters: float | None = Field(default=None, ge=0)
+    speedKmh: float | None = Field(default=None, ge=0)
+
+
+class TruckPositionPingResponse(BaseModel):
+    id: uuid.UUID
+    gpsDeviceId: uuid.UUID
+    recordedAt: datetime
+    receivedAt: datetime
+    latitude: float
+    longitude: float
+    channel: str | None
+    accuracyMeters: float | None
+    speedKmh: float | None
+
+    model_config = {"from_attributes": True}
+
+
+class TruckStopEventResponse(BaseModel):
+    id: uuid.UUID
+    truckId: uuid.UUID
+    latitude: float
+    longitude: float
+    startAt: datetime
+    endAt: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class TruckCurrentPositionResponse(BaseModel):
+    truckId: uuid.UUID
+    latitude: float | None
+    longitude: float | None
+    recordedAt: datetime | None
+    channel: str | None
+    currentStop: TruckStopEventResponse | None = None
+
+
 class CreatePurchaseOrderRequest(BaseModel):
     stationId: uuid.UUID
     tankId: uuid.UUID

@@ -111,6 +111,13 @@ CARRIER_MANAGE = "zyloLiquid.carrier.manage"
 TRUCK_READ = "zyloLiquid.truck.read"
 TRUCK_MANAGE = "zyloLiquid.truck.manage"
 
+# Boîtiers GPS (mission « tracking », étape 1) — la lecture des positions/
+# arrêts est protégée par TRUCK_READ ci-dessus (pas de permission dédiée,
+# éviter la prolifération) ; seule la gestion du référentiel de boîtiers
+# a sa propre permission, même portée que TRUCK_MANAGE.
+GPS_DEVICE_READ = "zyloLiquid.gpsDevice.read"
+GPS_DEVICE_MANAGE = "zyloLiquid.gpsDevice.manage"
+
 PURCHASE_ORDER_READ = "zyloLiquid.purchaseOrder.read"
 PURCHASE_ORDER_MANAGE = "zyloLiquid.purchaseOrder.manage"
 

@@ -4,6 +4,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError
 from app.shared.currency import Currency, ExchangeRate
 from app.shared.currency_schemas import CreateCurrencyRequest, CreateExchangeRateRequest, UpdateCurrencyRequest
+from app.shared.simple_cache import TTLCache
+
+# Cache TTL 60s pour la liste des devises — référentiel global (pas de
+# organizationId sur `Currency`, vérifié), quasi statique (Phase 1 audit,
+# problème #3). Une seule clé par combinaison pagination, pas de scoping
+# par organisation. Invalidé explicitement par create_currency/
+# update_currency ci-dessous.
+currency_list_cache = TTLCache(default_ttl_seconds=60.0)
 
 
 async def create_currency(db: AsyncSession, data: CreateCurrencyRequest) -> Currency:
@@ -14,6 +22,7 @@ async def create_currency(db: AsyncSession, data: CreateCurrencyRequest) -> Curr
     db.add(currency)
     await db.commit()
     await db.refresh(currency)
+    currency_list_cache.clear()
     return currency
 
 
@@ -31,6 +40,7 @@ async def update_currency(db: AsyncSession, currency_id, data: UpdateCurrencyReq
         setattr(currency, field, value)
     await db.commit()
     await db.refresh(currency)
+    currency_list_cache.clear()
     return currency
 
 

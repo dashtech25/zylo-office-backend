@@ -76,6 +76,7 @@ from app.modules.zylo_liquid.permissions import (
     TANK_SENSOR_MAPPING_MANAGE,
     TANK_SENSOR_MAPPING_READ,
     TRUCK_READ,
+    GPS_DEVICE_READ,
     SECURITY_EQUIPMENT_READ,
     SECURITY_EQUIPMENT_MANAGE,
     STATION_SUPPLIER_READ,
@@ -142,7 +143,7 @@ _DOCUMENT_FULL_PERMISSIONS = [DOCUMENT_READ, DOCUMENT_CREATE, DOCUMENT_MANAGE, D
 # station comme une déclaration) reste réservé au responsable de station.
 # La gestion des référentiels eux-mêmes (SUPPLIER_MANAGE...) n'est accordée
 # à aucun rôle par défaut : aucune vue réseau de gestion n'existe encore.
-_APPRO_READ_PERMISSIONS = [SUPPLIER_READ, CARRIER_READ, TRUCK_READ, PURCHASE_ORDER_READ]
+_APPRO_READ_PERMISSIONS = [SUPPLIER_READ, CARRIER_READ, TRUCK_READ, GPS_DEVICE_READ, PURCHASE_ORDER_READ]
 
 # Centre administratif et opérationnel de la station — domaines Sécurité
 # (SecurityEquipment) et Fournisseurs par station (StationSupplier), tous
@@ -191,7 +192,7 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
         [
             FUEL_PRODUCT_READ, STATION_FUEL_PRODUCT_READ,
             TANK_SENSOR_MAPPING_READ, TANK_CALIBRATION_READ, HOLYKELL_ACCOUNT_READ,
-            SUPPLIER_READ, CARRIER_READ, TRUCK_READ,
+            SUPPLIER_READ, CARRIER_READ, TRUCK_READ, GPS_DEVICE_READ,
         ],
     ),
     (

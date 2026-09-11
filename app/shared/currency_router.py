@@ -26,7 +26,15 @@ exchange_rate_router = APIRouter()
 
 @currency_router.get("", response_model=Page[CurrencyResponse], dependencies=[Depends(require_permission(CURRENCY_READ))])
 async def list_currencies(pagination: PaginationParams = Depends(), db: AsyncSession = Depends(get_db)) -> Page:
-    return await paginate(db, select(Currency).order_by(Currency.code), pagination, CurrencyResponse)
+    # Cache TTL 60s : référentiel global quasi statique, invalidé par
+    # service.create_currency/update_currency (Phase 1 audit, pb #3).
+    cache_key = f"limit:{pagination.limit}:offset:{pagination.offset}"
+    cached = service.currency_list_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    page = await paginate(db, select(Currency).order_by(Currency.code), pagination, CurrencyResponse)
+    service.currency_list_cache.set(cache_key, page)
+    return page
 
 
 @currency_router.post("", response_model=CurrencyResponse, status_code=201, dependencies=[Depends(require_permission(CURRENCY_MANAGE))])

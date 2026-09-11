@@ -12,7 +12,16 @@ from app.core.security import hash_password
 from app.identity.models import OrganizationUser, User
 from app.identity.service import build_user, check_email_available
 from app.rbac.service import assign_role
+from app.shared.simple_cache import TTLCache
 from app.shared.storage import get_storage_backend
+
+# Cache TTL 60s pour les listes de produits carburant — quasi statique,
+# refetché sans cache sur chaque requête sinon (Phase 1 audit, problème #3).
+# Clé par organisation (`organizationId` : donnée scopée, jamais globale,
+# voir commentaire de `FuelProduct.__table_args__`). Invalidé explicitement
+# dans `create_fuel_product`/`update_fuel_product` ci-dessous — jamais de
+# valeur périmée survivant une écriture dans le même process.
+fuel_product_list_cache = TTLCache(default_ttl_seconds=60.0)
 from app.modules.zylo_liquid.permissions import (
     ALERT_READ,
     CARRIER_MANAGE,
@@ -50,6 +59,8 @@ from app.modules.zylo_liquid.permissions import (
     TECHNICIAN_READ,
     TRUCK_MANAGE,
     TRUCK_READ,
+    GPS_DEVICE_MANAGE,
+    GPS_DEVICE_READ,
     DELIVERY_DECLARATION_CREATE,
     DELIVERY_DECLARATION_READ,
     INCIDENT_DECLARATION_CREATE,
@@ -100,12 +111,16 @@ from app.modules.zylo_liquid.algorithms import (
     RECONCILIATION_DELIVERY_WINDOW_HOURS_DEFAULT,
     RECONCILIATION_GAUGING_HEIGHT_TOLERANCE_MM_DEFAULT,
     RECONCILIATION_QUALITY_CHECK_WINDOW_HOURS_DEFAULT,
+    TRUCK_STOP_RADIUS_METERS_DEFAULT,
+    TRUCK_STOP_STABILIZATION_MINUTES_DEFAULT,
     classify_tank_variation,
     compute_leak_rate_lph,
     compute_net_corrected_volume,
     correct_volume_to_reference_temperature,
     detect_deliveries,
     detect_delivery_in_progress,
+    detect_truck_stops,
+    detect_truck_stop_in_progress,
     evaluate_threshold_alarms,
     interpolate_height_to_volume,
     is_leak_detected,
@@ -124,6 +139,8 @@ from app.modules.zylo_liquid.models import (
     Driver,
     Equipment,
     FuelProduct,
+    GpsDevice,
+    GpsIngestCredential,
     HolykellAccount,
     HolykellDeviceRegistry,
     IncidentDeclaration,
@@ -160,6 +177,8 @@ from app.modules.zylo_liquid.models import (
     TankSensorMapping,
     Technician,
     Truck,
+    TruckPositionPing,
+    TruckStopEvent,
     Vehicle,
 )
 from app.modules.zylo_liquid.schemas import (
@@ -193,6 +212,7 @@ from app.modules.zylo_liquid.schemas import (
     CreateSupplierRequest,
     CreateTankRequest,
     CreateTankSensorMappingRequest,
+    CreateGpsDeviceRequest,
     CreateTruckRequest,
     CreateVehicleRequest,
     CurrencyCashBlock,
@@ -252,8 +272,14 @@ from app.modules.zylo_liquid.schemas import (
     TankResponse,
     TankSensorMappingResponse,
     TruckResponse,
+    GpsDeviceResponse,
+    IngestTruckPositionRequest,
+    TruckPositionPingResponse,
+    TruckStopEventResponse,
+    TruckCurrentPositionResponse,
     VehicleResponse,
     UpdateCarrierRequest,
+    UpdateGpsDeviceRequest,
     UpdateCommercialAccountRequest,
     UpdateDeliveryDeclarationRequest,
     UpdateFuelProductRequest,
@@ -331,6 +357,7 @@ async def create_fuel_product(
     db.add(fuel_product)
     await db.commit()
     await db.refresh(fuel_product)
+    fuel_product_list_cache.invalidate_prefix(f"org:{organization_id}:")
     return fuel_product
 
 
@@ -354,6 +381,7 @@ async def update_fuel_product(
         setattr(fuel_product, field, value)
     await db.commit()
     await db.refresh(fuel_product)
+    fuel_product_list_cache.invalidate_prefix(f"org:{organization_id}:")
     return fuel_product
 
 
@@ -1174,15 +1202,21 @@ async def _resolve_tank_monetary_value(
     return volume_liters * unit_price, currency_code, None, unit_price
 
 
-async def get_tank_current_state(db: AsyncSession, tank: Tank) -> TankCurrentStateResponse:
-    """Construit l'état actuel d'une cuve — mesure instantanée lue depuis
-    HolykellDeviceRegistry.lastValue/lastValueAt/hkLastStatus (jamais
-    TankMeasurement, réservé à l'historique), conforme à
-    nouveau-zylo-liquid/Point 6 §6.4. Algorithmes appelés depuis
-    app.modules.zylo_liquid.algorithms, jamais réimplémentés ici (Point 3
-    §10)."""
-    product_level = await _get_active_registry_entry(db, tank.id, "product_level")
-
+def _build_tank_current_state(
+    tank: Tank,
+    product_level: HolykellDeviceRegistry | None,
+    water_registry: HolykellDeviceRegistry | None,
+    temperature_registry: HolykellDeviceRegistry | None,
+    calibration_points: list[tuple[float, float]],
+    fuel_product: FuelProduct | None,
+    price: PriceHistory | None,
+    currency_code: str | None,
+) -> TankCurrentStateResponse:
+    """Calcul pur (aucun accès DB) de l'état d'une cuve à partir de données
+    déjà chargées — factorisé hors de `get_tanks_current_state_batch` pour
+    que le calcul reste écrit une seule fois, jamais réimplémenté entre la
+    version batchée et un éventuel besoin ponctuel sur une seule cuve
+    (audit performance 2026-09-11)."""
     if product_level is None or product_level.lastValue is None:
         return TankCurrentStateResponse(
             tankId=tank.id,
@@ -1197,6 +1231,7 @@ async def get_tank_current_state(db: AsyncSession, tank: Tank) -> TankCurrentSta
             monetaryValue=None,
             currencyCode=None,
             monetaryValueNotCalculableReason="volume_not_calculable",
+            unitPriceAmount=None,
             waterHeightMm=None,
             waterVolumeLiters=None,
             temperatureC=None,
@@ -1207,15 +1242,9 @@ async def get_tank_current_state(db: AsyncSession, tank: Tank) -> TankCurrentSta
     sensor_status = "online" if product_level.hkLastStatus == 1 else "offline"
     height_mm = float(product_level.lastValue)
 
-    calibration_result = await db.execute(
-        select(TankCalibrationPoint.heightMm, TankCalibrationPoint.volumeLiters).where(TankCalibrationPoint.tankId == tank.id)
-    )
-    calibration_points = [(float(h), float(v)) for h, v in calibration_result.all()]
-
     volume_brut = interpolate_height_to_volume(calibration_points, height_mm) if calibration_points else None
     volume_not_calculable_reason = None if volume_brut is not None else "no_calibration_table"
 
-    water_registry = await _get_active_registry_entry(db, tank.id, "water_level")
     water_height_mm = float(water_registry.lastValue) if water_registry and water_registry.lastValue is not None else None
     water_volume = (
         interpolate_height_to_volume(calibration_points, water_height_mm)
@@ -1240,19 +1269,22 @@ async def get_tank_current_state(db: AsyncSession, tank: Tank) -> TankCurrentSta
     volume_at_low_alarm = interpolate_height_to_volume(calibration_points, float(tank.lowAlarmMm)) if calibration_points else None
     sellable_volume = max(0.0, volume_net - volume_at_low_alarm) if (volume_net is not None and volume_at_low_alarm is not None) else None
 
-    temperature_registry = await _get_active_registry_entry(db, tank.id, "temperature")
     temperature_c = (
         float(temperature_registry.lastValue) if temperature_registry and temperature_registry.lastValue is not None else None
     )
 
     volume_15c = None
-    if volume_net is not None and temperature_c is not None:
-        fuel_product = await db.get(FuelProduct, tank.fuelProductId)
-        if fuel_product.thermalExpansionCoefficient is not None:
-            volume_15c = correct_volume_to_reference_temperature(volume_net, temperature_c, float(fuel_product.thermalExpansionCoefficient))
+    if volume_net is not None and temperature_c is not None and fuel_product is not None and fuel_product.thermalExpansionCoefficient is not None:
+        volume_15c = correct_volume_to_reference_temperature(volume_net, temperature_c, float(fuel_product.thermalExpansionCoefficient))
 
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    monetary_value, currency_code, monetary_reason, unit_price = await _resolve_tank_monetary_value(db, tank, volume_net, now)
+    if price is None:
+        monetary_value, monetary_reason, unit_price = None, "no_applicable_price", None
+    else:
+        unit_price = float(price.priceAmount)
+        if volume_net is None:
+            monetary_value, monetary_reason = None, "volume_not_calculable"
+        else:
+            monetary_value, monetary_reason = volume_net * unit_price, None
 
     return TankCurrentStateResponse(
         tankId=tank.id,
@@ -1265,7 +1297,7 @@ async def get_tank_current_state(db: AsyncSession, tank: Tank) -> TankCurrentSta
         volumeLiters15C=volume_15c,
         sellableVolumeLiters=sellable_volume,
         monetaryValue=monetary_value,
-        currencyCode=currency_code,
+        currencyCode=currency_code if price is not None else None,
         monetaryValueNotCalculableReason=monetary_reason,
         unitPriceAmount=unit_price,
         waterHeightMm=water_height_mm,
@@ -1274,6 +1306,83 @@ async def get_tank_current_state(db: AsyncSession, tank: Tank) -> TankCurrentSta
         emptyVolumeLiters=empty_volume,
         lastMeasurementAt=product_level.lastValueAt,
     )
+
+
+async def get_tanks_current_state_batch(db: AsyncSession, tanks: list[Tank]) -> dict[uuid.UUID, TankCurrentStateResponse]:
+    """Version batchée de l'ancien `get_tank_current_state` (audit
+    performance 2026-09-11) : un aller-retour DB par TYPE de donnée pour
+    l'ensemble des cuves demandées (capteurs, calibrations, produits, prix,
+    devises), au lieu d'un aller-retour par cuve — jusqu'à 8 requêtes
+    séquentielles par cuve auparavant (`network/summary` mesuré à 27s pour
+    13 cuves). Mêmes résultats cuve par cuve, calcul inchangé
+    (`_build_tank_current_state`). À utiliser partout où plusieurs cuves
+    sont traitées ensemble (résumé réseau, état d'une station) ; pour un
+    besoin ponctuel sur une seule cuve, appeler avec une liste à un élément."""
+    if not tanks:
+        return {}
+
+    tank_ids = [t.id for t in tanks]
+
+    registry_result = await db.execute(
+        select(TankSensorMapping.tankId, TankSensorMapping.measurementType, HolykellDeviceRegistry)
+        .join(HolykellDeviceRegistry, HolykellDeviceRegistry.hkSensorId == TankSensorMapping.hkSensorId)
+        .where(TankSensorMapping.tankId.in_(tank_ids), TankSensorMapping.active.is_(True))
+    )
+    registry_by_key: dict[tuple[uuid.UUID, str], HolykellDeviceRegistry] = {}
+    for tank_id, measurement_type, registry in registry_result.all():
+        registry_by_key[(tank_id, measurement_type)] = registry
+
+    calibration_result = await db.execute(
+        select(TankCalibrationPoint.tankId, TankCalibrationPoint.heightMm, TankCalibrationPoint.volumeLiters).where(
+            TankCalibrationPoint.tankId.in_(tank_ids)
+        )
+    )
+    calibration_by_tank: dict[uuid.UUID, list[tuple[float, float]]] = {}
+    for tank_id, height_mm, volume_liters in calibration_result.all():
+        calibration_by_tank.setdefault(tank_id, []).append((float(height_mm), float(volume_liters)))
+
+    fuel_product_ids = {t.fuelProductId for t in tanks}
+    fuel_product_result = await db.execute(select(FuelProduct).where(FuelProduct.id.in_(fuel_product_ids)))
+    fuel_product_by_id = {fp.id: fp for fp in fuel_product_result.scalars().all()}
+
+    station_ids = {t.stationId for t in tanks}
+    stations_result = await db.execute(select(Station).where(Station.id.in_(station_ids)))
+    stations_by_id = {s.id: s for s in stations_result.scalars().all()}
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    pairs = {(t.stationId, t.fuelProductId) for t in tanks}
+    price_by_pair = await _resolve_applicable_prices_batch(db, pairs, stations_by_id, now)
+
+    currency_ids = {p.currencyId for p in price_by_pair.values() if p is not None}
+    currency_by_id: dict[uuid.UUID, Currency] = {}
+    if currency_ids:
+        currency_result = await db.execute(select(Currency).where(Currency.id.in_(currency_ids)))
+        currency_by_id = {c.id: c for c in currency_result.scalars().all()}
+
+    states: dict[uuid.UUID, TankCurrentStateResponse] = {}
+    for tank in tanks:
+        price = price_by_pair.get((tank.stationId, tank.fuelProductId))
+        currency = currency_by_id.get(price.currencyId) if price is not None else None
+        states[tank.id] = _build_tank_current_state(
+            tank,
+            registry_by_key.get((tank.id, "product_level")),
+            registry_by_key.get((tank.id, "water_level")),
+            registry_by_key.get((tank.id, "temperature")),
+            calibration_by_tank.get(tank.id, []),
+            fuel_product_by_id.get(tank.fuelProductId),
+            price,
+            currency.code if currency is not None else None,
+        )
+    return states
+
+
+async def get_tank_current_state(db: AsyncSession, tank: Tank) -> TankCurrentStateResponse:
+    """Ponctuel, une seule cuve — délègue à la version batchée pour ne
+    jamais réimplémenter le calcul (audit performance 2026-09-11). Pour
+    plusieurs cuves à la fois, appeler directement
+    `get_tanks_current_state_batch` (un seul aller-retour DB par type de
+    donnée au lieu d'un par cuve)."""
+    return (await get_tanks_current_state_batch(db, [tank]))[tank.id]
 
 
 async def get_tank_current_state_by_id(db: AsyncSession, organization_id: uuid.UUID, tank_id: uuid.UUID) -> TankCurrentStateResponse:
@@ -1287,7 +1396,8 @@ async def get_station_current_state(db: AsyncSession, organization_id: uuid.UUID
         select(Tank).where(Tank.stationId == station_id, Tank.active.is_(True)).order_by(Tank.tankNumber)
     )
     tanks = result.scalars().all()
-    states = [await get_tank_current_state(db, tank) for tank in tanks]
+    states_by_id = await get_tanks_current_state_batch(db, tanks)
+    states = [states_by_id[tank.id] for tank in tanks]
     return StationCurrentStateResponse(stationId=station_id, tanks=states)
 
 
@@ -1383,8 +1493,9 @@ async def get_network_summary(db: AsyncSession, organization_id: uuid.UUID, from
     per_product: dict[uuid.UUID, dict] = {}
     all_stations_with_data: set[uuid.UUID] = set()
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+    tank_states = await get_tanks_current_state_batch(db, tanks)
     for tank in tanks:
-        state = await get_tank_current_state(db, tank)
+        state = tank_states[tank.id]
         if state.volumeLiters is None:
             continue  # cuve sans mesure calculable exclue du total (jamais un zéro, Point 2 §3.2)
 
@@ -2338,19 +2449,27 @@ async def evaluate_structural_alerts_for_organization(db: AsyncSession, organiza
     await db.commit()
 
 
-async def _measurement_at_or_before(db: AsyncSession, tank_id: uuid.UUID, measurement_type: str, at) -> float | None:
+async def _measurement_at_or_before(
+    db: AsyncSession, tank_id: uuid.UUID, measurement_type: str, at, sensor_ids: list[int] | None = None
+) -> float | None:
     """Dernière mesure connue avant ou égale à l'instant demandé, jamais une
     mesure postérieure (Point 2 §5.4). Honore une éventuelle correction
     (`TankMeasurement.isCorrection`/`correctsMeasurementId`, audit
     Caisse P1 §D.1) : si la mesure trouvée a été corrigée depuis, la valeur
     de la correction remplace la valeur brute d'origine — jamais les deux
-    traitées comme deux mesures indépendantes."""
-    sensor_ids_result = await db.execute(
-        select(TankSensorMapping.hkSensorId).where(
-            TankSensorMapping.tankId == tank_id, TankSensorMapping.measurementType == measurement_type
+    traitées comme deux mesures indépendantes.
+
+    `sensor_ids` (audit performance 2026-09-11) : quand fourni par
+    l'appelant (déjà résolus une fois pour toute la cuve, cet appel étant
+    répété à chaque frontière de segment de caisse), évite de refaire la
+    requête `TankSensorMapping` à chaque appel."""
+    if sensor_ids is None:
+        sensor_ids_result = await db.execute(
+            select(TankSensorMapping.hkSensorId).where(
+                TankSensorMapping.tankId == tank_id, TankSensorMapping.measurementType == measurement_type
+            )
         )
-    )
-    sensor_ids = [row[0] for row in sensor_ids_result.all()]
+        sensor_ids = [row[0] for row in sensor_ids_result.all()]
     if not sensor_ids:
         return None
     result = await db.execute(
@@ -2492,6 +2611,197 @@ async def _resolve_station_default_currency(db: AsyncSession, station: Station) 
             status_code=422,
         )
     return currency
+
+
+async def _resolve_station_currencies_batch(db: AsyncSession, stations: list[Station]) -> dict[uuid.UUID, Currency | None]:
+    """Version batchée de `_resolve_station_default_currency` (audit
+    performance 2026-09-11) : un aller-retour DB par étape de la chaîne
+    (dérogation, ville, région, pays, devise) pour TOUTES les stations
+    demandées, au lieu d'un aller-retour par étape PAR STATION — cette
+    chaîne, appelée une fois par cuve via `_resolve_applicable_price`, était
+    un contributeur majeur des lenteurs mesurées (jusqu'à 4 requêtes
+    supplémentaires par cuve rien que pour retomber sur le prix réseau par
+    défaut). Retourne `None` pour une station dont la devise n'est pas
+    résolvable, jamais une exception — reproduit exactement le
+    `except AppError: pass` déjà présent chez l'appelant historique."""
+    if not stations:
+        return {}
+
+    result: dict[uuid.UUID, Currency | None] = {}
+    remaining: list[Station] = []
+
+    override_ids = {s.currencyOverrideId for s in stations if s.currencyOverrideId is not None}
+    override_by_id: dict[uuid.UUID, Currency] = {}
+    if override_ids:
+        override_result = await db.execute(select(Currency).where(Currency.id.in_(override_ids)))
+        override_by_id = {c.id: c for c in override_result.scalars().all()}
+
+    for station in stations:
+        if station.currencyOverrideId is not None and station.currencyOverrideId in override_by_id:
+            result[station.id] = override_by_id[station.currencyOverrideId]
+        else:
+            remaining.append(station)
+
+    if not remaining:
+        return result
+
+    city_ids = {s.cityId for s in remaining if s.cityId is not None}
+    cities_by_id: dict[uuid.UUID, City] = {}
+    if city_ids:
+        city_result = await db.execute(select(City).where(City.id.in_(city_ids)))
+        cities_by_id = {c.id: c for c in city_result.scalars().all()}
+
+    region_ids = {c.regionId for c in cities_by_id.values()}
+    regions_by_id: dict[uuid.UUID, Region] = {}
+    if region_ids:
+        region_result = await db.execute(select(Region).where(Region.id.in_(region_ids)))
+        regions_by_id = {r.id: r for r in region_result.scalars().all()}
+
+    country_ids = {r.countryId for r in regions_by_id.values()}
+    countries_by_id: dict[uuid.UUID, Country] = {}
+    if country_ids:
+        country_result = await db.execute(select(Country).where(Country.id.in_(country_ids)))
+        countries_by_id = {c.id: c for c in country_result.scalars().all()}
+
+    currency_ids = {c.currencyId for c in countries_by_id.values() if c.currencyId is not None}
+    currency_codes = {c.currencyCode for c in countries_by_id.values()}
+    currencies_by_id: dict[uuid.UUID, Currency] = {}
+    currencies_by_code: dict[str, Currency] = {}
+    if currency_ids:
+        currency_result = await db.execute(select(Currency).where(Currency.id.in_(currency_ids)))
+        currencies_by_id = {c.id: c for c in currency_result.scalars().all()}
+    if currency_codes:
+        code_result = await db.execute(select(Currency).where(Currency.code.in_(currency_codes)))
+        currencies_by_code = {c.code: c for c in code_result.scalars().all()}
+
+    for station in remaining:
+        city = cities_by_id.get(station.cityId) if station.cityId is not None else None
+        region = regions_by_id.get(city.regionId) if city is not None else None
+        country = countries_by_id.get(region.countryId) if region is not None else None
+        currency: Currency | None = None
+        if country is not None:
+            if country.currencyId is not None:
+                currency = currencies_by_id.get(country.currencyId)
+            if currency is None:
+                currency = currencies_by_code.get(country.currencyCode)
+        result[station.id] = currency
+
+    return result
+
+
+async def _resolve_applicable_prices_batch(
+    db: AsyncSession, pairs: set[tuple[uuid.UUID, uuid.UUID]], stations_by_id: dict[uuid.UUID, Station], at
+) -> dict[tuple[uuid.UUID, uuid.UUID], PriceHistory | None]:
+    """Version batchée de `_resolve_applicable_price` — même sémantique
+    exacte (prix propre à la station en priorité, repli sur le prix réseau
+    par défaut filtré par la devise de la station quand elle est
+    résolvable), mais un aller-retour DB par étape pour l'ensemble des
+    paires (station, produit) demandées plutôt qu'un aller-retour par
+    paire (audit performance 2026-09-11)."""
+    if not pairs:
+        return {}
+
+    station_ids = {station_id for station_id, _ in pairs}
+    product_ids = {product_id for _, product_id in pairs}
+    stations = [stations_by_id[sid] for sid in station_ids if sid in stations_by_id]
+    currency_by_station = await _resolve_station_currencies_batch(db, stations)
+
+    station_price_result = await db.execute(
+        select(PriceHistory)
+        .where(PriceHistory.stationId.in_(station_ids), PriceHistory.fuelProductId.in_(product_ids), PriceHistory.effectiveFrom <= at)
+        .order_by(PriceHistory.effectiveFrom.desc())
+    )
+    station_price_by_key: dict[tuple[uuid.UUID, uuid.UUID], PriceHistory] = {}
+    for price in station_price_result.scalars().all():
+        key = (price.stationId, price.fuelProductId)
+        if key not in station_price_by_key:
+            station_price_by_key[key] = price
+
+    default_price_result = await db.execute(
+        select(PriceHistory)
+        .where(PriceHistory.stationId.is_(None), PriceHistory.fuelProductId.in_(product_ids), PriceHistory.effectiveFrom <= at)
+        .order_by(PriceHistory.effectiveFrom.desc())
+    )
+    default_prices = list(default_price_result.scalars().all())
+
+    resolved: dict[tuple[uuid.UUID, uuid.UUID], PriceHistory | None] = {}
+    for station_id, product_id in pairs:
+        key = (station_id, product_id)
+        price = station_price_by_key.get(key)
+        if price is None:
+            candidates = [p for p in default_prices if p.fuelProductId == product_id]
+            station_currency = currency_by_station.get(station_id)
+            if station_currency is not None:
+                candidates = [p for p in candidates if p.currencyId == station_currency.id]
+            price = candidates[0] if candidates else None
+        resolved[key] = price
+
+    return resolved
+
+
+class _CashPriceContext:
+    """Pré-chargement des prix réseau par défaut et de la devise résolue
+    d'une station (audit performance 2026-09-11) — évite de refaire la
+    chaîne complète `_resolve_applicable_price`/`_resolve_station_default_
+    currency` (jusqu'à 6 requêtes) à CHAQUE frontière de segment de vente,
+    potentiellement plusieurs fois par cuve et par jour. Construit une seule
+    fois pour tout le réseau/toute la station, jamais par cuve. Optionnel
+    partout où il est accepté : en son absence, l'ancienne résolution
+    ponctuelle par requête reste utilisée (comportement inchangé pour les
+    appelants non batchés, ex. `get_tank_cash` sur une seule cuve)."""
+
+    def __init__(self, default_prices: list[PriceHistory], station_currency: Currency | None, currency_code_by_id: dict[uuid.UUID, str]):
+        self.default_prices = default_prices
+        self.station_currency = station_currency
+        self.currency_code_by_id = currency_code_by_id
+
+
+async def _build_cash_price_contexts(db: AsyncSession, tanks: list[Tank]) -> dict[uuid.UUID, "_CashPriceContext"]:
+    """Construit un `_CashPriceContext` par cuve à partir d'un seul jeu de
+    requêtes groupées pour l'ensemble des cuves demandées (audit
+    performance 2026-09-11) — jamais une résolution par cuve. Les prix par
+    défaut ne dépendent que du produit, la devise que de la station : les
+    deux sont donc calculés une fois pour tout l'ensemble, puis recombinés
+    en mémoire par cuve."""
+    if not tanks:
+        return {}
+
+    fuel_product_ids = {t.fuelProductId for t in tanks}
+    station_ids = {t.stationId for t in tanks}
+
+    default_price_result = await db.execute(
+        select(PriceHistory).where(PriceHistory.stationId.is_(None), PriceHistory.fuelProductId.in_(fuel_product_ids))
+    )
+    default_prices_by_product: dict[uuid.UUID, list[PriceHistory]] = {}
+    for p in default_price_result.scalars().all():
+        default_prices_by_product.setdefault(p.fuelProductId, []).append(p)
+
+    stations_result = await db.execute(select(Station).where(Station.id.in_(station_ids)))
+    stations = list(stations_result.scalars().all())
+    currency_by_station = await _resolve_station_currencies_batch(db, stations)
+
+    all_currencies_result = await db.execute(select(Currency))
+    currency_code_by_id = {c.id: c.code for c in all_currencies_result.scalars().all()}
+
+    contexts: dict[uuid.UUID, _CashPriceContext] = {}
+    for tank in tanks:
+        contexts[tank.id] = _CashPriceContext(
+            default_prices=default_prices_by_product.get(tank.fuelProductId, []),
+            station_currency=currency_by_station.get(tank.stationId),
+            currency_code_by_id=currency_code_by_id,
+        )
+    return contexts
+
+
+def _price_at_or_before(price_rows: list[PriceHistory], at) -> PriceHistory | None:
+    """Parmi des lignes `PriceHistory` déjà chargées (jamais une nouvelle
+    requête), celle dont `effectiveFrom` est la plus récente antérieure ou
+    égale à `at` — même sémantique que la clause `ORDER BY effectiveFrom
+    DESC LIMIT 1` de `_resolve_applicable_price`, mais en mémoire."""
+    applicable = [p for p in price_rows if p.effectiveFrom <= at]
+    if not applicable:
+        return None
+    return max(applicable, key=lambda p: p.effectiveFrom)
 
 
 async def create_price_history(
@@ -2726,13 +3036,18 @@ def _worse_cash_confidence(a: str, b: str) -> str:
 
 
 async def _cash_boundary_height_and_volume(
-    db: AsyncSession, tank_id: uuid.UUID, calibration_points: list[tuple[float, float]], at: datetime
+    db: AsyncSession, tank_id: uuid.UUID, calibration_points: list[tuple[float, float]], at: datetime, sensor_ids: list[int] | None = None
 ) -> tuple[float | None, float | None]:
     """Hauteur/volume à une borne de segment, lus depuis la dernière mesure
     réelle connue avant ou à cet instant (jamais une mesure future) —
     réutilise `_measurement_at_or_before`, jamais une deuxième requête
-    dupliquée (page_caisse.md §D.1)."""
-    height = await _measurement_at_or_before(db, tank_id, "product_level", at)
+    dupliquée (page_caisse.md §D.1).
+
+    `sensor_ids` (audit performance 2026-09-11) : capteurs "product_level"
+    de cette cuve déjà résolus une fois par `_compute_tank_cash` — cette
+    fonction étant appelée à chaque frontière de segment (parfois
+    plusieurs fois par cuve), évite de refaire la résolution à chaque appel."""
+    height = await _measurement_at_or_before(db, tank_id, "product_level", at, sensor_ids)
     if height is None:
         return None, None
     return height, interpolate_height_to_volume(calibration_points, height)
@@ -2749,6 +3064,8 @@ async def _price_sub_segments_for_sale_window(
     end_height: float,
     end_volume: float,
     price_changes_in_range: list[PriceHistory],
+    price_context: _CashPriceContext | None = None,
+    sensor_ids: list[int] | None = None,
 ) -> tuple[list[dict], float, float | None, str | None, str | None]:
     """Découpe un segment de vente à chaque changement de prix qui tombe
     strictement à l'intérieur (page_caisse.md §D.2/§G) : jamais un seul prix
@@ -2775,7 +3092,7 @@ async def _price_sub_segments_for_sale_window(
         if t == window_end:
             h, v = end_height, end_volume
         else:
-            h, v = await _cash_boundary_height_and_volume(db, tank.id, calibration_points, t)
+            h, v = await _cash_boundary_height_and_volume(db, tank.id, calibration_points, t, sensor_ids)
             if v is None:
                 # Aucune mesure exactement à cet instant (rare) -> repli sur
                 # une interpolation temporelle linéaire entre les deux
@@ -2787,16 +3104,33 @@ async def _price_sub_segments_for_sale_window(
 
         sub_volume = max(0.0, (prev_v or 0.0) - (v or 0.0))
 
-        price_at = await _resolve_applicable_price(db, tank.stationId, tank.fuelProductId, t)
+        if price_context is not None:
+            # Résolution en mémoire à partir des lignes déjà chargées pour
+            # tout le réseau/la station — jamais de requête ici (audit
+            # performance 2026-09-11) : `price_changes_in_range` couvre déjà
+            # le prix propre à la station, `price_context.default_prices`
+            # le repli réseau, exactement les deux mêmes sources que
+            # `_resolve_applicable_price`, juste précalculées.
+            price_at = _price_at_or_before(price_changes_in_range, t)
+            if price_at is None:
+                candidates = [p for p in price_context.default_prices if p.effectiveFrom <= t]
+                if price_context.station_currency is not None:
+                    candidates = [p for p in candidates if p.currencyId == price_context.station_currency.id]
+                price_at = max(candidates, key=lambda p: p.effectiveFrom) if candidates else None
+            sub_currency = price_context.currency_code_by_id.get(price_at.currencyId) if price_at is not None else None
+        else:
+            price_at = await _resolve_applicable_price(db, tank.stationId, tank.fuelProductId, t)
+            sub_currency = None
+            if price_at is not None:
+                currency = await db.get(Currency, price_at.currencyId)
+                sub_currency = currency.code if currency else None
+
         sub_monetary: float | None = None
-        sub_currency: str | None = None
         sub_reason: str | None = None
         if price_at is None:
             sub_reason = "no_applicable_price"
             reason = reason or "no_applicable_price"
         else:
-            currency = await db.get(Currency, price_at.currencyId)
-            sub_currency = currency.code if currency else None
             if currency_code is not None and sub_currency != currency_code:
                 reason = "mixed_currencies"
             else:
@@ -2826,12 +3160,20 @@ async def _price_sub_segments_for_sale_window(
     return segments, total_volume, final_monetary, (currency_code if reason is None else None), reason
 
 
-async def _compute_tank_cash(db: AsyncSession, tank: Tank, period_start: datetime, period_end: datetime) -> dict:
+async def _compute_tank_cash(
+    db: AsyncSession, tank: Tank, period_start: datetime, period_end: datetime, price_context: _CashPriceContext | None = None
+) -> dict:
     """Moteur de segmentation + valorisation pour une cuve sur une période
     (page_caisse.md §D.1-§D.2) : lit les mesures et les livraisons déjà
     détectées, découpe la période en segments vente/livraison/anomalie,
     valorise chaque segment de vente au prix applicable à son instant.
-    Ne modifie jamais aucune donnée — lecture seule."""
+    Ne modifie jamais aucune donnée — lecture seule.
+
+    `price_context` (audit performance 2026-09-11) : quand fourni par
+    l'appelant (réseau/station, où les mêmes prix réseau par défaut et la
+    même devise de station s'appliquent à toutes les cuves), la résolution
+    de prix se fait en mémoire plutôt que par une requête par frontière de
+    segment — voir `_price_sub_segments_for_sale_window`."""
     calibration_result = await db.execute(
         select(TankCalibrationPoint.heightMm, TankCalibrationPoint.volumeLiters).where(TankCalibrationPoint.tankId == tank.id)
     )
@@ -2850,6 +3192,16 @@ async def _compute_tank_cash(db: AsyncSession, tank: Tank, period_start: datetim
             "anomalyTypes": [],
             "segments": [],
         }
+
+    # Capteurs "product_level" de cette cuve, résolus une seule fois — sinon
+    # `_measurement_at_or_before` refait cette même requête à chaque frontière
+    # de segment (audit performance 2026-09-11).
+    sensor_ids_result = await db.execute(
+        select(TankSensorMapping.hkSensorId).where(
+            TankSensorMapping.tankId == tank.id, TankSensorMapping.measurementType == "product_level"
+        )
+    )
+    sensor_ids = [row[0] for row in sensor_ids_result.all()]
 
     deliveries_result = await db.execute(
         select(DeliveryDetected)
@@ -2923,7 +3275,7 @@ async def _compute_tank_cash(db: AsyncSession, tank: Tank, period_start: datetim
             return
 
         sub_segments, volume, monetary, code, reason = await _price_sub_segments_for_sale_window(
-            db, tank, calibration_points, window_start, window_end, h_start, v_start, h_end, v_end, price_history_rows
+            db, tank, calibration_points, window_start, window_end, h_start, v_start, h_end, v_end, price_history_rows, price_context, sensor_ids
         )
         segments.extend(sub_segments)
         total_volume += volume
@@ -2944,7 +3296,7 @@ async def _compute_tank_cash(db: AsyncSession, tank: Tank, period_start: datetim
 
         if clipped_start > cursor:
             if cursor_volume is None:
-                cursor_height, cursor_volume = await _cash_boundary_height_and_volume(db, tank.id, calibration_points, cursor)
+                cursor_height, cursor_volume = await _cash_boundary_height_and_volume(db, tank.id, calibration_points, cursor, sensor_ids)
             end_height = float(delivery.startHeightMm)
             end_volume = float(delivery.startVolumeLiters) if delivery.startVolumeLiters is not None else interpolate_height_to_volume(
                 calibration_points, end_height
@@ -2976,8 +3328,8 @@ async def _compute_tank_cash(db: AsyncSession, tank: Tank, period_start: datetim
 
     if cursor < period_end:
         if cursor_volume is None:
-            cursor_height, cursor_volume = await _cash_boundary_height_and_volume(db, tank.id, calibration_points, cursor)
-        end_height, end_volume = await _cash_boundary_height_and_volume(db, tank.id, calibration_points, period_end)
+            cursor_height, cursor_volume = await _cash_boundary_height_and_volume(db, tank.id, calibration_points, cursor, sensor_ids)
+        end_height, end_volume = await _cash_boundary_height_and_volume(db, tank.id, calibration_points, period_end, sensor_ids)
         await resolve_sale_window(cursor, period_end, cursor_height, cursor_volume, end_height, end_volume)
 
     if not any_volume_calculated:
@@ -3098,7 +3450,9 @@ def _tank_cash_summary_fields(result: dict) -> dict:
     }
 
 
-async def _get_or_compute_tank_cash_for_day(db: AsyncSession, tank: Tank, day_start: datetime, day_end: datetime) -> dict:
+async def _get_or_compute_tank_cash_for_day(
+    db: AsyncSession, tank: Tank, day_start: datetime, day_end: datetime, price_context: _CashPriceContext | None = None
+) -> dict:
     """Un jour calendaire plein (minuit à minuit) : sert le cache
     `TankCashDailyAggregate` si le jour est clos depuis au moins
     `_CASH_CACHE_SETTLE_DELAY`, sinon calcule en direct et met en cache
@@ -3122,7 +3476,7 @@ async def _get_or_compute_tank_cash_for_day(db: AsyncSession, tank: Tank, day_st
                 "confidence": row.confidence,
             }
 
-    result = _tank_cash_summary_fields(await _compute_tank_cash(db, tank, day_start, day_end))
+    result = _tank_cash_summary_fields(await _compute_tank_cash(db, tank, day_start, day_end, price_context))
 
     if settled:
         db.add(
@@ -3215,24 +3569,30 @@ def _merge_tank_cash_summaries(results: list[dict]) -> dict:
     }
 
 
-async def _compute_tank_cash_over_period(db: AsyncSession, tank: Tank, period_start: datetime, period_end: datetime) -> dict:
+async def _compute_tank_cash_over_period(
+    db: AsyncSession, tank: Tank, period_start: datetime, period_end: datetime, price_context: _CashPriceContext | None = None
+) -> dict:
     """Point d'entrée pour les vues réseau/station (jamais pour la
     traçabilité par cuve, qui a besoin des segments et recalcule toujours
     en direct sur toute la période demandée). Sur une période courte
     (≤ 24h : "aujourd'hui", "hier", journée d'exploitation...), calcule en
     direct sans découpage — inutile en dessous d'un jour. Sur une période
     plus longue (7/30 jours), découpe en jours calendaires et sert le
-    cache par jour clos (audit Caisse P2 §E.3)."""
+    cache par jour clos (audit Caisse P2 §E.3).
+
+    `price_context` (audit performance 2026-09-11) : propagé tel quel à
+    chaque jour — construit une seule fois par l'appelant réseau/station,
+    jamais recalculé ici."""
     if period_end - period_start <= timedelta(hours=24):
-        return _tank_cash_summary_fields(await _compute_tank_cash(db, tank, period_start, period_end))
+        return _tank_cash_summary_fields(await _compute_tank_cash(db, tank, period_start, period_end, price_context))
 
     buckets = _split_into_daily_buckets(period_start, period_end)
     results = []
     for bucket_start, bucket_end in buckets:
         if bucket_end - bucket_start >= timedelta(hours=23, minutes=59):
-            results.append(await _get_or_compute_tank_cash_for_day(db, tank, bucket_start, bucket_end))
+            results.append(await _get_or_compute_tank_cash_for_day(db, tank, bucket_start, bucket_end, price_context))
         else:
-            results.append(_tank_cash_summary_fields(await _compute_tank_cash(db, tank, bucket_start, bucket_end)))
+            results.append(_tank_cash_summary_fields(await _compute_tank_cash(db, tank, bucket_start, bucket_end, price_context)))
     return _merge_tank_cash_summaries(results)
 
 
@@ -3269,6 +3629,8 @@ async def get_station_cash_detail(
     fuel_products_result = await db.execute(select(FuelProduct).where(FuelProduct.organizationId == organization_id))
     fuel_products_by_id = {fp.id: fp for fp in fuel_products_result.scalars().all()}
 
+    price_contexts = await _build_cash_price_contexts(db, tanks)
+
     per_product: dict[uuid.UUID, dict] = {}
     station_volume = 0.0
     station_monetary = 0.0
@@ -3277,7 +3639,7 @@ async def get_station_cash_detail(
     station_confidence = "reliable"
 
     for tank in tanks:
-        cash = await _compute_tank_cash_over_period(db, tank, effective_start, period_end)
+        cash = await _compute_tank_cash_over_period(db, tank, effective_start, period_end, price_contexts.get(tank.id))
         entry = per_product.setdefault(
             tank.fuelProductId, {"tanks": [], "volume": 0.0, "monetary": 0.0, "currencies": set(), "incomplete": False, "confidence": "reliable"}
         )
@@ -3369,6 +3731,42 @@ async def get_network_cash_summary(
         select(Station).where(Station.organizationId == organization_id, Station.status == "active")
     )
     stations = stations_result.scalars().all()
+    station_ids = [s.id for s in stations]
+
+    # Un seul aller-retour pour les cuves de TOUTES les stations, plutôt
+    # qu'une requête par station (audit performance 2026-09-11) — regroupées
+    # ensuite en mémoire par stationId.
+    tanks_by_station: dict[uuid.UUID, list[Tank]] = {}
+    all_tanks: list[Tank] = []
+    if station_ids:
+        all_tanks_result = await db.execute(select(Tank).where(Tank.stationId.in_(station_ids), Tank.active.is_(True)))
+        all_tanks = list(all_tanks_result.scalars().all())
+        for tank in all_tanks:
+            tanks_by_station.setdefault(tank.stationId, []).append(tank)
+
+    # Prix réseau par défaut + devise de station, précalculés une seule fois
+    # pour toutes les cuves (audit performance 2026-09-11) — voir
+    # `_build_cash_price_contexts` : élimine la résolution de prix/devise
+    # répétée à chaque frontière de segment de vente, qui dominait le temps
+    # de calcul de la caisse (mesuré jusqu'à ~50s sur 7 jours).
+    price_contexts = await _build_cash_price_contexts(db, all_tanks)
+
+    # Dernière mesure connue (`lastValueAt`) pour toutes les cuves en un
+    # seul aller-retour, au lieu d'un `_get_active_registry_entry` par cuve.
+    last_measurement_by_tank: dict[uuid.UUID, datetime] = {}
+    if all_tanks:
+        registry_result = await db.execute(
+            select(TankSensorMapping.tankId, HolykellDeviceRegistry.lastValueAt)
+            .join(HolykellDeviceRegistry, HolykellDeviceRegistry.hkSensorId == TankSensorMapping.hkSensorId)
+            .where(
+                TankSensorMapping.tankId.in_([t.id for t in all_tanks]),
+                TankSensorMapping.measurementType == "product_level",
+                TankSensorMapping.active.is_(True),
+            )
+        )
+        for tank_id, last_value_at in registry_result.all():
+            if last_value_at is not None:
+                last_measurement_by_tank[tank_id] = last_value_at
 
     currency_blocks: dict[str, dict] = {}
     product_totals: dict[uuid.UUID, dict] = {}
@@ -3379,8 +3777,7 @@ async def get_network_cash_summary(
     last_measurement_at: datetime | None = None
 
     for station in stations:
-        tanks_result = await db.execute(select(Tank).where(Tank.stationId == station.id, Tank.active.is_(True)))
-        tanks = tanks_result.scalars().all()
+        tanks = tanks_by_station.get(station.id, [])
         if not tanks:
             continue
 
@@ -3393,13 +3790,13 @@ async def get_network_cash_summary(
         station_effective_start = _operational_period_start(station, period_start, period_end) if mode == "operational" else period_start
 
         for tank in tanks:
-            cash = await _compute_tank_cash_over_period(db, tank, station_effective_start, period_end)
+            cash = await _compute_tank_cash_over_period(db, tank, station_effective_start, period_end, price_contexts.get(tank.id))
             product_ids.add(tank.fuelProductId)
             station_confidence = _worse_cash_confidence(station_confidence, cash["confidence"])
-            registry_entry = await _get_active_registry_entry(db, tank.id, "product_level")
-            if registry_entry is not None and registry_entry.lastValueAt is not None:
-                if last_measurement_at is None or registry_entry.lastValueAt > last_measurement_at:
-                    last_measurement_at = registry_entry.lastValueAt
+            tank_last_value_at = last_measurement_by_tank.get(tank.id)
+            if tank_last_value_at is not None:
+                if last_measurement_at is None or tank_last_value_at > last_measurement_at:
+                    last_measurement_at = tank_last_value_at
             if cash["volumeSoldLiters"] is not None:
                 station_volume += cash["volumeSoldLiters"]
                 station_has_data = True
@@ -4196,6 +4593,271 @@ async def list_trucks(db: AsyncSession, organization_id: uuid.UUID, actor_user_i
     result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
     rows = result.scalars().all()
     return Page(data=[TruckResponse.model_validate(r) for r in rows], meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
+
+
+# ================================================================
+# Tracking GPS des camions-citernes (mission « tracking », étape 1) — même
+# schéma que la télémétrie Holykell des cuves : référentiel de boîtier →
+# journal brut append-only → état dérivé calculé séparément. Traccar
+# (passerelle protocole, hors périmètre de ce code) pousse les positions
+# déjà normalisées vers `ingest_truck_position` ; ce module ne parle
+# jamais un protocole boîtier propriétaire. Seuil de détection d'arrêt :
+# constantes fixes réseau (TRUCK_STOP_RADIUS_METERS_DEFAULT/
+# TRUCK_STOP_STABILIZATION_MINUTES_DEFAULT) — pas de dérogation par
+# station, un camion n'appartient à aucune station précise (décision
+# explicite du commanditaire, 2026-09-11).
+# ================================================================
+
+_TRUCK_STOP_LOOKBACK_HOURS = 48.0
+
+
+async def _ensure_gps_device_identifier_available(db: AsyncSession, organization_id: uuid.UUID, device_identifier: str, exclude_id: uuid.UUID | None = None) -> None:
+    stmt = select(GpsDevice).where(GpsDevice.organizationId == organization_id, GpsDevice.deviceIdentifier == device_identifier)
+    if exclude_id is not None:
+        stmt = stmt.where(GpsDevice.id != exclude_id)
+    if (await db.execute(stmt)).scalar_one_or_none() is not None:
+        raise AppError(
+            code="gps_device_identifier_already_used",
+            message=f"Un boîtier GPS avec l'identifiant '{device_identifier}' existe déjà pour cette organisation.",
+            status_code=409,
+        )
+
+
+async def create_gps_device(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateGpsDeviceRequest) -> GpsDeviceResponse:
+    await _check_org_scope(db, organization_id, actor_user_id, GPS_DEVICE_MANAGE)
+    if data.truckId is not None:
+        truck = await db.get(Truck, data.truckId)
+        if truck is None or truck.organizationId != organization_id:
+            raise AppError(code="truck_not_found", message="Camion introuvable.", status_code=404)
+    await _ensure_gps_device_identifier_available(db, organization_id, data.deviceIdentifier)
+    instance = GpsDevice(organizationId=organization_id, truckId=data.truckId, deviceIdentifier=data.deviceIdentifier, label=data.label)
+    db.add(instance)
+    await db.commit()
+    await db.refresh(instance)
+    return GpsDeviceResponse.model_validate(instance)
+
+
+async def update_gps_device(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, gps_device_id: uuid.UUID, data: UpdateGpsDeviceRequest) -> GpsDeviceResponse:
+    await _check_org_scope(db, organization_id, actor_user_id, GPS_DEVICE_MANAGE)
+    device = await db.get(GpsDevice, gps_device_id)
+    if device is None or device.organizationId != organization_id:
+        raise AppError(code="gps_device_not_found", message="Boîtier GPS introuvable.", status_code=404)
+    updates = data.model_dump(exclude_unset=True)
+    if updates.get("truckId") is not None:
+        truck = await db.get(Truck, updates["truckId"])
+        if truck is None or truck.organizationId != organization_id:
+            raise AppError(code="truck_not_found", message="Camion introuvable.", status_code=404)
+    for field, value in updates.items():
+        setattr(device, field, value)
+    await db.commit()
+    await db.refresh(device)
+    return GpsDeviceResponse.model_validate(device)
+
+
+async def list_gps_devices(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, pagination: PaginationParams, truck_id: uuid.UUID | None = None) -> Page:
+    await _check_org_scope(db, organization_id, actor_user_id, GPS_DEVICE_READ)
+    stmt = select(GpsDevice).where(GpsDevice.organizationId == organization_id)
+    if truck_id is not None:
+        stmt = stmt.where(GpsDevice.truckId == truck_id)
+    stmt = stmt.order_by(GpsDevice.deviceIdentifier)
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
+    result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
+    rows = result.scalars().all()
+    return Page(data=[GpsDeviceResponse.model_validate(r) for r in rows], meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
+
+
+async def get_or_create_gps_ingest_credential(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID) -> str:
+    """Retourne le secret d'ingestion de l'organisation (le génère au
+    premier appel) — affiché une seule fois à l'administrateur pour
+    configurer le renvoi (forwarding) Traccar, jamais reloggé ensuite."""
+    await _check_org_scope(db, organization_id, actor_user_id, GPS_DEVICE_MANAGE)
+    result = await db.execute(select(GpsIngestCredential).where(GpsIngestCredential.organizationId == organization_id))
+    credential = result.scalar_one_or_none()
+    if credential is None:
+        credential = GpsIngestCredential(organizationId=organization_id, secretToken=secrets.token_urlsafe(32))
+        db.add(credential)
+        await db.commit()
+        await db.refresh(credential)
+    return credential.secretToken
+
+
+async def regenerate_gps_ingest_credential(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID) -> str:
+    await _check_org_scope(db, organization_id, actor_user_id, GPS_DEVICE_MANAGE)
+    result = await db.execute(select(GpsIngestCredential).where(GpsIngestCredential.organizationId == organization_id))
+    credential = result.scalar_one_or_none()
+    new_token = secrets.token_urlsafe(32)
+    if credential is None:
+        credential = GpsIngestCredential(organizationId=organization_id, secretToken=new_token)
+        db.add(credential)
+    else:
+        credential.secretToken = new_token
+    await db.commit()
+    return new_token
+
+
+async def _get_current_gps_device_for_truck(db: AsyncSession, truck_id: uuid.UUID) -> GpsDevice | None:
+    """Un seul boîtier actif par camion à la fois dans ce lot (v1) — pas de
+    reconstitution d'historique à travers plusieurs boîtiers successifs."""
+    result = await db.execute(select(GpsDevice).where(GpsDevice.truckId == truck_id, GpsDevice.active == True))  # noqa: E712
+    return result.scalar_one_or_none()
+
+
+async def run_truck_stop_detection(db: AsyncSession, truck_id: uuid.UUID) -> list[TruckStopEvent]:
+    """Exécute l'algorithme de détection d'arrêt (`detect_truck_stops`,
+    jamais réimplémenté) sur les positions récentes du camion, et persiste
+    les arrêts non encore connus (idempotent via déduplication sur
+    startAt) — même pattern que `run_delivery_detection_for_tank`."""
+    device = await _get_current_gps_device_for_truck(db, truck_id)
+    if device is None:
+        return []
+    since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=_TRUCK_STOP_LOOKBACK_HOURS)
+    positions_result = await db.execute(
+        select(TruckPositionPing.recordedAt, TruckPositionPing.latitude, TruckPositionPing.longitude)
+        .where(TruckPositionPing.gpsDeviceId == device.id, TruckPositionPing.recordedAt >= since)
+        .order_by(TruckPositionPing.recordedAt)
+    )
+    positions = [(recordedAt, float(lat), float(lon)) for recordedAt, lat, lon in positions_result.all()]
+    if len(positions) < 2:
+        return []
+    events = detect_truck_stops(positions, TRUCK_STOP_RADIUS_METERS_DEFAULT, TRUCK_STOP_STABILIZATION_MINUTES_DEFAULT)
+    if not events:
+        return []
+
+    existing_result = await db.execute(select(TruckStopEvent.startAt).where(TruckStopEvent.truckId == truck_id))
+    existing_start_times = {row[0] for row in existing_result.all()}
+
+    created = []
+    for event in events:
+        if event["startTime"] in existing_start_times:
+            continue
+        instance = TruckStopEvent(
+            truckId=truck_id, latitude=event["latitude"], longitude=event["longitude"],
+            startAt=event["startTime"], endAt=event["endTime"],
+        )
+        db.add(instance)
+        created.append(instance)
+    if created:
+        await db.commit()
+        for instance in created:
+            await db.refresh(instance)
+    return created
+
+
+async def ingest_truck_position(db: AsyncSession, organization_id: uuid.UUID, secret_token: str, data: IngestTruckPositionRequest) -> TruckPositionPingResponse:
+    """Point d'entrée du webhook Traccar — jamais un utilisateur connecté
+    (pas de JWT ici), authentifié par le secret d'ingestion de
+    l'organisation (`GpsIngestCredential`). `organization_id` vient du
+    header X-Organization-Id (exigé par `require_module_active` sur tout
+    le routeur zylo_liquid) — le secret doit correspondre à CETTE
+    organisation précisément, pas n'importe laquelle."""
+    credential_result = await db.execute(
+        select(GpsIngestCredential).where(GpsIngestCredential.organizationId == organization_id, GpsIngestCredential.secretToken == secret_token)
+    )
+    credential = credential_result.scalar_one_or_none()
+    if credential is None:
+        raise AppError(code="invalid_ingest_secret", message="Secret d'ingestion invalide.", status_code=401)
+
+    device_result = await db.execute(
+        select(GpsDevice).where(GpsDevice.organizationId == credential.organizationId, GpsDevice.deviceIdentifier == data.deviceIdentifier)
+    )
+    device = device_result.scalar_one_or_none()
+    if device is None:
+        raise AppError(code="gps_device_not_found", message=f"Boîtier GPS inconnu : {data.deviceIdentifier}.", status_code=404)
+
+    ping = TruckPositionPing(
+        gpsDeviceId=device.id, recordedAt=data.recordedAt, latitude=data.latitude, longitude=data.longitude,
+        channel=data.channel, accuracyMeters=data.accuracyMeters, speedKmh=data.speedKmh,
+        rawPayload=data.model_dump(mode="json"),
+    )
+    db.add(ping)
+    await db.commit()
+    await db.refresh(ping)
+
+    if device.truckId is not None:
+        try:
+            await run_truck_stop_detection(db, device.truckId)
+        except Exception:
+            # Best-effort : une erreur de calcul dérivé ne doit jamais faire
+            # échouer l'ingestion elle-même (même discipline que le
+            # rapprochement automatique de livraison).
+            pass
+
+    return TruckPositionPingResponse.model_validate(ping)
+
+
+async def list_truck_current_positions(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID) -> list[TruckCurrentPositionResponse]:
+    """Dernière position connue de chaque camion de l'organisation, pour la
+    carte — même esprit que `get_station_current_state` (une seule requête
+    agrégée, jamais une donnée dupliquée côté client)."""
+    await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
+    trucks_result = await db.execute(select(Truck.id).where(Truck.organizationId == organization_id))
+    truck_ids = [row[0] for row in trucks_result.all()]
+    if not truck_ids:
+        return []
+
+    responses: list[TruckCurrentPositionResponse] = []
+    for truck_id in truck_ids:
+        device = await _get_current_gps_device_for_truck(db, truck_id)
+        if device is None:
+            responses.append(TruckCurrentPositionResponse(truckId=truck_id, latitude=None, longitude=None, recordedAt=None, channel=None, currentStop=None))
+            continue
+        last_ping_result = await db.execute(
+            select(TruckPositionPing).where(TruckPositionPing.gpsDeviceId == device.id).order_by(TruckPositionPing.recordedAt.desc()).limit(1)
+        )
+        last_ping = last_ping_result.scalar_one_or_none()
+        if last_ping is None:
+            responses.append(TruckCurrentPositionResponse(truckId=truck_id, latitude=None, longitude=None, recordedAt=None, channel=None, currentStop=None))
+            continue
+
+        since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=_TRUCK_STOP_LOOKBACK_HOURS)
+        recent_result = await db.execute(
+            select(TruckPositionPing.recordedAt, TruckPositionPing.latitude, TruckPositionPing.longitude)
+            .where(TruckPositionPing.gpsDeviceId == device.id, TruckPositionPing.recordedAt >= since)
+            .order_by(TruckPositionPing.recordedAt)
+        )
+        recent_positions = [(recordedAt, float(lat), float(lon)) for recordedAt, lat, lon in recent_result.all()]
+        in_progress = detect_truck_stop_in_progress(recent_positions, TRUCK_STOP_RADIUS_METERS_DEFAULT, TRUCK_STOP_STABILIZATION_MINUTES_DEFAULT) if len(recent_positions) >= 2 else None
+        current_stop = None
+        if in_progress is not None:
+            current_stop = TruckStopEventResponse(
+                id=uuid.uuid4(), truckId=truck_id, latitude=in_progress["latitude"], longitude=in_progress["longitude"],
+                startAt=in_progress["startTime"], endAt=None,
+            )
+
+        responses.append(TruckCurrentPositionResponse(
+            truckId=truck_id, latitude=float(last_ping.latitude), longitude=float(last_ping.longitude),
+            recordedAt=last_ping.recordedAt, channel=last_ping.channel, currentStop=current_stop,
+        ))
+    return responses
+
+
+async def list_truck_positions(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, truck_id: uuid.UUID, since: datetime, until: datetime) -> list[TruckPositionPingResponse]:
+    await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
+    truck = await db.get(Truck, truck_id)
+    if truck is None or truck.organizationId != organization_id:
+        raise AppError(code="truck_not_found", message="Camion introuvable.", status_code=404)
+    device = await _get_current_gps_device_for_truck(db, truck_id)
+    if device is None:
+        return []
+    result = await db.execute(
+        select(TruckPositionPing)
+        .where(TruckPositionPing.gpsDeviceId == device.id, TruckPositionPing.recordedAt >= since, TruckPositionPing.recordedAt <= until)
+        .order_by(TruckPositionPing.recordedAt)
+    )
+    return [TruckPositionPingResponse.model_validate(r) for r in result.scalars().all()]
+
+
+async def list_truck_stops(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, truck_id: uuid.UUID, since: datetime, until: datetime) -> list[TruckStopEventResponse]:
+    await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
+    truck = await db.get(Truck, truck_id)
+    if truck is None or truck.organizationId != organization_id:
+        raise AppError(code="truck_not_found", message="Camion introuvable.", status_code=404)
+    result = await db.execute(
+        select(TruckStopEvent)
+        .where(TruckStopEvent.truckId == truck_id, TruckStopEvent.startAt >= since, TruckStopEvent.startAt <= until)
+        .order_by(TruckStopEvent.startAt)
+    )
+    return [TruckStopEventResponse.model_validate(r) for r in result.scalars().all()]
 
 
 async def create_purchase_order(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreatePurchaseOrderRequest) -> PurchaseOrderResponse:

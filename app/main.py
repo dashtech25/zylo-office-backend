@@ -8,7 +8,7 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import setup_logging
-from app.core.middleware import RequestIdMiddleware
+from app.core.middleware import RequestIdMiddleware, TimingMiddleware
 from app.audit.seed import seed_known_permissions as seed_audit_permissions
 from app.core.database import AsyncSessionLocal
 from app.identity.service import backfill_owner_default_permissions
@@ -34,6 +34,14 @@ TAGS_METADATA = [
 
 app = FastAPI(title=settings.APP_NAME, openapi_tags=TAGS_METADATA)
 
+# Ordre important : TimingMiddleware doit être ajouté avant RequestIdMiddleware
+# pour s'exécuter à l'intérieur de celui-ci (Starlette empile les middlewares
+# dans l'ordre inverse de add_middleware — le dernier ajouté est le plus
+# externe). Ainsi request_id_ctx est déjà positionné par RequestIdMiddleware
+# quand TimingMiddleware journalise sa ligne "request_timing", et n'est
+# réinitialisé qu'après (dans le finally de RequestIdMiddleware, exécuté en
+# dernier).
+app.add_middleware(TimingMiddleware)
 app.add_middleware(RequestIdMiddleware)
 app.add_middleware(
     CORSMiddleware,

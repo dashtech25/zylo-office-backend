@@ -96,6 +96,26 @@ async def test_ingest_position_success(client: AsyncClient, registered_user: dic
     assert body["gpsDeviceId"] == device["id"]
 
 
+async def test_ingest_position_accepts_timezone_aware_recorded_at(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
+    """Régression : une passerelle (Traccar notamment) envoie souvent un
+    horodatage avec fuseau explicite (ex. "+00:00") — trouvé en testant le
+    pont Traccar->Zylo Liquid réel (mission « tracking », 2026-09-11).
+    recordedAt étant une colonne TIMESTAMP WITHOUT TIME ZONE, un fuseau
+    non dépouillé fait planter l'insertion (offset-naive vs offset-aware)."""
+    headers = _headers(registered_user, zylo_liquid_organization)
+    suffix = uuid.uuid4().hex[:8]
+    truck = await _create_truck(client, headers, suffix)
+    device = await _create_gps_device(client, headers, suffix, truck["id"])
+    secret = await _get_ingest_secret(client, headers)
+
+    res = await client.post(
+        "/api/v1/zylo-liquid/gps/ingest",
+        json={"deviceIdentifier": device["deviceIdentifier"], "recordedAt": "2026-09-11T15:00:00.000+00:00", "latitude": 4.0611, "longitude": 9.7869},
+        headers={"X-Gps-Ingest-Secret": secret, "X-Organization-Id": zylo_liquid_organization["id"]},
+    )
+    assert res.status_code == 201, res.text
+
+
 async def test_ingest_position_invalid_secret_rejected(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
     headers = _headers(registered_user, zylo_liquid_organization)
     suffix = uuid.uuid4().hex[:8]

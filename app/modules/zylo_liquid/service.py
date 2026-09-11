@@ -4765,7 +4765,14 @@ async def ingest_truck_position(db: AsyncSession, organization_id: uuid.UUID, se
         raise AppError(code="gps_device_not_found", message=f"Boîtier GPS inconnu : {data.deviceIdentifier}.", status_code=404)
 
     ping = TruckPositionPing(
-        gpsDeviceId=device.id, recordedAt=data.recordedAt, latitude=data.latitude, longitude=data.longitude,
+        gpsDeviceId=device.id,
+        # recordedAt est une colonne TIMESTAMP WITHOUT TIME ZONE — un
+        # boîtier/passerelle envoie souvent un horodatage avec fuseau
+        # explicite (ex. Traccar : "+00:00"), à dépouiller avant insertion
+        # (même bug que sur les endpoints de lecture positions/arrêts,
+        # trouvé et corrigé plus tôt dans cette même mission).
+        recordedAt=data.recordedAt.replace(tzinfo=None) if data.recordedAt.tzinfo else data.recordedAt,
+        latitude=data.latitude, longitude=data.longitude,
         channel=data.channel, accuracyMeters=data.accuracyMeters, speedKmh=data.speedKmh,
         rawPayload=data.model_dump(mode="json"),
     )

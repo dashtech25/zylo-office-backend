@@ -13,7 +13,7 @@ from app.audit.seed import seed_known_permissions as seed_audit_permissions
 from app.core.database import AsyncSessionLocal
 from app.identity.service import backfill_owner_default_permissions
 from app.modules.zylo_liquid.seed import seed_known_permissions
-from app.modules.zylo_liquid.telemetry_sync import sync_loop as holykell_sync_loop
+from app.modules.zylo_liquid.telemetry_sync import structural_sweep_loop, sync_loop as holykell_sync_loop
 from app.modules_registry.seed import seed_known_modules
 from app.modules_registry.service import backfill_active_module_permissions_for_owners
 from app.rbac.seed import seed_known_permissions as seed_rbac_permissions
@@ -80,16 +80,22 @@ async def on_startup() -> None:
             "HOLYKELL_SYNC_BASE_URL non défini — sondage Holykell désactivé."
         )
 
+    # D5 (refonte alertes, incrémentation détection réelle) — prix/mapping
+    # capteur/calibration manquants : structurel, indépendant de Holykell,
+    # tourne toujours (contrairement au sondage ci-dessus).
+    app.state.structural_sweep_task = asyncio.create_task(structural_sweep_loop())
+
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
-    task = getattr(app.state, "holykell_sync_task", None)
-    if task is not None:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+    for attr in ("holykell_sync_task", "structural_sweep_task"):
+        task = getattr(app.state, attr, None)
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 @app.get("/")

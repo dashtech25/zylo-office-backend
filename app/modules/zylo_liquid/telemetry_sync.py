@@ -37,10 +37,12 @@ from app.core.database import AsyncSessionLocal
 from app.modules.zylo_liquid.models import (
     HolykellAccount,
     HolykellDeviceRegistry,
+    Station,
     TankMeasurement,
     TankSensorMapping,
 )
 from app.modules.zylo_liquid.service import (
+    evaluate_structural_alerts_for_organization,
     run_alert_evaluation_for_tank,
     run_delivery_detection_for_tank,
 )
@@ -48,6 +50,7 @@ from app.modules.zylo_liquid.service import (
 logger = logging.getLogger("zylo_office.holykell_sync")
 
 DEFAULT_INTERVAL_SEC = 5
+DEFAULT_STRUCTURAL_SWEEP_INTERVAL_SEC = 300
 
 
 async def _login(client: httpx.AsyncClient, base_url: str, username: str, password: str) -> tuple[str, str]:
@@ -177,4 +180,36 @@ async def sync_loop() -> None:
             raise
         except Exception:
             logger.exception("Cycle de synchronisation Holykell en échec")
+        await asyncio.sleep(interval)
+
+
+async def sweep_structural_alerts_once() -> None:
+    """Un balayage — toutes les organisations qui ont au moins une station
+    (jamais toutes les organisations : une organisation sans station n'a
+    aucune structure à vérifier). Indépendant de Holykell : tourne même sans
+    `HOLYKELL_SYNC_BASE_URL` défini (prix/mapping/calibration manquants ne
+    dépendent d'aucune télémétrie)."""
+    async with AsyncSessionLocal() as db:
+        org_ids = (await db.execute(select(Station.organizationId).distinct())).scalars().all()
+        for org_id in org_ids:
+            try:
+                await evaluate_structural_alerts_for_organization(db, org_id)
+            except Exception:
+                logger.exception("Échec du balayage structurel pour l'organisation %s", org_id)
+
+
+async def structural_sweep_loop() -> None:
+    """Boucle infinie — démarrée au boot (app/main.py), indépendante de
+    `sync_loop`. Intervalle nettement plus long (5 min par défaut) : un prix,
+    un mapping ou un barème de calibration ne changent pas à la seconde,
+    inutile de vérifier au rythme de la télémétrie."""
+    interval = settings.STRUCTURAL_SWEEP_INTERVAL_SEC or DEFAULT_STRUCTURAL_SWEEP_INTERVAL_SEC
+    logger.info("Boucle de balayage structurel démarrée (intervalle %ss)", interval)
+    while True:
+        try:
+            await sweep_structural_alerts_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Cycle de balayage structurel en échec")
         await asyncio.sleep(interval)

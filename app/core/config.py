@@ -44,5 +44,10 @@ class Settings(BaseSettings):
     HOLYKELL_SYNC_BASE_URL: str | None = None
     HOLYKELL_SYNC_INTERVAL_SEC: int = 5
 
+    # Balayage structurel (D5 — prix/mapping capteur/calibration manquants) —
+    # indépendant de Holykell, tourne toujours (contrairement au sondage
+    # ci-dessus). Intervalle long : ces états ne changent pas à la seconde.
+    STRUCTURAL_SWEEP_INTERVAL_SEC: int = 300
+
 
 settings = Settings()

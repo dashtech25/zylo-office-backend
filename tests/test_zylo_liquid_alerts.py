@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timedelta
 
 from httpx import AsyncClient
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from app.core.database import AsyncSessionLocal
 from app.modules.zylo_liquid.models import HolykellDeviceRegistry, TankMeasurement
@@ -195,3 +195,180 @@ async def test_list_alerts_without_permission_is_denied(client: AsyncClient, reg
     res = await client.get("/api/v1/zylo-liquid/alerts", headers=headers)
     assert res.status_code == 403
     assert res.json()["error"]["code"] == "module_inactive"
+
+
+# D5 (refonte alertes, incrémentation détection réelle) — les 3 nouveaux
+# types structurels (Étape 1 §7 de la mission : un état système qui empêche
+# Zylo Liquid de fonctionner/afficher fiablement une information).
+
+async def test_calibration_missing_alert_created_then_auto_resolved(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
+    from app.modules.zylo_liquid.service import evaluate_calibration_missing_alert
+    from app.modules.zylo_liquid.models import Tank
+
+    headers = _headers(registered_user, zylo_liquid_organization)
+    _, tank_id, _ = await _create_tank_with_sensor(client, headers, zylo_liquid_organization["id"], "CALIB1")
+
+    # `_create_tank_with_sensor` crée une cuve sans aucun point de
+    # calibration (jamais généré implicitement, cf. `replace_tank_calibration_points`).
+    async with AsyncSessionLocal() as db:
+        tank = (await db.execute(select(Tank).where(Tank.id == uuid.UUID(tank_id)))).scalar_one()
+        await evaluate_calibration_missing_alert(db, tank)
+        await db.commit()
+
+    res = await client.get(f"/api/v1/zylo-liquid/alerts?tankId={tank_id}&type=calibration_missing", headers=headers)
+    assert res.json()["meta"]["total"] == 1
+    assert res.json()["data"][0]["status"] == "active"
+    assert res.json()["data"][0]["severity"] == "medium"
+
+    calib_res = await client.put(
+        f"/api/v1/zylo-liquid/tanks/{tank_id}/calibration-points",
+        json={"points": [{"heightMm": 0, "volumeLiters": 0}, {"heightMm": 2000, "volumeLiters": 40000}]},
+        headers=headers,
+    )
+    assert calib_res.status_code == 200, calib_res.text
+
+    async with AsyncSessionLocal() as db:
+        tank = (await db.execute(select(Tank).where(Tank.id == uuid.UUID(tank_id)))).scalar_one()
+        await evaluate_calibration_missing_alert(db, tank)
+        await db.commit()
+
+    res = await client.get(f"/api/v1/zylo-liquid/alerts?tankId={tank_id}&type=calibration_missing", headers=headers)
+    assert res.json()["data"][0]["status"] == "resolved"
+    assert res.json()["data"][0]["resolutionMethod"] == "auto_verified"
+    assert res.json()["data"][0]["resolvedByUserId"] is None
+
+
+async def test_sensor_mapping_missing_alert_created_then_auto_resolved(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
+    from app.modules.zylo_liquid.service import evaluate_sensor_mapping_missing_alert
+    from app.modules.zylo_liquid.models import Tank
+    from tests.conftest import register_holykell_sensor
+
+    headers = _headers(registered_user, zylo_liquid_organization)
+    st_res = await client.post("/api/v1/zylo-liquid/stations", json={"name": "Station Mapping", "code": "MAP1"}, headers=headers)
+    station_id = st_res.json()["id"]
+    tank_res = await client.post(
+        "/api/v1/zylo-liquid/tanks",
+        json={
+            "stationId": station_id, "tankNumber": 1, "displayName": "Cuve 1", "capacityLiters": 40000,
+            "tankHeightMm": 2000, "newFuelProductName": "Produit Mapping", "newFuelProductCode": "MAP1",
+            "heightAlarmMm": 1900, "heightAlertMm": 1800, "lowAlarmMm": 200,
+        },
+        headers=headers,
+    )
+    tank_id = tank_res.json()["id"]
+    # Jamais de mapping créé ici, à la différence de `_create_tank_with_sensor`.
+
+    async with AsyncSessionLocal() as db:
+        tank = (await db.execute(select(Tank).where(Tank.id == uuid.UUID(tank_id)))).scalar_one()
+        assert tank.dataSourceType == "console"  # défaut — condition nécessaire à l'alerte
+        await evaluate_sensor_mapping_missing_alert(db, tank)
+        await db.commit()
+
+    res = await client.get(f"/api/v1/zylo-liquid/alerts?tankId={tank_id}&type=sensor_mapping_missing", headers=headers)
+    assert res.json()["meta"]["total"] == 1
+    assert res.json()["data"][0]["status"] == "active"
+
+    serial = f"XM_MAP_{uuid.uuid4().hex[:6]}"
+    sensor_id = await register_holykell_sensor(zylo_liquid_organization["id"], serial, "product_level")
+    map_res = await client.post(
+        "/api/v1/zylo-liquid/tank-sensor-mappings",
+        json={"tankId": tank_id, "hkSerialNumber": serial, "measurementType": "product_level"},
+        headers=headers,
+    )
+    assert map_res.status_code == 201, map_res.text
+
+    async with AsyncSessionLocal() as db:
+        tank = (await db.execute(select(Tank).where(Tank.id == uuid.UUID(tank_id)))).scalar_one()
+        await evaluate_sensor_mapping_missing_alert(db, tank)
+        await db.commit()
+
+    res = await client.get(f"/api/v1/zylo-liquid/alerts?tankId={tank_id}&type=sensor_mapping_missing", headers=headers)
+    assert res.json()["data"][0]["status"] == "resolved"
+
+
+async def test_sensor_mapping_missing_never_fires_for_direct_data_source_tank(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
+    """Une cuve `dataSourceType='direct'` (saisie manuelle assumée) ne doit
+    jamais déclencher cette alerte — jamais une fausse alerte sur une cuve
+    volontairement sans sonde."""
+    from app.modules.zylo_liquid.service import evaluate_sensor_mapping_missing_alert
+    from app.modules.zylo_liquid.models import Tank
+
+    headers = _headers(registered_user, zylo_liquid_organization)
+    st_res = await client.post("/api/v1/zylo-liquid/stations", json={"name": "Station Directe", "code": "DIR1"}, headers=headers)
+    station_id = st_res.json()["id"]
+    tank_res = await client.post(
+        "/api/v1/zylo-liquid/tanks",
+        json={
+            "stationId": station_id, "tankNumber": 1, "displayName": "Cuve 1", "capacityLiters": 40000,
+            "tankHeightMm": 2000, "newFuelProductName": "Produit Direct", "newFuelProductCode": "DIR1",
+            "heightAlarmMm": 1900, "heightAlertMm": 1800, "lowAlarmMm": 200, "dataSourceType": "direct",
+        },
+        headers=headers,
+    )
+    tank_id = tank_res.json()["id"]
+
+    async with AsyncSessionLocal() as db:
+        tank = (await db.execute(select(Tank).where(Tank.id == uuid.UUID(tank_id)))).scalar_one()
+        assert tank.dataSourceType == "direct"
+        await evaluate_sensor_mapping_missing_alert(db, tank)
+        await db.commit()
+
+    res = await client.get(f"/api/v1/zylo-liquid/alerts?tankId={tank_id}&type=sensor_mapping_missing", headers=headers)
+    assert res.json()["meta"]["total"] == 0
+
+
+async def test_price_missing_alert_created_then_auto_resolved(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
+    from app.modules.zylo_liquid.service import evaluate_price_missing_alert
+
+    headers = _headers(registered_user, zylo_liquid_organization)
+    _, tank_id, _ = await _create_tank_with_sensor(client, headers, zylo_liquid_organization["id"], "PRICE1")
+    tank_res = await client.get(f"/api/v1/zylo-liquid/tanks/{tank_id}", headers=headers)
+    station_id = tank_res.json()["stationId"]
+    fuel_product_id = tank_res.json()["fuelProductId"]
+
+    link_res = await client.post(
+        "/api/v1/zylo-liquid/station-fuel-products",
+        json={"stationId": station_id, "fuelProductId": fuel_product_id},
+        headers=headers,
+    )
+    assert link_res.status_code == 201, link_res.text
+
+    async with AsyncSessionLocal() as db:
+        await evaluate_price_missing_alert(db, uuid.UUID(station_id), uuid.UUID(fuel_product_id))
+        await db.commit()
+
+    res = await client.get(f"/api/v1/zylo-liquid/alerts?stationId={station_id}&type=price_missing", headers=headers)
+    assert res.json()["meta"]["total"] == 1
+    assert res.json()["data"][0]["status"] == "active"
+    assert res.json()["data"][0]["tankId"] is None
+    assert res.json()["data"][0]["productId"] == fuel_product_id
+
+    # La station de test n'a pas de ville associée — la devise ne peut pas
+    # être déduite automatiquement, il faut la fournir explicitement (même
+    # contrainte que test_zylo_liquid_prices.py).
+    import random
+    import string
+
+    from app.shared.currency import Currency
+
+    currency_code = "".join(random.choices(string.ascii_uppercase, k=3))
+    async with AsyncSessionLocal() as db:
+        currency = Currency(code=currency_code, name=currency_code, symbol=currency_code, decimalPlaces=0)
+        db.add(currency)
+        await db.commit()
+        await db.refresh(currency)
+        currency_id = str(currency.id)
+
+    price_res = await client.post(
+        "/api/v1/zylo-liquid/prices",
+        json={"stationId": station_id, "fuelProductId": fuel_product_id, "priceAmount": 750, "currencyId": currency_id, "effectiveFrom": "2026-01-01T00:00:00"},
+        headers=headers,
+    )
+    assert price_res.status_code == 201, price_res.text
+
+    async with AsyncSessionLocal() as db:
+        await evaluate_price_missing_alert(db, uuid.UUID(station_id), uuid.UUID(fuel_product_id))
+        await db.commit()
+
+    res = await client.get(f"/api/v1/zylo-liquid/alerts?stationId={station_id}&type=price_missing", headers=headers)
+    assert res.json()["data"][0]["status"] == "resolved"

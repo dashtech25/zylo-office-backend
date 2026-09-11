@@ -2238,6 +2238,106 @@ async def resolve_alert(
     return _alert_to_response(alert)
 
 
+# D5 (refonte alertes, incrémentation détection réelle) — 3 états système
+# qui empêchent Zylo Liquid de fonctionner ou d'afficher une information
+# fiable (Étape 1 §7 de la mission : « si le système a besoin d'une donnée
+# pour calculer/afficher une information et qu'elle manque, c'est un état
+# système important »). Structurel — ne dépend d'aucune mesure télémétrique,
+# donc jamais évalué par `run_alert_evaluation_for_tank` (qui ne tourne que
+# quand une mesure arrive) : balayé périodiquement, voir
+# `evaluate_structural_alerts_for_organization` et
+# `app/modules/zylo_liquid/telemetry_sync.py::structural_sweep_loop`.
+
+async def evaluate_price_missing_alert(db: AsyncSession, station_id: uuid.UUID, fuel_product_id: uuid.UUID) -> None:
+    """Un produit vendu à une station (`StationFuelProduct.active`) sans
+    prix résolu (`_resolve_applicable_price`, ni prix station ni défaut
+    réseau) empêche tout calcul fiable de valeur de stock/vente — jamais un
+    champ de réponse dégradée silencieux (constat Étape 1 : c'était le cas
+    avant cette incrémentation, `monetaryValueNotCalculableReason`)."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    price = await _resolve_applicable_price(db, station_id, fuel_product_id, now)
+    if price is None:
+        await _upsert_active_alert(
+            db, station_id=station_id, product_id=fuel_product_id, alert_type="price_missing",
+            triggered_at=now, source_type="fuelProduct", source_id=fuel_product_id,
+        )
+    else:
+        await _auto_resolve_alert(
+            db, station_id=station_id, tank_id=None, product_id=fuel_product_id,
+            alert_type="price_missing", resolved_at=now,
+        )
+
+
+async def evaluate_sensor_mapping_missing_alert(db: AsyncSession, tank: Tank) -> None:
+    """Une cuve pilotée par console (`dataSourceType='console'`) sans
+    mapping capteur actif de type `product_level` ne peut jamais recevoir de
+    mesure — la cuve reste invisible à toute évaluation d'alerte de seuil
+    tant que ce mapping manque. Les cuves `dataSourceType='direct'` (saisie
+    manuelle assumée, jamais de capteur attendu) sont hors périmètre de ce
+    type — jamais une fausse alerte sur une cuve volontairement sans sonde."""
+    if tank.dataSourceType != "console":
+        return
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    mapping = (await db.execute(
+        select(TankSensorMapping).where(
+            TankSensorMapping.tankId == tank.id,
+            TankSensorMapping.measurementType == "product_level",
+            TankSensorMapping.active == True,  # noqa: E712
+        )
+    )).scalar_one_or_none()
+    if mapping is None:
+        await _upsert_active_alert(
+            db, station_id=tank.stationId, tank_id=tank.id, alert_type="sensor_mapping_missing", triggered_at=now,
+        )
+    else:
+        await _auto_resolve_alert(
+            db, station_id=tank.stationId, tank_id=tank.id, product_id=None,
+            alert_type="sensor_mapping_missing", resolved_at=now,
+        )
+
+
+async def evaluate_calibration_missing_alert(db: AsyncSession, tank: Tank) -> None:
+    """Sans aucun point de calibration, la conversion hauteur mesurée →
+    volume (`interpolate_height_to_volume`, algorithms.py) est impossible —
+    toute mesure télémétrique de cette cuve reste inexploitable tant que ce
+    barème n'existe pas."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    count_result = await db.execute(
+        select(func.count()).select_from(TankCalibrationPoint).where(TankCalibrationPoint.tankId == tank.id)
+    )
+    has_points = (count_result.scalar_one() or 0) > 0
+    if not has_points:
+        await _upsert_active_alert(
+            db, station_id=tank.stationId, tank_id=tank.id, alert_type="calibration_missing", triggered_at=now,
+        )
+    else:
+        await _auto_resolve_alert(
+            db, station_id=tank.stationId, tank_id=tank.id, product_id=None,
+            alert_type="calibration_missing", resolved_at=now,
+        )
+
+
+async def evaluate_structural_alerts_for_organization(db: AsyncSession, organization_id: uuid.UUID) -> None:
+    """Un balayage périodique (pas piloté par la télémétrie, contrairement à
+    `run_alert_evaluation_for_tank`) — toutes les stations de l'organisation,
+    toutes leurs cuves actives, tous leurs produits vendus actifs."""
+    stations = (await db.execute(select(Station).where(Station.organizationId == organization_id))).scalars().all()
+    for station in stations:
+        links = (await db.execute(
+            select(StationFuelProduct).where(StationFuelProduct.stationId == station.id, StationFuelProduct.active == True)  # noqa: E712
+        )).scalars().all()
+        for link in links:
+            await evaluate_price_missing_alert(db, station.id, link.fuelProductId)
+
+        tanks = (await db.execute(
+            select(Tank).where(Tank.stationId == station.id, Tank.active == True)  # noqa: E712
+        )).scalars().all()
+        for tank in tanks:
+            await evaluate_sensor_mapping_missing_alert(db, tank)
+            await evaluate_calibration_missing_alert(db, tank)
+    await db.commit()
+
+
 async def _measurement_at_or_before(db: AsyncSession, tank_id: uuid.UUID, measurement_type: str, at) -> float | None:
     """Dernière mesure connue avant ou égale à l'instant demandé, jamais une
     mesure postérieure (Point 2 §5.4). Honore une éventuelle correction

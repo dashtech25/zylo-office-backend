@@ -35,6 +35,8 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -141,6 +143,18 @@ class TankMeasurement(Base):
 
     __tablename__ = "zyloLiquidTankMeasurement"
     __table_args__ = (
+        # Requis par `_measurement_at_or_before` (service.py ~L2441) :
+        # "dernière mesure connue avant un instant, pour un capteur" —
+        # WHERE hkSensorId IN (...) AND measuredAt <= X ORDER BY measuredAt
+        # DESC LIMIT 1. Sans cet index composite, Postgres balaye l'index
+        # measuredAt seul et filtre hkSensorId après coup (mesuré :
+        # Rows Removed by Filter proche du total de la table). measuredAt
+        # DESC pour matcher l'ORDER BY ... DESC du pattern de requête.
+        Index(
+            "ix_zyloLiquidTankMeasurement_hkSensorId_measuredAt",
+            "hkSensorId",
+            text('"measuredAt" DESC'),
+        ),
         {
             "comment": "Journal immuable des mesures physiques reçues depuis Holykell — jamais converties, jamais modifiées. Partitionnée par mois (measuredAt) dans le schéma source. Source : table 'tank_measurements'."
         },
@@ -512,38 +526,84 @@ class LeakageRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Alerte (Point 2 chapitre 4, Point 13 §13.4) — modèle confirmé absent
     en Phase 1 (Point 2 §7), créé à la construction de l'endpoint 12
-    (issue #45). 5 déclencheurs distincts (niveau haut/pré-alarme/bas, eau,
-    fuite, sonde déconnectée) partagent cette table unique et son cycle de
-    vie actif/résolue (Point 2 §4.1-4.6).
+    (issue #45). Partage une table unique entre tous les déclencheurs —
+    jamais un second modèle d'alerte par famille.
 
-    Étendue (mission « flux de livraison station ») avec 3 déclencheurs de
-    rapprochement livraison — mêmes colonnes, jamais un second modèle
-    d'alerte : `delivery_discrepancy` (écart de volume déclaré/détecté hors
-    tolérance), `delivery_undeclared` (livraison détectée par télémétrie
-    sans déclaration correspondante), `delivery_declaration_pending`
-    (déclaration toujours sans détection après la fenêtre de rapprochement
-    — signal plus léger, jamais confondu avec un écart avéré)."""
+    Refonte alertes Étape 2 (2026-09) — décisions D2/D3/D4 :
+    - `stationId` toujours renseigné (portée minimale garantie même sans
+      cuve) ; `tankId`/`productId` selon le type (une cuve précise, ou un
+      produit à l'échelle de la station — ex. `price_missing`).
+    - `sourceType`/`sourceId` : référence logique vers l'entité qui a
+      réellement déclenché l'alerte (`DeliveryDetected`, `DeliveryDeclaration`,
+      `LeakageRecord`...) — jamais une FK stricte (polymorphe), pour permettre
+      un vrai diagnostic sans dupliquer un second schéma par famille.
+    - `severity` calculée par le service au moment de la création — plus
+      jamais dérivée côté frontend depuis un `Set` de types dupliqué.
+    - Cycle de vie à 3 états (`active`/`acknowledged`/`resolved`, D3) :
+      l'acquittement (qui/quand) est une déclaration d'intention humaine,
+      distincte de la résolution. La résolution elle-même distingue
+      `resolutionMethod` : `auto_verified` (le service a relu la condition
+      réelle et constaté sa disparition — `resolvedByUserId` reste NULL) vs
+      `manual_justified` (aucune vérification automatique possible pour ce
+      type, fermeture manuelle avec `resolutionNote` obligatoire et
+      `resolvedByUserId` renseigné). Un clic humain ne referme donc plus
+      jamais silencieusement une alerte pour laquelle une vérité mesurable
+      existe (Point 2 §11 de la mission alertes)."""
 
     __tablename__ = "zyloLiquidAlert"
     __table_args__ = (
         CheckConstraint(
             "type IN ('level_high','level_high_pre_alarm','level_low','water','leak','sensor_offline',"
-            "'delivery_discrepancy','delivery_undeclared','delivery_declaration_pending')",
+            "'delivery_discrepancy','delivery_undeclared','delivery_declaration_pending',"
+            "'price_missing','sensor_mapping_missing','calibration_missing')",
             name="ck_zlAlert_type",
         ),
-        CheckConstraint("status IN ('active','resolved')", name="ck_zlAlert_status"),
-        {"comment": "Alerte déclenchée automatiquement — résolution manuelle uniquement (sauf sonde déconnectée, point non tranché, Point 2 §4.6)."},
+        CheckConstraint("status IN ('active','acknowledged','resolved')", name="ck_zlAlert_status"),
+        CheckConstraint(
+            "severity IN ('critical','high','medium','low')",
+            name="ck_zlAlert_severity",
+        ),
+        CheckConstraint(
+            "\"resolutionMethod\" IS NULL OR \"resolutionMethod\" IN ('auto_verified','manual_justified')",
+            name="ck_zlAlert_resolutionMethod",
+        ),
+        {"comment": "Alerte déclenchée automatiquement — cycle de vie active/acknowledged/resolved (refonte 2026-09, voir docstring)."},
     )
 
-    tankId: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="CASCADE"), nullable=False, index=True
+    stationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tankId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    productId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidFuelProduct.id", ondelete="CASCADE"), nullable=True, index=True
     )
     type: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String(10), nullable=False, default="active", index=True)
+    severity: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="active", index=True)
+
+    # Référence logique (jamais une FK stricte — polymorphe par nature) vers
+    # l'entité qui a réellement produit l'alerte, pour permettre un
+    # diagnostic contextualisé (D4). NULL pour les types sans entité source
+    # dédiée (ex. seuils de niveau, dérivés directement de la mesure).
+    sourceType: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    sourceId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
     triggeredAt: Mapped[datetime] = mapped_column(nullable=False)
     triggeredValue: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
     thresholdValue: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
+
+    acknowledgedAt: Mapped[datetime | None] = mapped_column(nullable=True)
+    acknowledgedByUserId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+
     resolvedAt: Mapped[datetime | None] = mapped_column(nullable=True)
+    resolvedByUserId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    resolutionMethod: Mapped[str | None] = mapped_column(String(20), nullable=True)
     resolutionNote: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -894,6 +954,9 @@ class Supplier(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     contactEmail: Mapped[str | None] = mapped_column(String(255), nullable=True)
     website: Mapped[str | None] = mapped_column(String(255), nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Mission « bon de commande généré » — SIRET/RCS du fournisseur, requis
+    # par le modèle français de bon de commande, jamais inventé si absent.
+    taxId: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
 
 class Carrier(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -928,6 +991,97 @@ class Truck(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     plateNumber: Mapped[str] = mapped_column(String(50), nullable=False)
     capacityLiters: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
     compartmentsCount: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+
+
+# ================================================================
+# Tracking GPS des camions-citernes (mission « tracking », étape 1 —
+# position + arrêts sur carte, 2026-09-11) — même schéma que la
+# télémétrie Holykell des cuves : compte/appareil enregistré → journal
+# brut append-only → état dérivé calculé séparément, jamais dupliqué
+# dans le brut. Traccar (passerelle protocole, hors périmètre de ce
+# code) pousse les positions déjà normalisées ; ce module ne parle
+# jamais un protocole boîtier propriétaire.
+# ================================================================
+
+
+class GpsIngestCredential(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Secret d'ingestion par organisation — l'endpoint webhook GPS n'est
+    jamais appelé par un utilisateur connecté (Traccar n'a pas de compte
+    Zylo Office), donc pas d'authentification JWT possible ici. Même
+    esprit que `HolykellAccount` : des identifiants externes scopés à une
+    organisation, jamais un secret global partagé entre organisations."""
+
+    __tablename__ = "zyloLiquidGpsIngestCredential"
+    __table_args__ = (
+        UniqueConstraint("organizationId", name="uq_zlGpsIngestCredential_org"),
+        {"comment": "Secret d'ingestion GPS par organisation — valide l'endpoint webhook, jamais un accès utilisateur."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id", ondelete="RESTRICT"), nullable=False, index=True)
+    secretToken: Mapped[str] = mapped_column(String(100), nullable=False)
+
+
+class GpsDevice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Boîtier GPS enregistré — référentiel réseau, même portée que
+    `Truck`. `deviceIdentifier` est l'IMEI/numéro de série du boîtier,
+    fourni par Traccar dans chaque position pour retrouver le camion
+    correspondant. `truckId` nullable : un boîtier peut être enregistré
+    avant d'être posé sur un camion précis."""
+
+    __tablename__ = "zyloLiquidGpsDevice"
+    __table_args__ = (
+        UniqueConstraint("organizationId", "deviceIdentifier", name="uq_zlGpsDevice_org_identifier"),
+        {"comment": "Boîtier GPS — référentiel réseau, rattaché optionnellement à un camion."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id", ondelete="RESTRICT"), nullable=False, index=True)
+    truckId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTruck.id", ondelete="SET NULL"), nullable=True, index=True)
+    deviceIdentifier: Mapped[str] = mapped_column(String(50), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    active: Mapped[bool] = mapped_column(nullable=False, default=True)
+
+
+class TruckPositionPing(UUIDPrimaryKeyMixin, Base):
+    """Journal brut append-only des positions GPS — jamais modifié après
+    insertion, même discipline que `TankMeasurement`. `rawPayload`
+    conserve le JSON transmis par Traccar tel quel, pour audit/diagnostic,
+    jamais réinterprété ailleurs que dans le calcul dérivé."""
+
+    __tablename__ = "zyloLiquidTruckPositionPing"
+    __table_args__ = (
+        Index("ix_zlTruckPositionPing_gpsDeviceId_recordedAt", "gpsDeviceId", "recordedAt"),
+        {"comment": "Position GPS brute — append-only, jamais modifiée. L'état dérivé (trajet/arrêts) est calculé séparément."},
+    )
+
+    gpsDeviceId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidGpsDevice.id", ondelete="RESTRICT"), nullable=False, index=True)
+    recordedAt: Mapped[datetime] = mapped_column(nullable=False)
+    receivedAt: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    latitude: Mapped[float] = mapped_column(Numeric(10, 7), nullable=False)
+    longitude: Mapped[float] = mapped_column(Numeric(10, 7), nullable=False)
+    channel: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    accuracyMeters: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
+    speedKmh: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
+    rawPayload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+
+class TruckStopEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Arrêt détecté — état dérivé et persisté (même esprit que
+    `DeliveryDetected`), calculé à partir du flux de `TruckPositionPing`
+    par l'algorithme `_scan_truck_stops` (même state machine que la
+    détection de livraison : ancre stable + confirmation après N minutes).
+    `endAt` NULL = arrêt toujours en cours."""
+
+    __tablename__ = "zyloLiquidTruckStopEvent"
+    __table_args__ = (
+        Index("ix_zlTruckStopEvent_truckId_startAt", "truckId", "startAt"),
+        {"comment": "Arrêt détecté d'un camion — dérivé du flux de positions, jamais un second système de vérité."},
+    )
+
+    truckId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTruck.id", ondelete="RESTRICT"), nullable=False, index=True)
+    latitude: Mapped[float] = mapped_column(Numeric(10, 7), nullable=False)
+    longitude: Mapped[float] = mapped_column(Numeric(10, 7), nullable=False)
+    startAt: Mapped[datetime] = mapped_column(nullable=False)
+    endAt: Mapped[datetime | None] = mapped_column(nullable=True)
 
 
 class PurchaseOrder(UUIDPrimaryKeyMixin, TimestampMixin, Base):

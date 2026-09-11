@@ -163,7 +163,10 @@ async def test_quality_check_reconciliation_matched_when_both_agree(client: Asyn
     declaration_id = declaration_res.json()["id"]
 
     async with AsyncSessionLocal() as db:
-        db.add(Alert(tankId=uuid.UUID(tank_id), type="water", triggeredAt=datetime(2026, 2, 1, 8, 10), triggeredValue=8))
+        db.add(Alert(
+            stationId=uuid.UUID(station_id), tankId=uuid.UUID(tank_id), type="water", severity="high",
+            triggeredAt=datetime(2026, 2, 1, 8, 10), triggeredValue=8,
+        ))
         await db.commit()
 
     res = await client.post(f"/api/v1/zylo-liquid/quality-check-declarations/{declaration_id}/reconcile", headers=headers)

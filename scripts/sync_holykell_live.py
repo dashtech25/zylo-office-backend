@@ -57,9 +57,9 @@ from app.modules.zylo_liquid.models import (  # noqa: E402
     Tank,
     TankCalibrationPoint,
     TankSensorMapping,
-    TankMeasurement,
 )
 from app.modules.zylo_liquid.service import run_alert_evaluation_for_tank, run_delivery_detection_for_tank  # noqa: E402
+from app.modules.zylo_liquid.telemetry_sync import sync_one_account  # noqa: E402
 
 ORG_ID = os.environ.get("HOLYKELL_SYNC_ORG_ID", "0879158e-0e28-45d7-8688-be2c81c96b37")
 HOLY_BASE = os.environ.get("HOLYKELL_SYNC_BASE_URL", "http://localhost:8500")
@@ -211,84 +211,23 @@ async def provision(db, holy_stations, ss_stations, ss_tanks_by_station, ss_poin
     return tank_id_by_sensor
 
 
-async def poll_once(db, client: httpx.AsyncClient, access_token: str, tenant_id: str, sensor_to_tank: dict):
-    resp = await client.get(
-        f"{HOLY_BASE}/admin-api/business/deviceGroup/",
-        headers={"Authorization": f"Bearer {access_token}", "tenant-id": tenant_id},
-    )
-    resp.raise_for_status()
-    groups = resp.json().get("data", [])
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    touched_tank_ids = set()
-
-    for g in groups:
-        for device in g.get("deviceList", []):
-            serial = device["serialNumber"]
-            status = device.get("status", 1)
-            sensor_way_list = device.get("sensorWayList") or {}
-
-            # Le TSL donne flag->sensorId ; sensorWayList donne flag->value.
-            tsl_raw = device.get("tsl")
-            import json as _json
-            flag_to_sensor_id = {}
-            if tsl_raw:
-                try:
-                    tsl = _json.loads(tsl_raw)
-                    for sd in tsl.get("sensorDatas", []):
-                        flag_to_sensor_id[str(sd["flag"])] = sd["sensorId"]
-                except Exception:
-                    pass
-
-            for flag, value in sensor_way_list.items():
-                sensor_id = flag_to_sensor_id.get(str(flag))
-                if sensor_id is None or sensor_id not in sensor_to_tank:
-                    continue
-                tank_id, measurement_type = sensor_to_tank[sensor_id]
-
-                registry = (await db.execute(
-                    select(HolykellDeviceRegistry).where(HolykellDeviceRegistry.hkSensorId == sensor_id)
-                )).scalar_one_or_none()
-                if registry is None:
-                    continue
-                registry.lastValue = value
-                registry.lastValueAt = now
-                registry.hkLastStatus = 1 if status == 1 else 0
-                # Une ingestion réussie EST une visibilité du capteur : sans
-                # cela, `hkLastSeenAt` (affiché « Dernière visibilité » dans
-                # l'ATG) resterait NULL à jamais — aucun autre chemin d'écriture.
-                registry.hkLastSeenAt = now
-
-                db.add(TankMeasurement(
-                    hkSensorId=sensor_id, hkDeviceSerial=serial, hkSensorName=registry.hkSensorName,
-                    hkUnit=registry.hkUnit, measuredAt=now, receivedAt=now, rawValue=value, insertedAt=now,
-                ))
-                touched_tank_ids.add(tank_id)
-
-    holy_account = (await db.execute(select(HolykellAccount).where(HolykellAccount.organizationId == ORG_ID))).scalar_one_or_none()
-    if holy_account is not None:
-        holy_account.lastSyncAt = now
-        holy_account.lastSyncStatus = "success"
-        holy_account.lastSyncError = None
-
-    await db.commit()
+async def poll_once(db, client: httpx.AsyncClient):
+    """Un cycle de sondage pour le compte de démo — délègue entièrement à
+    `app.modules.zylo_liquid.telemetry_sync.sync_one_account` (Étape 2 de la
+    refonte alertes, décision D1) : c'est la même fonction que le backend
+    utilise en continu une fois déployé, pour n'avoir plus qu'une seule
+    implémentation du sondage Holykell, jamais deux qui divergent.
+    Résolution du mapping capteur→cuve désormais faite en base à chaque
+    cycle (TankSensorMapping), plus depuis un dict figé à la provision —
+    tout nouveau mapping ajouté pendant que la boucle tourne est pris en
+    compte au cycle suivant."""
+    holy_account = (await db.execute(select(HolykellAccount).where(HolykellAccount.organizationId == ORG_ID))).scalar_one()
+    touched_tank_ids = await sync_one_account(db, client, HOLY_BASE, holy_account)
 
     for tank_id in touched_tank_ids:
         await run_alert_evaluation_for_tank(db, tank_id)
-        # Manquait jusqu'ici : seule l'évaluation des alertes tournait en
-        # continu, jamais la détection de livraison — aucune livraison
-        # n'était donc jamais créée automatiquement, même après des heures
-        # de sync réelle. `run_delivery_detection_for_tank` est déjà
-        # idempotent (contrainte tankId+startTime) et documenté comme
-        # "traitement de fond" à brancher sur un scheduler réel (service.py) —
-        # ce point de sync est ce scheduler.
+        # Détection de livraison : idempotente (contrainte tankId+startTime).
         await run_delivery_detection_for_tank(db, tank_id)
-
-
-async def get_holykell_token(client: httpx.AsyncClient) -> tuple[str, str]:
-    resp = await client.post(f"{HOLY_BASE}/admin-api/system/auth/login", json={"username": HOLY_USERNAME, "password": HOLY_PASSWORD})
-    resp.raise_for_status()
-    data = resp.json()["data"]
-    return data["accessToken"], data["tenantId"]
 
 
 async def main():
@@ -303,19 +242,15 @@ async def main():
         print(f"Provisionné : {len(sensor_to_tank)} capteurs mappés sur des cuves Zylo Liquid.")
 
     async with httpx.AsyncClient(timeout=10.0) as client:
-        access_token, tenant_id = await get_holykell_token(client)
         print("Connecté à Holykell Simulator, boucle de synchronisation démarrée (Ctrl+C pour arrêter)...")
         while True:
             try:
                 async with AsyncSessionLocal() as db:
-                    await poll_once(db, client, access_token, tenant_id, sensor_to_tank)
+                    await poll_once(db, client)
                 print(f"[{datetime.now().isoformat(timespec='seconds')}] cycle de synchronisation OK")
             except httpx.HTTPStatusError as e:
-                if e.response.status_code == 401:
-                    access_token, tenant_id = await get_holykell_token(client)
-                else:
-                    print("Erreur HTTP:", e)
-                    await _mark_sync_failed(str(e))
+                print("Erreur HTTP:", e)
+                await _mark_sync_failed(str(e))
             except Exception as e:
                 print("Erreur cycle de sync:", repr(e))
                 await _mark_sync_failed(repr(e))

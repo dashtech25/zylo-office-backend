@@ -27,6 +27,11 @@ DELIVERY_READ = "zyloLiquid.delivery.read"
 LEAK_EVENT_READ = "zyloLiquid.leakEvent.read"
 
 ALERT_READ = "zyloLiquid.alert.read"
+# D3/D6 (refonte alertes) : acquitter ("je m'en occupe") est une action bien
+# plus légère que résoudre manuellement avec justification — ouverte à des
+# rôles opérationnels qui n'ont pas ALERT_MANAGE (le pompiste, premier à
+# constater une fuite ou un niveau bas sur le terrain, notamment).
+ALERT_ACKNOWLEDGE = "zyloLiquid.alert.acknowledge"
 ALERT_MANAGE = "zyloLiquid.alert.manage"
 
 PRICE_HISTORY_READ = "zyloLiquid.priceHistory.read"
@@ -105,6 +110,13 @@ CARRIER_MANAGE = "zyloLiquid.carrier.manage"
 
 TRUCK_READ = "zyloLiquid.truck.read"
 TRUCK_MANAGE = "zyloLiquid.truck.manage"
+
+# Boîtiers GPS (mission « tracking », étape 1) — la lecture des positions/
+# arrêts est protégée par TRUCK_READ ci-dessus (pas de permission dédiée,
+# éviter la prolifération) ; seule la gestion du référentiel de boîtiers
+# a sa propre permission, même portée que TRUCK_MANAGE.
+GPS_DEVICE_READ = "zyloLiquid.gpsDevice.read"
+GPS_DEVICE_MANAGE = "zyloLiquid.gpsDevice.manage"
 
 PURCHASE_ORDER_READ = "zyloLiquid.purchaseOrder.read"
 PURCHASE_ORDER_MANAGE = "zyloLiquid.purchaseOrder.manage"

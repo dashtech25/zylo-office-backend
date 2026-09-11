@@ -1,6 +1,7 @@
 import colorsys
 import uuid
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -462,19 +463,30 @@ class LeakEventResponse(BaseModel):
 
 
 class ResolveAlertRequest(BaseModel):
+    """D2 : réservé aux types sans vérification automatique possible
+    (le service refuse la requête pour un type auto-vérifiable — voir
+    `resolve_alert`). `resolutionNote` devient obligatoire à cet usage."""
     resolutionNote: str | None = None
 
 
 class AlertResponse(BaseModel):
     id: uuid.UUID
-    tankId: uuid.UUID
     stationId: uuid.UUID
+    tankId: uuid.UUID | None
+    productId: uuid.UUID | None
     type: str
+    severity: str
     status: str
+    sourceType: str | None
+    sourceId: uuid.UUID | None
     triggeredAt: datetime
     triggeredValue: float | None
     thresholdValue: float | None
+    acknowledgedAt: datetime | None
+    acknowledgedByUserId: uuid.UUID | None
     resolvedAt: datetime | None
+    resolvedByUserId: uuid.UUID | None
+    resolutionMethod: str | None
     resolutionNote: str | None
 
     model_config = {"from_attributes": True}
@@ -1270,6 +1282,7 @@ class CreateSupplierRequest(BaseModel):
     contactEmail: str | None = Field(default=None, max_length=255)
     website: str | None = Field(default=None, max_length=255)
     address: str | None = None
+    taxId: str | None = Field(default=None, max_length=50)
 
     _validate_category = field_validator("category")(_validate_supplier_category)
 
@@ -1284,6 +1297,7 @@ class UpdateSupplierRequest(BaseModel):
     contactEmail: str | None = Field(default=None, max_length=255)
     website: str | None = Field(default=None, max_length=255)
     address: str | None = None
+    taxId: str | None = Field(default=None, max_length=50)
     active: bool | None = None
 
     _validate_category = field_validator("category")(_validate_supplier_category)
@@ -1301,6 +1315,7 @@ class SupplierResponse(BaseModel):
     contactEmail: str | None = None
     website: str | None = None
     address: str | None = None
+    taxId: str | None = None
     active: bool
 
     model_config = {"from_attributes": True}
@@ -1349,6 +1364,84 @@ class TruckResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ================================================================
+# Tracking GPS des camions-citernes (mission « tracking », étape 1)
+# ================================================================
+
+
+class CreateGpsDeviceRequest(BaseModel):
+    truckId: uuid.UUID | None = None
+    deviceIdentifier: str = Field(min_length=1, max_length=50)
+    label: str | None = Field(default=None, max_length=150)
+
+
+class UpdateGpsDeviceRequest(BaseModel):
+    truckId: uuid.UUID | None = None
+    label: str | None = Field(default=None, max_length=150)
+    active: bool | None = None
+
+
+class GpsDeviceResponse(BaseModel):
+    id: uuid.UUID
+    organizationId: uuid.UUID
+    truckId: uuid.UUID | None
+    deviceIdentifier: str
+    label: str | None
+    active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class IngestTruckPositionRequest(BaseModel):
+    """Contrat d'ingestion contrôlé par Zylo Liquid — `deviceIdentifier`
+    doit correspondre à celui enregistré sur un `GpsDevice` (le
+    rapprochement exact avec le champ envoyé par Traccar, deviceId ou
+    uniqueId selon la configuration, est un réglage fait à la passerelle,
+    pas ici)."""
+
+    deviceIdentifier: str = Field(min_length=1, max_length=50)
+    recordedAt: datetime
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    channel: str | None = None
+    accuracyMeters: float | None = Field(default=None, ge=0)
+    speedKmh: float | None = Field(default=None, ge=0)
+
+
+class TruckPositionPingResponse(BaseModel):
+    id: uuid.UUID
+    gpsDeviceId: uuid.UUID
+    recordedAt: datetime
+    receivedAt: datetime
+    latitude: float
+    longitude: float
+    channel: str | None
+    accuracyMeters: float | None
+    speedKmh: float | None
+
+    model_config = {"from_attributes": True}
+
+
+class TruckStopEventResponse(BaseModel):
+    id: uuid.UUID
+    truckId: uuid.UUID
+    latitude: float
+    longitude: float
+    startAt: datetime
+    endAt: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class TruckCurrentPositionResponse(BaseModel):
+    truckId: uuid.UUID
+    latitude: float | None
+    longitude: float | None
+    recordedAt: datetime | None
+    channel: str | None
+    currentStop: TruckStopEventResponse | None = None
+
+
 class CreatePurchaseOrderRequest(BaseModel):
     stationId: uuid.UUID
     tankId: uuid.UUID
@@ -1371,6 +1464,10 @@ class PurchaseOrderResponse(BaseModel):
     status: str
 
     model_config = {"from_attributes": True}
+
+
+class GeneratePurchaseOrderDocumentRequest(BaseModel):
+    format: Literal["pdf", "docx"]
 
 
 # ================================================================

@@ -1,6 +1,7 @@
 """Algorithmes métier validés (Point 3 §10) — jamais réimplémentés à
 l'intérieur d'un endpoint, toujours appelés depuis ce module unique."""
 
+import math
 from datetime import timedelta
 
 # Constantes métier nommées (au lieu de littéraux répétés en valeur par
@@ -41,6 +42,15 @@ RECONCILIATION_DELIVERY_VOLUME_TOLERANCE_PERCENT_DEFAULT = 0.5
 RECONCILIATION_DELIVERY_STALE_PENDING_HOURS_DEFAULT = 24.0
 RECONCILIATION_GAUGING_HEIGHT_TOLERANCE_MM_DEFAULT = 10.0
 RECONCILIATION_QUALITY_CHECK_WINDOW_HOURS_DEFAULT = 1.0
+
+# Détection d'arrêt camion (mission « tracking », étape 1) — constantes
+# fixes pour tout le réseau (un camion dessert plusieurs stations, pas de
+# point d'ancrage cohérent pour une dérogation par station — décision
+# explicite du commanditaire). Valeurs de démarrage prudentes (comme
+# CASH_NOISE_FLOOR_LITERS), à calibrer avec des positions réelles une fois
+# le matériel déployé.
+TRUCK_STOP_RADIUS_METERS_DEFAULT = 150.0
+TRUCK_STOP_STABILIZATION_MINUTES_DEFAULT = 10.0
 
 
 def interpolate_height_to_volume(calibration_points: list[tuple[float, float]], height_mm: float) -> float | None:
@@ -168,6 +178,98 @@ def detect_delivery_in_progress(
     {startTime, startHeightMm, currentTime, currentHeightMm} ou None si
     aucune hausse en cours sur la fenêtre fournie."""
     _, open_candidate = _scan_deliveries(measurements, rise_threshold_mm, stability_delta_mm, stabilization_minutes)
+    return open_candidate
+
+
+def _haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Distance entre deux points GPS sur une sphère (formule de
+    Haversine) — suffisante pour un rayon de détection d'arrêt de l'ordre
+    de la centaine de mètres, aucun besoin d'une projection plus précise."""
+    r_earth_meters = 6371000.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    return 2 * r_earth_meters * math.asin(math.sqrt(a))
+
+
+def _scan_truck_stops(
+    positions: list[tuple],
+    radius_meters: float,
+    stabilization_minutes: float,
+) -> tuple[list[dict], dict | None]:
+    """Détection d'arrêt camion (mission « tracking », étape 1) — même
+    discipline de confirmation que `_scan_deliveries` (ancre stable +
+    confirmation après N minutes), avec la distance à l'ancre comme mesure
+    à la place de la hauteur de cuve. L'ancre ne bouge que tant qu'aucune
+    fenêtre de stabilisation n'est en cours, pour ne jamais dériver
+    progressivement loin du point de départ réel de l'arrêt.
+
+    `positions` : liste de (recordedAt: datetime, latitude: float,
+    longitude: float) triée chronologiquement. Retourne (arrêts confirmés,
+    candidat encore en cours à la fin de la fenêtre ou None)."""
+    if len(positions) < 2:
+        return [], None
+
+    events: list[dict] = []
+    anchor_time, anchor_lat, anchor_lon = positions[0]
+    in_stop = False
+    start_time = start_lat = start_lon = None
+    stabilization_start = None
+
+    for i in range(1, len(positions)):
+        t, lat, lon = positions[i]
+        distance = _haversine_distance_meters(anchor_lat, anchor_lon, lat, lon)
+
+        if not in_stop:
+            if distance <= radius_meters:
+                if stabilization_start is None:
+                    stabilization_start = anchor_time
+                if (t - stabilization_start) >= timedelta(minutes=stabilization_minutes):
+                    in_stop = True
+                    start_time, start_lat, start_lon = stabilization_start, anchor_lat, anchor_lon
+            else:
+                # Position hors du rayon de l'ancre : nouvelle ancre, la
+                # fenêtre de stabilisation repart de zéro.
+                anchor_time, anchor_lat, anchor_lon = t, lat, lon
+                stabilization_start = None
+        elif distance > radius_meters:
+            # Reprise du mouvement : l'arrêt confirmé se termine ici.
+            events.append({"startTime": start_time, "latitude": start_lat, "longitude": start_lon, "endTime": t})
+            in_stop = False
+            anchor_time, anchor_lat, anchor_lon = t, lat, lon
+            stabilization_start = None
+
+    open_candidate = None
+    if in_stop:
+        last_time, _, _ = positions[-1]
+        open_candidate = {"startTime": start_time, "latitude": start_lat, "longitude": start_lon, "currentTime": last_time}
+
+    return events, open_candidate
+
+
+def detect_truck_stops(
+    positions: list[tuple],
+    radius_meters: float = TRUCK_STOP_RADIUS_METERS_DEFAULT,
+    stabilization_minutes: float = TRUCK_STOP_STABILIZATION_MINUTES_DEFAULT,
+) -> list[dict]:
+    """`positions` : liste de (recordedAt, latitude, longitude) triée
+    chronologiquement. Retourne une liste de {startTime, latitude,
+    longitude, endTime} — un arrêt confirmé et terminé (le camion a repris
+    sa route)."""
+    events, _ = _scan_truck_stops(positions, radius_meters, stabilization_minutes)
+    return events
+
+
+def detect_truck_stop_in_progress(
+    positions: list[tuple],
+    radius_meters: float = TRUCK_STOP_RADIUS_METERS_DEFAULT,
+    stabilization_minutes: float = TRUCK_STOP_STABILIZATION_MINUTES_DEFAULT,
+) -> dict | None:
+    """Arrêt en cours, pas encore terminé (le camion est toujours dans le
+    rayon de l'ancre) — jamais persisté en base, recalculé à chaque appel.
+    Retourne {startTime, latitude, longitude, currentTime} ou None."""
+    _, open_candidate = _scan_truck_stops(positions, radius_meters, stabilization_minutes)
     return open_candidate
 
 

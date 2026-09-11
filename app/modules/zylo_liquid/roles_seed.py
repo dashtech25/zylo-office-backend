@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.zylo_liquid.permissions import (
+    ALERT_ACKNOWLEDGE,
     ALERT_MANAGE,
     ALERT_READ,
     CARRIER_READ,
@@ -75,6 +76,7 @@ from app.modules.zylo_liquid.permissions import (
     TANK_SENSOR_MAPPING_MANAGE,
     TANK_SENSOR_MAPPING_READ,
     TRUCK_READ,
+    GPS_DEVICE_READ,
     SECURITY_EQUIPMENT_READ,
     SECURITY_EQUIPMENT_MANAGE,
     STATION_SUPPLIER_READ,
@@ -141,7 +143,7 @@ _DOCUMENT_FULL_PERMISSIONS = [DOCUMENT_READ, DOCUMENT_CREATE, DOCUMENT_MANAGE, D
 # station comme une déclaration) reste réservé au responsable de station.
 # La gestion des référentiels eux-mêmes (SUPPLIER_MANAGE...) n'est accordée
 # à aucun rôle par défaut : aucune vue réseau de gestion n'existe encore.
-_APPRO_READ_PERMISSIONS = [SUPPLIER_READ, CARRIER_READ, TRUCK_READ, PURCHASE_ORDER_READ]
+_APPRO_READ_PERMISSIONS = [SUPPLIER_READ, CARRIER_READ, TRUCK_READ, GPS_DEVICE_READ, PURCHASE_ORDER_READ]
 
 # Centre administratif et opérationnel de la station — domaines Sécurité
 # (SecurityEquipment) et Fournisseurs par station (StationSupplier), tous
@@ -190,7 +192,7 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
         [
             FUEL_PRODUCT_READ, STATION_FUEL_PRODUCT_READ,
             TANK_SENSOR_MAPPING_READ, TANK_CALIBRATION_READ, HOLYKELL_ACCOUNT_READ,
-            SUPPLIER_READ, CARRIER_READ, TRUCK_READ,
+            SUPPLIER_READ, CARRIER_READ, TRUCK_READ, GPS_DEVICE_READ,
         ],
     ),
     (
@@ -212,6 +214,7 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
             DELIVERY_READ,
             LEAK_EVENT_READ,
             ALERT_READ,
+            ALERT_ACKNOWLEDGE,
             ALERT_MANAGE,
             PRICE_HISTORY_READ,
             PRICE_HISTORY_CREATE,
@@ -269,6 +272,7 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
             STATION_READ,
             TANK_READ,
             ALERT_READ,
+            ALERT_ACKNOWLEDGE,
             DELIVERY_READ,
             LEAK_EVENT_READ,
             CASH_READ,
@@ -317,7 +321,11 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
         # gérant/caissier, cf. Phase 7 §2/§4 de processus-double-sources-verite).
         "zylo_liquid_pump_attendant",
         "Pompiste",
-        [ALERT_READ, SHIFT_CASH_DECLARATION_READ, SHIFT_CASH_DECLARATION_CREATE, DECLARATION_LOCK],
+        # Refonte alertes D6 : ALERT_ACKNOWLEDGE ajouté — premier sur le
+        # terrain à constater une fuite ou un niveau bas, il doit pouvoir
+        # signaler qu'il s'en occupe sans avoir ALERT_MANAGE (résolution
+        # manuelle justifiée, réservée aux rôles de pilotage).
+        [ALERT_READ, ALERT_ACKNOWLEDGE, SHIFT_CASH_DECLARATION_READ, SHIFT_CASH_DECLARATION_CREATE, DECLARATION_LOCK],
     ),
     (
         "zylo_liquid_fleet_coordinator",

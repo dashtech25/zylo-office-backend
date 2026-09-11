@@ -36,5 +36,18 @@ class Settings(BaseSettings):
     STORAGE_S3_SECRET_KEY: str | None = None
     STORAGE_S3_REGION: str = "us-east-1"
 
+    # Sondage continu de l'API Holykell (h-smartlink.com / simulateur en dev)
+    # — Étape 2 de la refonte alertes (décision D1) : la boucle tourne DANS
+    # ce process (app/modules/zylo_liquid/telemetry_sync.py, démarrée par
+    # app/main.py), plus jamais dépendante d'un script externe lancé à la
+    # main. Vide par défaut = boucle désactivée (dev sans simulateur).
+    HOLYKELL_SYNC_BASE_URL: str | None = None
+    HOLYKELL_SYNC_INTERVAL_SEC: int = 5
+
+    # Balayage structurel (D5 — prix/mapping capteur/calibration manquants) —
+    # indépendant de Holykell, tourne toujours (contrairement au sondage
+    # ci-dessus). Intervalle long : ces états ne changent pas à la seconde.
+    STRUCTURAL_SWEEP_INTERVAL_SEC: int = 300
+
 
 settings = Settings()

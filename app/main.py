@@ -1,3 +1,6 @@
+import asyncio
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -5,11 +8,12 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import setup_logging
-from app.core.middleware import RequestIdMiddleware
+from app.core.middleware import RequestIdMiddleware, TimingMiddleware
 from app.audit.seed import seed_known_permissions as seed_audit_permissions
 from app.core.database import AsyncSessionLocal
 from app.identity.service import backfill_owner_default_permissions
 from app.modules.zylo_liquid.seed import seed_known_permissions
+from app.modules.zylo_liquid.telemetry_sync import structural_sweep_loop, sync_loop as holykell_sync_loop
 from app.modules_registry.seed import seed_known_modules
 from app.modules_registry.service import backfill_active_module_permissions_for_owners
 from app.rbac.seed import seed_known_permissions as seed_rbac_permissions
@@ -30,6 +34,14 @@ TAGS_METADATA = [
 
 app = FastAPI(title=settings.APP_NAME, openapi_tags=TAGS_METADATA)
 
+# Ordre important : TimingMiddleware doit être ajouté avant RequestIdMiddleware
+# pour s'exécuter à l'intérieur de celui-ci (Starlette empile les middlewares
+# dans l'ordre inverse de add_middleware — le dernier ajouté est le plus
+# externe). Ainsi request_id_ctx est déjà positionné par RequestIdMiddleware
+# quand TimingMiddleware journalise sa ligne "request_timing", et n'est
+# réinitialisé qu'après (dans le finally de RequestIdMiddleware, exécuté en
+# dernier).
+app.add_middleware(TimingMiddleware)
 app.add_middleware(RequestIdMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -63,6 +75,35 @@ async def on_startup() -> None:
     # ajoutées après son activation initiale du module.
     async with AsyncSessionLocal() as db:
         await backfill_active_module_permissions_for_owners(db)
+
+    # Refonte alertes Étape 2 (décision D1) : la boucle de sondage Holykell
+    # tourne dans ce process, plus jamais dépendante d'un script externe.
+    # Vide par défaut (HOLYKELL_SYNC_BASE_URL non défini) = désactivée, sans
+    # effet sur le dev local qui n'a pas de simulateur Holykell en ligne.
+    if settings.HOLYKELL_SYNC_BASE_URL:
+        app.state.holykell_sync_task = asyncio.create_task(holykell_sync_loop())
+    else:
+        app.state.holykell_sync_task = None
+        logging.getLogger("zylo_office.holykell_sync").info(
+            "HOLYKELL_SYNC_BASE_URL non défini — sondage Holykell désactivé."
+        )
+
+    # D5 (refonte alertes, incrémentation détection réelle) — prix/mapping
+    # capteur/calibration manquants : structurel, indépendant de Holykell,
+    # tourne toujours (contrairement au sondage ci-dessus).
+    app.state.structural_sweep_task = asyncio.create_task(structural_sweep_loop())
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    for attr in ("holykell_sync_task", "structural_sweep_task"):
+        task = getattr(app.state, attr, None)
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 @app.get("/")

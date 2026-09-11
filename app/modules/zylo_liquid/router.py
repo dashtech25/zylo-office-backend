@@ -1,7 +1,7 @@
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,7 @@ from app.modules.zylo_liquid.algorithms import (
 )
 from app.modules.zylo_liquid.models import FuelProduct, HolykellAccount, Station, Tank, TankSensorMapping
 from app.modules.zylo_liquid.permissions import (
+    ALERT_ACKNOWLEDGE,
     ALERT_MANAGE,
     ALERT_READ,
     CASH_READ,
@@ -58,6 +59,7 @@ from app.modules.zylo_liquid.schemas import (
     CreateManualGaugingDeclarationRequest,
     CreatePaymentRequest,
     CreatePurchaseOrderRequest,
+    GeneratePurchaseOrderDocumentRequest,
     CreateQualityCheckDeclarationRequest,
     CreateSaleRequest,
     CreateShiftCashDeclarationRequest,
@@ -66,6 +68,7 @@ from app.modules.zylo_liquid.schemas import (
     CreateSupplierRequest,
     CreateTankRequest,
     CreateTankSensorMappingRequest,
+    CreateGpsDeviceRequest,
     CreateTruckRequest,
     CreateVehicleRequest,
     AlertResponse,
@@ -100,7 +103,13 @@ from app.modules.zylo_liquid.schemas import (
     PricingPolicyResponse,
     SupplierResponse,
     TruckResponse,
+    GpsDeviceResponse,
+    IngestTruckPositionRequest,
+    TruckPositionPingResponse,
+    TruckStopEventResponse,
+    TruckCurrentPositionResponse,
     UpdateCarrierRequest,
+    UpdateGpsDeviceRequest,
     UpdateCommercialAccountRequest,
     UpdateDeliveryDeclarationRequest,
     UpdateIncidentDeclarationRequest,
@@ -186,8 +195,8 @@ async def _alert_station_scope(db: AsyncSession, organization_id: uuid.UUID, pat
     raw_id = path_params.get("alert_id")
     if raw_id is None:
         return None, None
-    _alert, tank = await service._get_alert_and_tank(db, organization_id, uuid.UUID(str(raw_id)))
-    return "station", tank.stationId
+    alert, _tank = await service._get_alert_and_tank(db, organization_id, uuid.UUID(str(raw_id)))
+    return "station", alert.stationId
 
 
 async def _delivery_station_scope(db: AsyncSession, organization_id: uuid.UUID, path_params: dict) -> tuple[str | None, uuid.UUID | None]:
@@ -247,8 +256,17 @@ async def list_fuel_products(
     organization_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ) -> Page:
+    # Cache TTL 60s : référentiel quasi statique, invalidé explicitement par
+    # create_fuel_product/update_fuel_product (service.py) — jamais périmé
+    # au-delà d'une écriture dans le même process (Phase 1 audit, pb #3).
+    cache_key = f"org:{organization_id}:limit:{pagination.limit}:offset:{pagination.offset}"
+    cached = service.fuel_product_list_cache.get(cache_key)
+    if cached is not None:
+        return cached
     stmt = select(FuelProduct).where(FuelProduct.organizationId == organization_id).order_by(FuelProduct.name)
-    return await paginate(db, stmt, pagination, FuelProductResponse)
+    page = await paginate(db, stmt, pagination, FuelProductResponse)
+    service.fuel_product_list_cache.set(cache_key, page)
+    return page
 
 
 @router.get(
@@ -806,6 +824,22 @@ async def get_alert(
     return await service.get_alert(db, organization_id, alert_id)
 
 
+@router.post(
+    "/alerts/{alert_id}/acknowledge",
+    response_model=AlertResponse,
+    dependencies=[Depends(require_permission_scoped_via(ALERT_ACKNOWLEDGE, _alert_station_scope))],
+)
+async def acknowledge_alert(
+    alert_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AlertResponse:
+    """D3 : « je m'en occupe » — ne referme jamais l'alerte (voir PATCH pour
+    la résolution manuelle, réservée aux types sans vérification auto)."""
+    return await service.acknowledge_alert(db, organization_id, current_user.id, alert_id)
+
+
 @router.patch(
     "/alerts/{alert_id}",
     response_model=AlertResponse,
@@ -818,6 +852,8 @@ async def resolve_alert(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AlertResponse:
+    """D2 : réservé aux types sans vérification automatique possible — le
+    service refuse la requête (422) pour un type auto-vérifiable."""
     return await service.resolve_alert(db, organization_id, current_user.id, alert_id, data.resolutionNote)
 
 
@@ -1124,6 +1160,119 @@ async def update_truck(
     return await service.update_truck(db, organization_id, current_user.id, truck_id, data)
 
 
+@router.post("/gps-devices", response_model=GpsDeviceResponse, status_code=201)
+async def create_gps_device(
+    data: CreateGpsDeviceRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> GpsDeviceResponse:
+    return await service.create_gps_device(db, organization_id, current_user.id, data)
+
+
+@router.get("/gps-devices", response_model=Page[GpsDeviceResponse])
+async def list_gps_devices(
+    pagination: PaginationParams = Depends(),
+    truckId: uuid.UUID | None = None,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    return await service.list_gps_devices(db, organization_id, current_user.id, pagination, truckId)
+
+
+@router.patch("/gps-devices/{gps_device_id}", response_model=GpsDeviceResponse)
+async def update_gps_device(
+    gps_device_id: uuid.UUID,
+    data: UpdateGpsDeviceRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> GpsDeviceResponse:
+    return await service.update_gps_device(db, organization_id, current_user.id, gps_device_id, data)
+
+
+@router.get("/gps-ingest-credential")
+async def get_gps_ingest_credential(
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    token = await service.get_or_create_gps_ingest_credential(db, organization_id, current_user.id)
+    return {"secretToken": token}
+
+
+@router.post("/gps-ingest-credential/regenerate")
+async def regenerate_gps_ingest_credential(
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    token = await service.regenerate_gps_ingest_credential(db, organization_id, current_user.id)
+    return {"secretToken": token}
+
+
+@router.post("/gps/ingest", response_model=TruckPositionPingResponse, status_code=201)
+async def ingest_truck_position(
+    data: IngestTruckPositionRequest,
+    x_gps_ingest_secret: str = Header(...),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TruckPositionPingResponse:
+    """Webhook appelé par Traccar (passerelle protocole GPS) — jamais un
+    utilisateur Zylo Office connecté, aucune dépendance `get_current_user`
+    ici (le routeur zylo_liquid exige tout de même X-Organization-Id pour
+    `require_module_active`, réutilisé comme défense en profondeur : le
+    secret doit correspondre à CETTE organisation précisément, pas
+    n'importe laquelle)."""
+    return await service.ingest_truck_position(db, organization_id, x_gps_ingest_secret, data)
+
+
+@router.get("/trucks/current-positions", response_model=list[TruckCurrentPositionResponse])
+async def list_truck_current_positions(
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[TruckCurrentPositionResponse]:
+    return await service.list_truck_current_positions(db, organization_id, current_user.id)
+
+
+@router.get("/trucks/{truck_id}/positions", response_model=list[TruckPositionPingResponse])
+async def list_truck_positions(
+    truck_id: uuid.UUID,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[TruckPositionPingResponse]:
+    # Les colonnes recordedAt/startAt sont TIMESTAMP WITHOUT TIME ZONE — un
+    # since/until fourni par le client (souvent suffixé "Z", donc tz-aware
+    # une fois parsé par Pydantic) doit être dépouillé de son fuseau avant
+    # toute comparaison, sinon asyncpg refuse (offset-naive vs offset-aware).
+    resolved_until = (until or datetime.now(timezone.utc)).replace(tzinfo=None)
+    resolved_since = (since.replace(tzinfo=None) if since else resolved_until - timedelta(hours=24))
+    return await service.list_truck_positions(db, organization_id, current_user.id, truck_id, resolved_since, resolved_until)
+
+
+@router.get("/trucks/{truck_id}/stops", response_model=list[TruckStopEventResponse])
+async def list_truck_stops(
+    truck_id: uuid.UUID,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[TruckStopEventResponse]:
+    # Les colonnes recordedAt/startAt sont TIMESTAMP WITHOUT TIME ZONE — un
+    # since/until fourni par le client (souvent suffixé "Z", donc tz-aware
+    # une fois parsé par Pydantic) doit être dépouillé de son fuseau avant
+    # toute comparaison, sinon asyncpg refuse (offset-naive vs offset-aware).
+    resolved_until = (until or datetime.now(timezone.utc)).replace(tzinfo=None)
+    resolved_since = (since.replace(tzinfo=None) if since else resolved_until - timedelta(hours=24))
+    return await service.list_truck_stops(db, organization_id, current_user.id, truck_id, resolved_since, resolved_until)
+
+
 @router.post("/purchase-orders", response_model=PurchaseOrderResponse, status_code=201)
 async def create_purchase_order(
     data: CreatePurchaseOrderRequest,
@@ -1153,6 +1302,17 @@ async def get_purchase_order(
     db: AsyncSession = Depends(get_db),
 ) -> PurchaseOrderResponse:
     return await service.get_purchase_order(db, organization_id, current_user.id, purchase_order_id)
+
+
+@router.post("/purchase-orders/{purchase_order_id}/generate-document", response_model=DocumentResponse, status_code=201)
+async def generate_purchase_order_document(
+    purchase_order_id: uuid.UUID,
+    data: GeneratePurchaseOrderDocumentRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> DocumentResponse:
+    return await service.generate_purchase_order_document(db, organization_id, current_user.id, purchase_order_id, data)
 
 
 @router.post("/shift-cash-declarations", response_model=ShiftCashDeclarationResponse, status_code=201)

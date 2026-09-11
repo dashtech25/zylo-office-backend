@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.zylo_liquid.permissions import (
+    ALERT_ACKNOWLEDGE,
     ALERT_MANAGE,
     ALERT_READ,
     CARRIER_READ,
@@ -212,6 +213,7 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
             DELIVERY_READ,
             LEAK_EVENT_READ,
             ALERT_READ,
+            ALERT_ACKNOWLEDGE,
             ALERT_MANAGE,
             PRICE_HISTORY_READ,
             PRICE_HISTORY_CREATE,
@@ -269,6 +271,7 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
             STATION_READ,
             TANK_READ,
             ALERT_READ,
+            ALERT_ACKNOWLEDGE,
             DELIVERY_READ,
             LEAK_EVENT_READ,
             CASH_READ,
@@ -317,7 +320,11 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
         # gérant/caissier, cf. Phase 7 §2/§4 de processus-double-sources-verite).
         "zylo_liquid_pump_attendant",
         "Pompiste",
-        [ALERT_READ, SHIFT_CASH_DECLARATION_READ, SHIFT_CASH_DECLARATION_CREATE, DECLARATION_LOCK],
+        # Refonte alertes D6 : ALERT_ACKNOWLEDGE ajouté — premier sur le
+        # terrain à constater une fuite ou un niveau bas, il doit pouvoir
+        # signaler qu'il s'en occupe sans avoir ALERT_MANAGE (résolution
+        # manuelle justifiée, réservée aux rôles de pilotage).
+        [ALERT_READ, ALERT_ACKNOWLEDGE, SHIFT_CASH_DECLARATION_READ, SHIFT_CASH_DECLARATION_CREATE, DECLARATION_LOCK],
     ),
     (
         "zylo_liquid_fleet_coordinator",

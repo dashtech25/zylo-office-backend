@@ -17,6 +17,7 @@ from app.modules.zylo_liquid.algorithms import (
 )
 from app.modules.zylo_liquid.models import FuelProduct, HolykellAccount, Station, Tank, TankSensorMapping
 from app.modules.zylo_liquid.permissions import (
+    ALERT_ACKNOWLEDGE,
     ALERT_MANAGE,
     ALERT_READ,
     CASH_READ,
@@ -58,6 +59,7 @@ from app.modules.zylo_liquid.schemas import (
     CreateManualGaugingDeclarationRequest,
     CreatePaymentRequest,
     CreatePurchaseOrderRequest,
+    GeneratePurchaseOrderDocumentRequest,
     CreateQualityCheckDeclarationRequest,
     CreateSaleRequest,
     CreateShiftCashDeclarationRequest,
@@ -186,8 +188,8 @@ async def _alert_station_scope(db: AsyncSession, organization_id: uuid.UUID, pat
     raw_id = path_params.get("alert_id")
     if raw_id is None:
         return None, None
-    _alert, tank = await service._get_alert_and_tank(db, organization_id, uuid.UUID(str(raw_id)))
-    return "station", tank.stationId
+    alert, _tank = await service._get_alert_and_tank(db, organization_id, uuid.UUID(str(raw_id)))
+    return "station", alert.stationId
 
 
 async def _delivery_station_scope(db: AsyncSession, organization_id: uuid.UUID, path_params: dict) -> tuple[str | None, uuid.UUID | None]:
@@ -806,6 +808,22 @@ async def get_alert(
     return await service.get_alert(db, organization_id, alert_id)
 
 
+@router.post(
+    "/alerts/{alert_id}/acknowledge",
+    response_model=AlertResponse,
+    dependencies=[Depends(require_permission_scoped_via(ALERT_ACKNOWLEDGE, _alert_station_scope))],
+)
+async def acknowledge_alert(
+    alert_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AlertResponse:
+    """D3 : « je m'en occupe » — ne referme jamais l'alerte (voir PATCH pour
+    la résolution manuelle, réservée aux types sans vérification auto)."""
+    return await service.acknowledge_alert(db, organization_id, current_user.id, alert_id)
+
+
 @router.patch(
     "/alerts/{alert_id}",
     response_model=AlertResponse,
@@ -818,6 +836,8 @@ async def resolve_alert(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AlertResponse:
+    """D2 : réservé aux types sans vérification automatique possible — le
+    service refuse la requête (422) pour un type auto-vérifiable."""
     return await service.resolve_alert(db, organization_id, current_user.id, alert_id, data.resolutionNote)
 
 
@@ -1153,6 +1173,17 @@ async def get_purchase_order(
     db: AsyncSession = Depends(get_db),
 ) -> PurchaseOrderResponse:
     return await service.get_purchase_order(db, organization_id, current_user.id, purchase_order_id)
+
+
+@router.post("/purchase-orders/{purchase_order_id}/generate-document", response_model=DocumentResponse, status_code=201)
+async def generate_purchase_order_document(
+    purchase_order_id: uuid.UUID,
+    data: GeneratePurchaseOrderDocumentRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> DocumentResponse:
+    return await service.generate_purchase_order_document(db, organization_id, current_user.id, purchase_order_id, data)
 
 
 @router.post("/shift-cash-declarations", response_model=ShiftCashDeclarationResponse, status_code=201)

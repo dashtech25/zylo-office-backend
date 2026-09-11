@@ -1,5 +1,6 @@
 from app.core.database import AsyncSessionLocal
 from app.modules.zylo_liquid.permissions import (
+    ALERT_ACKNOWLEDGE,
     ALERT_MANAGE,
     ALERT_READ,
     CASH_READ,
@@ -111,7 +112,8 @@ KNOWN_PERMISSIONS = [
     (DELIVERY_READ, "Consulter les livraisons détectées."),
     (LEAK_EVENT_READ, "Consulter les événements de fuite détectés."),
     (ALERT_READ, "Consulter les alertes."),
-    (ALERT_MANAGE, "Résoudre une alerte."),
+    (ALERT_ACKNOWLEDGE, "Acquitter une alerte (\"je m'en occupe\") — ne la résout pas."),
+    (ALERT_MANAGE, "Résoudre manuellement une alerte (types sans vérification automatique possible)."),
     (PRICE_HISTORY_READ, "Consulter l'historique des prix."),
     (PRICE_HISTORY_CREATE, "Enregistrer un changement réel de prix ou corriger un prix historique."),
     (CASH_READ, "Consulter la caisse (ventes estimées à partir de la télémétrie)."),

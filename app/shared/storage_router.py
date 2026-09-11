@@ -6,6 +6,7 @@ partagée", Phase 3 §1 du plan de mission). La création de `Document`
 déplacer des octets, jamais de logique métier."""
 
 import io
+import mimetypes
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
@@ -77,4 +78,10 @@ async def download_local_file(storage_reference: str, expires: int, signature: s
         content = backend.read(storage_reference)
     except StorageError:
         raise HTTPException(status_code=404, detail="Fichier introuvable.")
-    return Response(content=content, media_type="application/octet-stream")
+    # Type MIME déduit de l'extension conservée dans la référence de
+    # stockage (mission « bon de commande + aperçu/partage », 2026-09-10) —
+    # sans cela, le navigateur reçoit toujours application/octet-stream et
+    # refuse d'afficher un PDF/une image en ligne (iframe/<img>), forçant un
+    # téléchargement même quand un aperçu est demandé.
+    guessed_type, _ = mimetypes.guess_type(storage_reference)
+    return Response(content=content, media_type=guessed_type or "application/octet-stream")

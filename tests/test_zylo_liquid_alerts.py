@@ -61,8 +61,10 @@ async def _set_last_value(sensor_id: int, value: float, status: int = 1) -> None
 
 
 async def test_low_level_alert_full_scenario(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
-    """Niveau 3 — scénario complet : une mesure sous le seuil bas produit
-    une alerte, consultable et résoluble via l'API."""
+    """Niveau 3 — scénario complet (refonte alertes D2/D3) : une mesure sous
+    le seuil bas produit une alerte, consultable, acquittable (jamais
+    résoluble par clic — type auto-vérifiable), fermée automatiquement dès
+    que la mesure suivante repasse au-dessus du seuil."""
     headers = _headers(registered_user, zylo_liquid_organization)
     station_id, tank_id, sensor_id = await _create_tank_with_sensor(client, headers, zylo_liquid_organization["id"], "ALT-01")
     await _set_last_value(sensor_id, 195)  # Point 13 §13.5 : H_net=195mm, Low_alarm=200mm
@@ -71,6 +73,7 @@ async def test_low_level_alert_full_scenario(client: AsyncClient, registered_use
         created = await run_alert_evaluation_for_tank(db, uuid.UUID(tank_id))
     assert len(created) == 1
     assert created[0].type == "level_low"
+    assert created[0].severity == "high"
 
     list_res = await client.get(f"/api/v1/zylo-liquid/alerts?tankId={tank_id}", headers=headers)
     assert list_res.status_code == 200
@@ -81,14 +84,32 @@ async def test_low_level_alert_full_scenario(client: AsyncClient, registered_use
     assert alert["type"] == "level_low"
     assert alert["status"] == "active"
 
+    # D2 : "level_low" est auto-vérifiable — resolve_alert (clic déclaratif)
+    # est refusé, seule l'évaluation automatique peut refermer.
     resolve_res = await client.patch(f"/api/v1/zylo-liquid/alerts/{alert['id']}", json={"resolutionNote": "Livraison programmée"}, headers=headers)
-    assert resolve_res.status_code == 200
-    assert resolve_res.json()["status"] == "resolved"
-    assert resolve_res.json()["resolvedAt"] is not None
+    assert resolve_res.status_code == 422
+    assert resolve_res.json()["error"]["code"] == "alert_requires_automatic_verification"
 
-    already_resolved = await client.patch(f"/api/v1/zylo-liquid/alerts/{alert['id']}", json={}, headers=headers)
-    assert already_resolved.status_code == 409
-    assert already_resolved.json()["error"]["code"] == "alert_already_resolved"
+    # D3 : l'acquittement reste ouvert à un clic humain — ne referme rien.
+    ack_res = await client.post(f"/api/v1/zylo-liquid/alerts/{alert['id']}/acknowledge", headers=headers)
+    assert ack_res.status_code == 200
+    assert ack_res.json()["status"] == "acknowledged"
+    assert ack_res.json()["acknowledgedAt"] is not None
+
+    # La condition disparaît réellement (livraison reçue) — le cycle suivant
+    # referme l'alerte tout seul, resolutionMethod=auto_verified, jamais un
+    # resolvedByUserId (personne n'a cliqué "résoudre").
+    await _set_last_value(sensor_id, 1000)
+    async with AsyncSessionLocal() as db:
+        await run_alert_evaluation_for_tank(db, uuid.UUID(tank_id))
+
+    get_res = await client.get(f"/api/v1/zylo-liquid/alerts/{alert['id']}", headers=headers)
+    assert get_res.status_code == 200
+    resolved = get_res.json()
+    assert resolved["status"] == "resolved"
+    assert resolved["resolutionMethod"] == "auto_verified"
+    assert resolved["resolvedByUserId"] is None
+    assert resolved["resolvedAt"] is not None
 
 
 async def test_alert_evaluation_does_not_duplicate_active_alert(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):

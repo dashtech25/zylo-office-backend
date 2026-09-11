@@ -27,6 +27,11 @@ DELIVERY_READ = "zyloLiquid.delivery.read"
 LEAK_EVENT_READ = "zyloLiquid.leakEvent.read"
 
 ALERT_READ = "zyloLiquid.alert.read"
+# D3/D6 (refonte alertes) : acquitter ("je m'en occupe") est une action bien
+# plus légère que résoudre manuellement avec justification — ouverte à des
+# rôles opérationnels qui n'ont pas ALERT_MANAGE (le pompiste, premier à
+# constater une fuite ou un niveau bas sur le terrain, notamment).
+ALERT_ACKNOWLEDGE = "zyloLiquid.alert.acknowledge"
 ALERT_MANAGE = "zyloLiquid.alert.manage"
 
 PRICE_HISTORY_READ = "zyloLiquid.priceHistory.read"

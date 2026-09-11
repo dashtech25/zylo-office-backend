@@ -512,38 +512,84 @@ class LeakageRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Alerte (Point 2 chapitre 4, Point 13 §13.4) — modèle confirmé absent
     en Phase 1 (Point 2 §7), créé à la construction de l'endpoint 12
-    (issue #45). 5 déclencheurs distincts (niveau haut/pré-alarme/bas, eau,
-    fuite, sonde déconnectée) partagent cette table unique et son cycle de
-    vie actif/résolue (Point 2 §4.1-4.6).
+    (issue #45). Partage une table unique entre tous les déclencheurs —
+    jamais un second modèle d'alerte par famille.
 
-    Étendue (mission « flux de livraison station ») avec 3 déclencheurs de
-    rapprochement livraison — mêmes colonnes, jamais un second modèle
-    d'alerte : `delivery_discrepancy` (écart de volume déclaré/détecté hors
-    tolérance), `delivery_undeclared` (livraison détectée par télémétrie
-    sans déclaration correspondante), `delivery_declaration_pending`
-    (déclaration toujours sans détection après la fenêtre de rapprochement
-    — signal plus léger, jamais confondu avec un écart avéré)."""
+    Refonte alertes Étape 2 (2026-09) — décisions D2/D3/D4 :
+    - `stationId` toujours renseigné (portée minimale garantie même sans
+      cuve) ; `tankId`/`productId` selon le type (une cuve précise, ou un
+      produit à l'échelle de la station — ex. `price_missing`).
+    - `sourceType`/`sourceId` : référence logique vers l'entité qui a
+      réellement déclenché l'alerte (`DeliveryDetected`, `DeliveryDeclaration`,
+      `LeakageRecord`...) — jamais une FK stricte (polymorphe), pour permettre
+      un vrai diagnostic sans dupliquer un second schéma par famille.
+    - `severity` calculée par le service au moment de la création — plus
+      jamais dérivée côté frontend depuis un `Set` de types dupliqué.
+    - Cycle de vie à 3 états (`active`/`acknowledged`/`resolved`, D3) :
+      l'acquittement (qui/quand) est une déclaration d'intention humaine,
+      distincte de la résolution. La résolution elle-même distingue
+      `resolutionMethod` : `auto_verified` (le service a relu la condition
+      réelle et constaté sa disparition — `resolvedByUserId` reste NULL) vs
+      `manual_justified` (aucune vérification automatique possible pour ce
+      type, fermeture manuelle avec `resolutionNote` obligatoire et
+      `resolvedByUserId` renseigné). Un clic humain ne referme donc plus
+      jamais silencieusement une alerte pour laquelle une vérité mesurable
+      existe (Point 2 §11 de la mission alertes)."""
 
     __tablename__ = "zyloLiquidAlert"
     __table_args__ = (
         CheckConstraint(
             "type IN ('level_high','level_high_pre_alarm','level_low','water','leak','sensor_offline',"
-            "'delivery_discrepancy','delivery_undeclared','delivery_declaration_pending')",
+            "'delivery_discrepancy','delivery_undeclared','delivery_declaration_pending',"
+            "'price_missing','sensor_mapping_missing','calibration_missing')",
             name="ck_zlAlert_type",
         ),
-        CheckConstraint("status IN ('active','resolved')", name="ck_zlAlert_status"),
-        {"comment": "Alerte déclenchée automatiquement — résolution manuelle uniquement (sauf sonde déconnectée, point non tranché, Point 2 §4.6)."},
+        CheckConstraint("status IN ('active','acknowledged','resolved')", name="ck_zlAlert_status"),
+        CheckConstraint(
+            "severity IN ('critical','high','medium','low')",
+            name="ck_zlAlert_severity",
+        ),
+        CheckConstraint(
+            "\"resolutionMethod\" IS NULL OR \"resolutionMethod\" IN ('auto_verified','manual_justified')",
+            name="ck_zlAlert_resolutionMethod",
+        ),
+        {"comment": "Alerte déclenchée automatiquement — cycle de vie active/acknowledged/resolved (refonte 2026-09, voir docstring)."},
     )
 
-    tankId: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="CASCADE"), nullable=False, index=True
+    stationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tankId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    productId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidFuelProduct.id", ondelete="CASCADE"), nullable=True, index=True
     )
     type: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String(10), nullable=False, default="active", index=True)
+    severity: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="active", index=True)
+
+    # Référence logique (jamais une FK stricte — polymorphe par nature) vers
+    # l'entité qui a réellement produit l'alerte, pour permettre un
+    # diagnostic contextualisé (D4). NULL pour les types sans entité source
+    # dédiée (ex. seuils de niveau, dérivés directement de la mesure).
+    sourceType: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    sourceId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
     triggeredAt: Mapped[datetime] = mapped_column(nullable=False)
     triggeredValue: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
     thresholdValue: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
+
+    acknowledgedAt: Mapped[datetime | None] = mapped_column(nullable=True)
+    acknowledgedByUserId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+
     resolvedAt: Mapped[datetime | None] = mapped_column(nullable=True)
+    resolvedByUserId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    resolutionMethod: Mapped[str | None] = mapped_column(String(20), nullable=True)
     resolutionNote: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -894,6 +940,9 @@ class Supplier(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     contactEmail: Mapped[str | None] = mapped_column(String(255), nullable=True)
     website: Mapped[str | None] = mapped_column(String(255), nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Mission « bon de commande généré » — SIRET/RCS du fournisseur, requis
+    # par le modèle français de bon de commande, jamais inventé si absent.
+    taxId: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
 
 class Carrier(UUIDPrimaryKeyMixin, TimestampMixin, Base):

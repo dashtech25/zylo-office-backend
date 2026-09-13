@@ -104,6 +104,21 @@ from app.modules.zylo_liquid.schemas import (
     SupplierResponse,
     TruckResponse,
     GpsDeviceResponse,
+    TraccarConnectionRequest,
+    TraccarConnectionResponse,
+    TraccarDeviceListItem,
+    TruckOrderAssignmentRequest,
+    TruckOrderAssignmentResponse,
+    CreateTrackingLocationRequest,
+    UpdateTrackingLocationRequest,
+    TrackingLocationResponse,
+    TruckStopReconciliationResponse,
+    ResolveTruckStopReconciliationRequest,
+    CreateTruckStopCommentRequest,
+    UpdateTruckStopCommentRequest,
+    TruckStopCommentResponse,
+    TrackingSettingsRequest,
+    TrackingSettingsResponse,
     IngestTruckPositionRequest,
     TruckPositionPingResponse,
     TruckStopEventResponse,
@@ -797,6 +812,7 @@ async def get_leak_event(
 async def list_alerts(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
+    truckId: uuid.UUID | None = None,
     tankId: uuid.UUID | None = None,
     type: str | None = None,
     status: str | None = None,
@@ -808,7 +824,7 @@ async def list_alerts(
 ) -> Page:
     """Pas de `require_permission(ALERT_READ)` global — même principe que
     `list_stations`/`list_deliveries`/`list_leak_events`."""
-    return await service.list_alerts(db, organization_id, current_user.id, pagination, stationId, tankId, type, status, fromDate, toDate)
+    return await service.list_alerts(db, organization_id, current_user.id, pagination, stationId, tankId, type, status, fromDate, toDate, truckId)
 
 
 @router.get(
@@ -1190,6 +1206,209 @@ async def update_gps_device(
     db: AsyncSession = Depends(get_db),
 ) -> GpsDeviceResponse:
     return await service.update_gps_device(db, organization_id, current_user.id, gps_device_id, data)
+
+
+@router.post("/gps-devices/{gps_device_id}/unassign", response_model=GpsDeviceResponse)
+async def unassign_gps_device(
+    gps_device_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> GpsDeviceResponse:
+    return await service.unassign_gps_device(db, organization_id, current_user.id, gps_device_id)
+
+
+@router.get("/traccar-connection", response_model=TraccarConnectionResponse | None)
+async def get_traccar_connection(
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TraccarConnectionResponse | None:
+    return await service.get_traccar_connection(db, organization_id, current_user.id)
+
+
+@router.post("/traccar-connection", response_model=TraccarConnectionResponse)
+async def set_traccar_connection(
+    data: TraccarConnectionRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TraccarConnectionResponse:
+    return await service.set_traccar_connection(db, organization_id, current_user.id, data)
+
+
+@router.get("/gps-devices/from-traccar", response_model=list[TraccarDeviceListItem])
+async def list_traccar_devices(
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[TraccarDeviceListItem]:
+    return await service.list_traccar_devices(db, organization_id, current_user.id)
+
+
+@router.post("/tracking-locations", response_model=TrackingLocationResponse, status_code=201)
+async def create_tracking_location(
+    data: CreateTrackingLocationRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TrackingLocationResponse:
+    return await service.create_tracking_location(db, organization_id, current_user.id, data)
+
+
+@router.get("/tracking-locations", response_model=list[TrackingLocationResponse])
+async def list_tracking_locations(
+    includeDeleted: bool = False,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[TrackingLocationResponse]:
+    return await service.list_tracking_locations(db, organization_id, current_user.id, includeDeleted)
+
+
+@router.patch("/tracking-locations/{location_id}", response_model=TrackingLocationResponse)
+async def update_tracking_location(
+    location_id: uuid.UUID,
+    data: UpdateTrackingLocationRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TrackingLocationResponse:
+    return await service.update_tracking_location(db, organization_id, current_user.id, location_id, data)
+
+
+@router.delete("/tracking-locations/{location_id}", response_model=TrackingLocationResponse)
+async def delete_tracking_location(
+    location_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TrackingLocationResponse:
+    return await service.delete_tracking_location(db, organization_id, current_user.id, location_id)
+
+
+@router.get("/truck-stop-reconciliations", response_model=list[TruckStopReconciliationResponse])
+async def list_truck_stop_reconciliations(
+    status: str | None = "pending",
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[TruckStopReconciliationResponse]:
+    return await service.list_truck_stop_reconciliations(db, organization_id, current_user.id, status)
+
+
+@router.post("/truck-stop-reconciliations/{reconciliation_id}/resolve", response_model=TruckStopReconciliationResponse)
+async def resolve_truck_stop_reconciliation(
+    reconciliation_id: uuid.UUID,
+    data: ResolveTruckStopReconciliationRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TruckStopReconciliationResponse:
+    return await service.resolve_truck_stop_reconciliation(db, organization_id, current_user.id, reconciliation_id, data)
+
+
+@router.post("/truck-stops/{stop_id}/comments", response_model=TruckStopCommentResponse, status_code=201)
+async def create_truck_stop_comment(
+    stop_id: uuid.UUID,
+    data: CreateTruckStopCommentRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TruckStopCommentResponse:
+    return await service.create_truck_stop_comment(db, organization_id, current_user.id, stop_id, data)
+
+
+@router.get("/truck-stops/{stop_id}/comments", response_model=list[TruckStopCommentResponse])
+async def list_truck_stop_comments(
+    stop_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[TruckStopCommentResponse]:
+    return await service.list_truck_stop_comments(db, organization_id, current_user.id, stop_id)
+
+
+@router.patch("/truck-stop-comments/{comment_id}", response_model=TruckStopCommentResponse)
+async def update_truck_stop_comment(
+    comment_id: uuid.UUID,
+    data: UpdateTruckStopCommentRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TruckStopCommentResponse:
+    return await service.update_truck_stop_comment(db, organization_id, current_user.id, comment_id, data)
+
+
+@router.delete("/truck-stop-comments/{comment_id}", status_code=204)
+async def delete_truck_stop_comment(
+    comment_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await service.delete_truck_stop_comment(db, organization_id, current_user.id, comment_id)
+
+
+@router.post("/purchase-orders/{purchase_order_id}/trucks", response_model=TruckOrderAssignmentResponse, status_code=201)
+async def assign_truck_to_purchase_order(
+    purchase_order_id: uuid.UUID,
+    data: TruckOrderAssignmentRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TruckOrderAssignmentResponse:
+    return await service.assign_truck_to_purchase_order(db, organization_id, current_user.id, purchase_order_id, data)
+
+
+@router.delete("/purchase-orders/{purchase_order_id}/trucks/{truck_id}", status_code=204)
+async def unassign_truck_from_purchase_order(
+    purchase_order_id: uuid.UUID,
+    truck_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await service.unassign_truck_from_purchase_order(db, organization_id, current_user.id, purchase_order_id, truck_id)
+
+
+@router.get("/purchase-orders/{purchase_order_id}/trucks", response_model=list[TruckOrderAssignmentResponse])
+async def list_trucks_for_purchase_order(
+    purchase_order_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[TruckOrderAssignmentResponse]:
+    return await service.list_trucks_for_purchase_order(db, organization_id, current_user.id, purchase_order_id)
+
+
+@router.get("/trucks/{truck_id}/orders", response_model=list[TruckOrderAssignmentResponse])
+async def list_orders_for_truck(
+    truck_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[TruckOrderAssignmentResponse]:
+    return await service.list_orders_for_truck(db, organization_id, current_user.id, truck_id)
+
+
+@router.get("/tracking-settings", response_model=TrackingSettingsResponse)
+async def get_tracking_settings(
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TrackingSettingsResponse:
+    return await service.get_tracking_settings(db, organization_id, current_user.id)
+
+
+@router.patch("/tracking-settings", response_model=TrackingSettingsResponse)
+async def update_tracking_settings(
+    data: TrackingSettingsRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TrackingSettingsResponse:
+    return await service.update_tracking_settings(db, organization_id, current_user.id, data)
 
 
 @router.get("/gps-ingest-credential")

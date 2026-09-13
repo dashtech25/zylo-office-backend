@@ -18,6 +18,14 @@ engine = create_async_engine(
     echo=settings.ENVIRONMENT == "development",
     pool_size=20,
     max_overflow=20,
+    # pool_pre_ping (2026-09-13) — Neon (et tout Postgres géré derrière un
+    # pooler) peut fermer une connexion inactive en silence ; sans ceci,
+    # SQLAlchemy réutilise la connexion morte et la requête reste
+    # bloquée indéfiniment (jamais d'erreur, jamais de timeout) — bug vécu
+    # en direct sur /auth/login après une longue inactivité du process.
+    # Un aller-retour léger (SELECT 1) avant chaque emprunt, coût
+    # négligeable, reconnecte automatiquement si besoin.
+    pool_pre_ping=True,
 )
 
 AsyncSessionLocal = async_sessionmaker(bind=engine, expire_on_commit=False)

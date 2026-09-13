@@ -555,7 +555,7 @@ class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint(
             "type IN ('level_high','level_high_pre_alarm','level_low','water','leak','sensor_offline',"
             "'delivery_discrepancy','delivery_undeclared','delivery_declaration_pending',"
-            "'price_missing','sensor_mapping_missing','calibration_missing')",
+            "'price_missing','sensor_mapping_missing','calibration_missing','truck_stop_unqualified')",
             name="ck_zlAlert_type",
         ),
         CheckConstraint("status IN ('active','acknowledged','resolved')", name="ck_zlAlert_status"),
@@ -567,11 +567,21 @@ class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "\"resolutionMethod\" IS NULL OR \"resolutionMethod\" IN ('auto_verified','manual_justified')",
             name="ck_zlAlert_resolutionMethod",
         ),
+        # Étape 2 tracking — un camion n'est pas toujours rattaché à une
+        # station (arrêt hors lieu connu) : au moins l'un des deux doit
+        # être renseigné, jamais une alerte totalement orpheline.
+        CheckConstraint("\"stationId\" IS NOT NULL OR \"truckId\" IS NOT NULL", name="ck_zlAlert_station_or_truck"),
         {"comment": "Alerte déclenchée automatiquement — cycle de vie active/acknowledged/resolved (refonte 2026-09, voir docstring)."},
     )
 
-    stationId: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="CASCADE"), nullable=False, index=True
+    stationId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    # Étape 2 (flux métier) — alerte d'arrêt de camion hors de tout lieu
+    # connu, jamais rattachée à une station (le camion peut être n'importe
+    # où). Mutuellement complémentaire de stationId, voir CHECK ci-dessus.
+    truckId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidTruck.id", ondelete="CASCADE"), nullable=True, index=True
     )
     tankId: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="CASCADE"), nullable=True, index=True
@@ -1074,6 +1084,7 @@ class TruckStopEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "zyloLiquidTruckStopEvent"
     __table_args__ = (
         Index("ix_zlTruckStopEvent_truckId_startAt", "truckId", "startAt"),
+        CheckConstraint("\"reconciliationStatus\" IN ('none','pending','resolved')", name="ck_zlTruckStopEvent_reconciliationStatus"),
         {"comment": "Arrêt détecté d'un camion — dérivé du flux de positions, jamais un second système de vérité."},
     )
 
@@ -1082,6 +1093,11 @@ class TruckStopEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     longitude: Mapped[float] = mapped_column(Numeric(10, 7), nullable=False)
     startAt: Mapped[datetime] = mapped_column(nullable=False)
     endAt: Mapped[datetime | None] = mapped_column(nullable=True)
+    # Étape 2 (flux métier) — lieu reconnu automatiquement (ou tranché en
+    # réconciliation), NULL = arrêt non qualifié. `reconciliationStatus`
+    # distingue "jamais ambigu" (none) de "ambigu, en attente"/"tranché".
+    locationId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTruckTrackingLocation.id", ondelete="SET NULL"), nullable=True, index=True)
+    reconciliationStatus: Mapped[str] = mapped_column(String(10), nullable=False, server_default="none")
 
 
 class PurchaseOrder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -1613,3 +1629,151 @@ class RegulatoryDeclaration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     triggerIncidentId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidIncidentDeclaration.id", ondelete="SET NULL"), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="to_produce")
     reserve: Mapped[str | None] = mapped_column(Text(), nullable=True)
+
+
+# ================================================================
+# Tracking GPS des camions-citernes — étape 2 (flux métier, 2026-09) :
+# lieux nommés, historique boîtier<->camion, réconciliation, commentaires,
+# rattachement commande. Traccar garde exactement son rôle de l'étape 1
+# (passerelle protocole) — toute cette logique vit ici, jamais dans
+# Traccar (pas de géozones/rapports Traccar utilisés).
+# ================================================================
+
+
+class GpsDeviceAssignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Historique des périodes d'association boîtier<->camion — un boîtier
+    peut passer d'un camion à un autre (panne, changement de véhicule) ;
+    `GpsDevice.truckId` reste un raccourci de "l'association active
+    actuelle", mais toute requête sur une période passée doit résoudre
+    l'association via cette table, jamais via `GpsDevice.truckId` seul
+    (qui aurait déjà changé). `unassignedAt` NULL = association active."""
+
+    __tablename__ = "zyloLiquidGpsDeviceAssignment"
+    __table_args__ = (
+        Index("ix_zlGpsDeviceAssignment_gpsDeviceId_assignedAt", "gpsDeviceId", "assignedAt"),
+        Index("ix_zlGpsDeviceAssignment_truckId_assignedAt", "truckId", "assignedAt"),
+        {"comment": "Historique des périodes d'association boîtier<->camion — jamais réécrit, une réaffectation ferme la ligne active et en ouvre une nouvelle."},
+    )
+
+    gpsDeviceId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidGpsDevice.id", ondelete="CASCADE"), nullable=False, index=True)
+    truckId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTruck.id", ondelete="CASCADE"), nullable=False, index=True)
+    assignedAt: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    unassignedAt: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class TraccarConnection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Connexion à l'API Traccar de l'organisation — configurée en libre-
+    service depuis Zylo Liquid (jamais par un identifiant en dur côté
+    serveur, qui ne passerait pas à l'échelle multi-organisation). Utilisée
+    uniquement côté serveur pour appeler `POST /api/session` puis
+    `GET /api/devices` sur le Traccar de cette organisation — jamais
+    exposée au navigateur. Mot de passe stocké tel quel, même pratique que
+    `GpsIngestCredential.secretToken` (protégé par les accès base, pas de
+    chiffrement colonne dans ce projet à ce stade)."""
+
+    __tablename__ = "zyloLiquidTraccarConnection"
+    __table_args__ = (
+        UniqueConstraint("organizationId", name="uq_zlTraccarConnection_org"),
+        {"comment": "Identifiants de connexion à l'API Traccar de l'organisation — jamais exposés au navigateur."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id", ondelete="RESTRICT"), nullable=False, index=True)
+    baseUrl: Mapped[str] = mapped_column(String(255), nullable=False)
+    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    password: Mapped[str] = mapped_column(String(255), nullable=False)
+
+
+class TruckTrackingLocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Lieu nommé posé sur la carte (port, entrepôt, dépôt fournisseur) —
+    posé comme un point Google Maps (position actuelle / coordonnées /
+    recherche d'adresse), jamais une géozone dessinée. `radiusMeters` est
+    une tolérance invisible pour l'utilisateur, pas un objet à dessiner.
+    `status='deleted'` = suppression douce, appliquée dès qu'au moins un
+    `TruckStopEvent` référence ce lieu (jamais de suppression physique
+    dans ce cas — casserait l'historique déjà qualifié)."""
+
+    __tablename__ = "zyloLiquidTruckTrackingLocation"
+    __table_args__ = (
+        CheckConstraint("type IN ('port','entrepot','depot_fournisseur','libre')", name="ck_zlTruckTrackingLocation_type"),
+        CheckConstraint("status IN ('active','deleted')", name="ck_zlTruckTrackingLocation_status"),
+        {"comment": "Lieu nommé de référence pour la reconnaissance automatique d'arrêt — jamais une géozone Traccar."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id", ondelete="RESTRICT"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(150), nullable=False)
+    type: Mapped[str] = mapped_column(String(20), nullable=False, server_default="libre")
+    latitude: Mapped[float] = mapped_column(Numeric(10, 7), nullable=False)
+    longitude: Mapped[float] = mapped_column(Numeric(10, 7), nullable=False)
+    radiusMeters: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False, server_default="150")
+    status: Mapped[str] = mapped_column(String(10), nullable=False, server_default="active")
+
+
+class TruckStopReconciliation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """File de décision humaine quand un arrêt tombe dans le rayon de
+    plusieurs lieux dont les distances sont trop proches pour trancher
+    automatiquement (écart < 20 %, voir `_match_truck_stop_to_locations`).
+    `resolvedLocationId` NULL après résolution = "aucun des deux",
+    l'arrêt reste non qualifié en connaissance de cause."""
+
+    __tablename__ = "zyloLiquidTruckStopReconciliation"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending','resolved')", name="ck_zlTruckStopReconciliation_status"),
+        {"comment": "File d'arrêts ambigus (chevauchement de lieux) en attente d'un arbitrage humain."},
+    )
+
+    stopEventId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTruckStopEvent.id", ondelete="CASCADE"), nullable=False, index=True, unique=True)
+    candidateLocationIds: Mapped[list] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String(10), nullable=False, server_default="pending")
+    resolvedLocationId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTruckTrackingLocation.id", ondelete="SET NULL"), nullable=True)
+    resolvedByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True)
+    resolvedAt: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class TruckStopComment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Commentaire humain sur un arrêt — plusieurs par arrêt, modifiable et
+    supprimable (version simple assumée avec le commanditaire, pas un
+    journal append-only ici). Jamais lié automatiquement au traitement
+    d'une alerte (actions découplées)."""
+
+    __tablename__ = "zyloLiquidTruckStopComment"
+    __table_args__ = ({"comment": "Commentaire humain sur un arrêt de camion — modifiable/supprimable, plusieurs par arrêt."},)
+
+    stopEventId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTruckStopEvent.id", ondelete="CASCADE"), nullable=False, index=True)
+    authorUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class TruckOrderAssignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Rattachement optionnel camion<->commande — plusieurs-à-plusieurs
+    (plusieurs camions sur une commande, un camion sur plusieurs
+    commandes), jamais obligatoire. Portée par la commande (comme
+    `PurchaseOrder` lui-même), pas par organisation."""
+
+    __tablename__ = "zyloLiquidTruckOrderAssignment"
+    __table_args__ = (
+        UniqueConstraint("truckId", "purchaseOrderId", name="uq_zlTruckOrderAssignment_truck_order"),
+        {"comment": "Lien plusieurs-à-plusieurs camion<->commande d'approvisionnement, toujours optionnel."},
+    )
+
+    truckId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTruck.id", ondelete="CASCADE"), nullable=False, index=True)
+    purchaseOrderId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidPurchaseOrder.id", ondelete="CASCADE"), nullable=False, index=True)
+    active: Mapped[bool] = mapped_column(nullable=False, default=True)
+
+
+class TrackingSettings(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Réglages de tracking par organisation — remplace les constantes
+    réseau fixes de l'étape 1 (`TRUCK_STOP_RADIUS_METERS_DEFAULT`/
+    `TRUCK_STOP_STABILIZATION_MINUTES_DEFAULT`) par des valeurs
+    réglables ; ces constantes restent le repli si aucune ligne n'existe
+    pour l'organisation (jamais de comportement cassé par défaut)."""
+
+    __tablename__ = "zyloLiquidTrackingSettings"
+    __table_args__ = (
+        UniqueConstraint("organizationId", name="uq_zlTrackingSettings_org"),
+        {"comment": "Réglages de tracking par organisation — repli sur les constantes réseau si absent."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id", ondelete="RESTRICT"), nullable=False, index=True)
+    stopStabilizationMinutes: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
+    stopRadiusMeters: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
+    liveViewThrottleMs: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)

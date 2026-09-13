@@ -190,3 +190,16 @@ REGULATORY_DOCUMENT_ARCHIVE = "zyloLiquid.regulatoryDocument.archive"
 
 REGULATORY_DECLARATION_READ = "zyloLiquid.regulatoryDeclaration.read"
 REGULATORY_DECLARATION_MANAGE = "zyloLiquid.regulatoryDeclaration.manage"
+
+# ================================================================
+# Tracking GPS des camions-citernes — étape 2 (flux métier, 2026-09).
+# ================================================================
+
+TRACKING_LOCATION_READ = "zyloLiquid.trackingLocation.read"
+TRACKING_LOCATION_MANAGE = "zyloLiquid.trackingLocation.manage"
+
+TRUCK_ORDER_ASSIGNMENT_MANAGE = "zyloLiquid.truckOrderAssignment.manage"
+
+TRACKING_SETTINGS_MANAGE = "zyloLiquid.trackingSettings.manage"
+
+TRACCAR_CONNECTION_MANAGE = "zyloLiquid.traccarConnection.manage"

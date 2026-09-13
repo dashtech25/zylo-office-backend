@@ -52,6 +52,40 @@ RECONCILIATION_QUALITY_CHECK_WINDOW_HOURS_DEFAULT = 1.0
 TRUCK_STOP_RADIUS_METERS_DEFAULT = 150.0
 TRUCK_STOP_STABILIZATION_MINUTES_DEFAULT = 10.0
 
+# Filtre de plausibilité à l'ingestion (2026-09-13, incident réel) — un
+# boîtier/téléphone peut ponctuellement renvoyer un point aberrant (perte de
+# précision GPS, multi-trajet radio en zone urbaine dense) à des centaines de
+# mètres du reste du trajet, avec une vitesse implicite bien au-delà de ce
+# qu'un camion-citerne peut atteindre. Non filtrés, ces points créent des
+# lignes « impossibles » sur la carte (constaté en conditions réelles : 8
+# points à ~40 km/h alors que le trajet réel était une marche à 3-6 km/h).
+# Seuil large et prudent (jamais calibré sur route réelle) : mieux vaut
+# rejeter un point trop rarement qu'exclure un vrai déplacement rapide.
+TRUCK_POSITION_MAX_PLAUSIBLE_SPEED_KMH_DEFAULT = 150.0
+
+
+def is_position_plausible(
+    prev_recorded_at,
+    prev_latitude: float,
+    prev_longitude: float,
+    recorded_at,
+    latitude: float,
+    longitude: float,
+    max_speed_kmh: float = TRUCK_POSITION_MAX_PLAUSIBLE_SPEED_KMH_DEFAULT,
+) -> bool:
+    """Rejette un point dont la vitesse implicite depuis le point précédent
+    du même boîtier dépasse `max_speed_kmh` — jamais appliqué au tout premier
+    point d'un boîtier (rien à comparer, toujours plausible). Écart de temps
+    nul ou négatif entre les deux points : jamais plausible (positions
+    dupliquées/désordonnées ne doivent pas être comparées comme un
+    déplacement)."""
+    elapsed_seconds = (recorded_at - prev_recorded_at).total_seconds()
+    if elapsed_seconds <= 0:
+        return False
+    distance_meters = _haversine_distance_meters(prev_latitude, prev_longitude, latitude, longitude)
+    implied_speed_kmh = (distance_meters / elapsed_seconds) * 3.6
+    return implied_speed_kmh <= max_speed_kmh
+
 
 def interpolate_height_to_volume(calibration_points: list[tuple[float, float]], height_mm: float) -> float | None:
     """Interpolation linéaire hauteur -> volume entre les deux points de la
@@ -271,6 +305,48 @@ def detect_truck_stop_in_progress(
     Retourne {startTime, latitude, longitude, currentTime} ou None."""
     _, open_candidate = _scan_truck_stops(positions, radius_meters, stabilization_minutes)
     return open_candidate
+
+
+# Écart minimal entre la distance aux deux lieux candidats les plus
+# proches pour trancher automatiquement (scénario 5, validé avec le
+# commanditaire) — en dessous, l'arrêt part en file de réconciliation
+# humaine plutôt que d'être deviné.
+TRUCK_STOP_LOCATION_AMBIGUITY_THRESHOLD = 0.20
+
+
+def match_truck_stop_to_locations(
+    stop_latitude: float,
+    stop_longitude: float,
+    locations: list[tuple],
+) -> dict:
+    """Reconnaissance automatique d'un arrêt par rapport aux lieux nommés
+    (scénario 5) — réutilise `_haversine_distance_meters`, jamais un
+    nouvel algorithme. `locations` : liste de (id, latitude, longitude,
+    radiusMeters) des lieux actifs de l'organisation.
+
+    Retourne un de ces trois résultats :
+    - {"status": "matched", "locationId": ...} — un seul lieu dans le
+      rayon, ou le plus proche l'emporte avec un écart >= 20% sur le
+      deuxième candidat.
+    - {"status": "ambiguous", "candidateIds": [...]} — au moins deux
+      lieux dans le rayon, écart de distance < 20%, réconciliation requise.
+    - {"status": "unmatched"} — aucun lieu ne couvre cette position."""
+    candidates = [
+        (loc_id, _haversine_distance_meters(stop_latitude, stop_longitude, lat, lon))
+        for loc_id, lat, lon, radius in locations
+        if _haversine_distance_meters(stop_latitude, stop_longitude, lat, lon) <= radius
+    ]
+    if not candidates:
+        return {"status": "unmatched"}
+    if len(candidates) == 1:
+        return {"status": "matched", "locationId": candidates[0][0]}
+
+    candidates.sort(key=lambda c: c[1])
+    closest_id, closest_distance = candidates[0]
+    _, second_distance = candidates[1]
+    if second_distance == 0 or (second_distance - closest_distance) / second_distance < TRUCK_STOP_LOCATION_AMBIGUITY_THRESHOLD:
+        return {"status": "ambiguous", "candidateIds": [c[0] for c in candidates]}
+    return {"status": "matched", "locationId": closest_id}
 
 
 def compute_net_corrected_volume(

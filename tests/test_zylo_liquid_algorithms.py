@@ -14,6 +14,7 @@ from app.modules.zylo_liquid.algorithms import (
     evaluate_threshold_alarms,
     interpolate_height_to_volume,
     is_leak_detected,
+    is_position_plausible,
 )
 
 CALIBRATION_TABLE = [(0, 0), (1000, 18000), (1050, 19200), (1100, 20350), (2000, 40000)]
@@ -238,3 +239,32 @@ def test_correct_volume_to_reference_temperature_below_reference_increases_volum
     15°C doit être supérieur au volume mesuré (physiquement cohérent)."""
     v15 = correct_volume_to_reference_temperature(10000, 5, 0.00120)
     assert v15 > 10000
+
+
+def test_is_position_plausible_normal_truck_speed_accepted():
+    """~36 km/h entre les deux points (1 km en 100 secondes) : plausible
+    pour un camion-citerne."""
+    t0 = datetime(2026, 1, 1, 8, 0, 0)
+    assert is_position_plausible(t0, 4.05, 9.70, t0 + timedelta(seconds=100), 4.059, 9.70) is True
+
+
+def test_is_position_plausible_implausible_jump_rejected():
+    """Incident réel (2026-09-13) : un point à ~400 km/h implicite (saut de
+    ~330m en moins de 3 secondes) doit être rejeté."""
+    t0 = datetime(2026, 1, 1, 11, 28, 44)
+    assert is_position_plausible(t0, 4.0839392, 9.7759189, t0 + timedelta(seconds=3), 4.0821036, 9.7782765) is False
+
+
+def test_is_position_plausible_zero_or_negative_elapsed_rejected():
+    """Deux positions au même horodatage (ou désordonnées) : jamais
+    comparées comme un déplacement, toujours rejetées par prudence."""
+    t0 = datetime(2026, 1, 1, 8, 0, 0)
+    assert is_position_plausible(t0, 4.05, 9.70, t0, 4.06, 9.71) is False
+    assert is_position_plausible(t0, 4.05, 9.70, t0 - timedelta(seconds=1), 4.06, 9.71) is False
+
+
+def test_is_position_plausible_stationary_always_accepted():
+    """Position identique répétée (camion à l'arrêt) : toujours plausible,
+    quel que soit l'écart de temps."""
+    t0 = datetime(2026, 1, 1, 8, 0, 0)
+    assert is_position_plausible(t0, 4.05, 9.70, t0 + timedelta(milliseconds=1), 4.05, 9.70) is True

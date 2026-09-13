@@ -1,10 +1,14 @@
+import logging
 import secrets
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 
-from sqlalchemy import func, select
+import httpx
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.audit.service import record_audit_event
 from app.core.errors import AppError
@@ -60,6 +64,11 @@ from app.modules.zylo_liquid.permissions import (
     TRUCK_MANAGE,
     TRUCK_READ,
     GPS_DEVICE_MANAGE,
+    TRACKING_LOCATION_READ,
+    TRACKING_LOCATION_MANAGE,
+    TRUCK_ORDER_ASSIGNMENT_MANAGE,
+    TRACKING_SETTINGS_MANAGE,
+    TRACCAR_CONNECTION_MANAGE,
     GPS_DEVICE_READ,
     DELIVERY_DECLARATION_CREATE,
     DELIVERY_DECLARATION_READ,
@@ -120,10 +129,12 @@ from app.modules.zylo_liquid.algorithms import (
     detect_deliveries,
     detect_delivery_in_progress,
     detect_truck_stops,
+    match_truck_stop_to_locations,
     detect_truck_stop_in_progress,
     evaluate_threshold_alarms,
     interpolate_height_to_volume,
     is_leak_detected,
+    is_position_plausible,
 )
 from app.modules.zylo_liquid.document_generation import generate_purchase_order_docx, generate_purchase_order_pdf
 from app.modules.zylo_liquid.models import (
@@ -141,6 +152,13 @@ from app.modules.zylo_liquid.models import (
     FuelProduct,
     GpsDevice,
     GpsIngestCredential,
+    GpsDeviceAssignment,
+    TraccarConnection,
+    TruckTrackingLocation,
+    TruckStopReconciliation,
+    TruckStopComment,
+    TruckOrderAssignment,
+    TrackingSettings,
     HolykellAccount,
     HolykellDeviceRegistry,
     IncidentDeclaration,
@@ -273,6 +291,21 @@ from app.modules.zylo_liquid.schemas import (
     TankSensorMappingResponse,
     TruckResponse,
     GpsDeviceResponse,
+    TraccarConnectionRequest,
+    TraccarConnectionResponse,
+    TraccarDeviceListItem,
+    TruckOrderAssignmentRequest,
+    TruckOrderAssignmentResponse,
+    CreateTrackingLocationRequest,
+    UpdateTrackingLocationRequest,
+    TrackingLocationResponse,
+    TruckStopReconciliationResponse,
+    ResolveTruckStopReconciliationRequest,
+    CreateTruckStopCommentRequest,
+    UpdateTruckStopCommentRequest,
+    TruckStopCommentResponse,
+    TrackingSettingsRequest,
+    TrackingSettingsResponse,
     IngestTruckPositionRequest,
     TruckPositionPingResponse,
     TruckStopEventResponse,
@@ -2174,6 +2207,7 @@ def _alert_to_response(alert: Alert) -> AlertResponse:
     return AlertResponse(
         id=alert.id,
         stationId=alert.stationId,
+        truckId=alert.truckId,
         tankId=alert.tankId,
         productId=alert.productId,
         type=alert.type,
@@ -2204,6 +2238,7 @@ async def list_alerts(
     status_filter: str | None,
     from_date,
     to_date,
+    truck_id: uuid.UUID | None = None,
 ) -> Page:
     """Corrigé — filtrait auparavant uniquement par organisation, jamais par
     la portée réelle de l'utilisateur (même constat que `list_stations`,
@@ -2223,15 +2258,26 @@ async def list_alerts(
     if not sees_all and not visible_station_ids:
         raise AppError(code="permission_denied", message=f"Permission manquante : {ALERT_READ}.", status_code=403)
 
+    # Étape 2 tracking — une alerte peut désormais être rattachée à un
+    # camion (`truckId`) plutôt qu'à une station (`stationId` nullable
+    # depuis cette migration) : un INNER JOIN strict sur Station
+    # exclurait silencieusement toute alerte de camion. Jointure externe
+    # sur les deux, filtre d'organisation vérifié via l'une ou l'autre.
     stmt = (
         select(Alert)
-        .join(Station, Station.id == Alert.stationId)
-        .where(Station.organizationId == organization_id)
+        .outerjoin(Station, Station.id == Alert.stationId)
+        .outerjoin(Truck, Truck.id == Alert.truckId)
+        .where(or_(Station.organizationId == organization_id, Truck.organizationId == organization_id))
     )
     if not sees_all:
+        # Un accès scopé par station ne couvre jamais une alerte de
+        # camion (les camions ne sont pas rattachés à une station) —
+        # comportement inchangé pour ces utilisateurs.
         stmt = stmt.where(Alert.stationId.in_(visible_station_ids))
     if station_id is not None:
         stmt = stmt.where(Alert.stationId == station_id)
+    if truck_id is not None:
+        stmt = stmt.where(Alert.truckId == truck_id)
     if tank_id is not None:
         stmt = stmt.where(Alert.tankId == tank_id)
     if type_filter is not None:
@@ -2256,9 +2302,13 @@ async def _get_alert_and_tank(db: AsyncSession, organization_id: uuid.UUID, aler
     le résumé d'audit), `None` pour les types d'alerte sans cuve."""
     result = await db.execute(
         select(Alert, Tank)
-        .join(Station, Station.id == Alert.stationId)
+        # Étape 2 tracking — jointure externe sur Station, une alerte de
+        # camion (stationId NULL) ne doit jamais être exclue par un INNER
+        # JOIN strict (même correction que list_alerts ci-dessus).
+        .outerjoin(Station, Station.id == Alert.stationId)
+        .outerjoin(Truck, Truck.id == Alert.truckId)
         .outerjoin(Tank, Tank.id == Alert.tankId)
-        .where(Alert.id == alert_id, Station.organizationId == organization_id)
+        .where(Alert.id == alert_id, or_(Station.organizationId == organization_id, Truck.organizationId == organization_id))
     )
     row = result.first()
     if row is None:
@@ -4623,6 +4673,23 @@ async def _ensure_gps_device_identifier_available(db: AsyncSession, organization
         )
 
 
+async def _open_gps_device_assignment(db: AsyncSession, gps_device_id: uuid.UUID, truck_id: uuid.UUID) -> None:
+    """Ouvre une nouvelle période d'association dans l'historique — jamais
+    appelé sans avoir d'abord fermé toute période active existante pour ce
+    boîtier (voir `unassign_gps_device`), sous peine de deux lignes actives
+    simultanées pour le même boîtier."""
+    db.add(GpsDeviceAssignment(gpsDeviceId=gps_device_id, truckId=truck_id))
+
+
+async def _close_active_gps_device_assignment(db: AsyncSession, gps_device_id: uuid.UUID) -> None:
+    result = await db.execute(
+        select(GpsDeviceAssignment).where(GpsDeviceAssignment.gpsDeviceId == gps_device_id, GpsDeviceAssignment.unassignedAt.is_(None))
+    )
+    active = result.scalar_one_or_none()
+    if active is not None:
+        active.unassignedAt = datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 async def create_gps_device(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateGpsDeviceRequest) -> GpsDeviceResponse:
     await _check_org_scope(db, organization_id, actor_user_id, GPS_DEVICE_MANAGE)
     if data.truckId is not None:
@@ -4632,6 +4699,9 @@ async def create_gps_device(db: AsyncSession, organization_id: uuid.UUID, actor_
     await _ensure_gps_device_identifier_available(db, organization_id, data.deviceIdentifier)
     instance = GpsDevice(organizationId=organization_id, truckId=data.truckId, deviceIdentifier=data.deviceIdentifier, label=data.label)
     db.add(instance)
+    await db.flush()
+    if data.truckId is not None:
+        await _open_gps_device_assignment(db, instance.id, data.truckId)
     await db.commit()
     await db.refresh(instance)
     return GpsDeviceResponse.model_validate(instance)
@@ -4647,8 +4717,34 @@ async def update_gps_device(db: AsyncSession, organization_id: uuid.UUID, actor_
         truck = await db.get(Truck, updates["truckId"])
         if truck is None or truck.organizationId != organization_id:
             raise AppError(code="truck_not_found", message="Camion introuvable.", status_code=404)
+        existing_result = await db.execute(
+            select(GpsDeviceAssignment).where(GpsDeviceAssignment.truckId == updates["truckId"], GpsDeviceAssignment.unassignedAt.is_(None), GpsDeviceAssignment.gpsDeviceId != device.id)
+        )
+        if existing_result.scalar_one_or_none() is not None:
+            raise AppError(code="truck_already_has_device", message="Ce camion a déjà un boîtier GPS actif.", status_code=409)
+        if updates["truckId"] != device.truckId:
+            await _close_active_gps_device_assignment(db, device.id)
+            await _open_gps_device_assignment(db, device.id, updates["truckId"])
     for field, value in updates.items():
         setattr(device, field, value)
+    await db.commit()
+    await db.refresh(device)
+    return GpsDeviceResponse.model_validate(device)
+
+
+async def unassign_gps_device(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, gps_device_id: uuid.UUID) -> GpsDeviceResponse:
+    """Dissociation explicite d'un boîtier de son camion (scénario 2) — la
+    confirmation « êtes-vous sûr » reste une responsabilité du frontend,
+    cet appel exécute la dissociation dès qu'il est reçu. Ferme la période
+    d'association active dans l'historique ; les positions/arrêts déjà
+    enregistrés restent attribués au camion précédent pour toujours."""
+    await _check_org_scope(db, organization_id, actor_user_id, GPS_DEVICE_MANAGE)
+    device = await db.get(GpsDevice, gps_device_id)
+    if device is None or device.organizationId != organization_id:
+        raise AppError(code="gps_device_not_found", message="Boîtier GPS introuvable.", status_code=404)
+    if device.truckId is not None:
+        await _close_active_gps_device_assignment(db, device.id)
+        device.truckId = None
     await db.commit()
     await db.refresh(device)
     return GpsDeviceResponse.model_validate(device)
@@ -4706,17 +4802,45 @@ async def run_truck_stop_detection(db: AsyncSession, truck_id: uuid.UUID) -> lis
     """Exécute l'algorithme de détection d'arrêt (`detect_truck_stops`,
     jamais réimplémenté) sur les positions récentes du camion, et persiste
     les arrêts non encore connus (idempotent via déduplication sur
-    startAt) — même pattern que `run_delivery_detection_for_tank`."""
-    device = await _get_current_gps_device_for_truck(db, truck_id)
-    if device is None:
+    startAt) — même pattern que `run_delivery_detection_for_tank`.
+
+    Bornage par fenêtre d'affectation (2026-09-13, correction) — même
+    principe que `list_truck_positions` : chaque position n'est prise en
+    compte QUE dans la période où son boîtier était réellement affecté à
+    CE camion. Avant cette correction, la fonction regardait toutes les
+    positions du boîtier *actuel* du camion sur 48h sans regarder qui
+    l'avait porté pendant cette période — un arrêt pouvait donc être
+    attribué à un camion alors que le boîtier était, au même instant,
+    affecté à un autre camion (ou à aucun), après une réaffectation en
+    cours de route (scénario 2)."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    since = now - timedelta(hours=_TRUCK_STOP_LOOKBACK_HOURS)
+    # `now` ne sert qu'à sélectionner les lignes d'affectation pertinentes
+    # (une affectation ne peut pas commencer dans le futur) — jamais à
+    # plafonner les positions elles-mêmes : une affectation encore ouverte
+    # (`unassignedAt` nul) n'a AUCUNE borne haute ici, contrairement à
+    # `list_truck_positions` qui reçoit un `until` explicite de l'appelant.
+    # Plafonner au relogie serveur exclurait à tort toute position dont
+    # l'horloge (ou l'injection de test) est même de quelques secondes en
+    # avance sur ce process.
+    assignments = await _get_truck_gps_assignments_for_period(db, truck_id, since, now)
+    if not assignments:
         return []
-    since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=_TRUCK_STOP_LOOKBACK_HOURS)
-    positions_result = await db.execute(
-        select(TruckPositionPing.recordedAt, TruckPositionPing.latitude, TruckPositionPing.longitude)
-        .where(TruckPositionPing.gpsDeviceId == device.id, TruckPositionPing.recordedAt >= since)
-        .order_by(TruckPositionPing.recordedAt)
-    )
-    positions = [(recordedAt, float(lat), float(lon)) for recordedAt, lat, lon in positions_result.all()]
+    all_positions: list[tuple] = []
+    for assignment in assignments:
+        window_start = max(since, assignment.assignedAt)
+        query = select(TruckPositionPing.recordedAt, TruckPositionPing.latitude, TruckPositionPing.longitude).where(
+            TruckPositionPing.gpsDeviceId == assignment.gpsDeviceId,
+            TruckPositionPing.recordedAt >= window_start,
+        )
+        if assignment.unassignedAt is not None:
+            if window_start > assignment.unassignedAt:
+                continue
+            query = query.where(TruckPositionPing.recordedAt <= assignment.unassignedAt)
+        positions_result = await db.execute(query)
+        all_positions.extend((recordedAt, float(lat), float(lon)) for recordedAt, lat, lon in positions_result.all())
+    all_positions.sort(key=lambda p: p[0])
+    positions = all_positions
     if len(positions) < 2:
         return []
     events = detect_truck_stops(positions, TRUCK_STOP_RADIUS_METERS_DEFAULT, TRUCK_STOP_STABILIZATION_MINUTES_DEFAULT)
@@ -4737,6 +4861,16 @@ async def run_truck_stop_detection(db: AsyncSession, truck_id: uuid.UUID) -> lis
         db.add(instance)
         created.append(instance)
     if created:
+        await db.flush()
+        truck = await db.get(Truck, truck_id)
+        for instance in created:
+            # Qualification automatique (lieu connu / réconciliation / alerte
+            # d'arrêt non qualifié) — scénarios 5/6, best-effort comme le
+            # reste de la détection dérivée.
+            try:
+                await _qualify_truck_stop(db, truck.organizationId, instance)
+            except Exception:
+                pass
         await db.commit()
         for instance in created:
             await db.refresh(instance)
@@ -4764,6 +4898,31 @@ async def ingest_truck_position(db: AsyncSession, organization_id: uuid.UUID, se
     if device is None:
         raise AppError(code="gps_device_not_found", message=f"Boîtier GPS inconnu : {data.deviceIdentifier}.", status_code=404)
 
+    recorded_at = data.recordedAt.replace(tzinfo=None) if data.recordedAt.tzinfo else data.recordedAt
+
+    # Filtre de plausibilité (2026-09-13, incident réel) — rejette un point
+    # dont la vitesse implicite depuis la dernière position connue de CE
+    # boîtier est physiquement impossible pour un camion-citerne (voir
+    # `is_position_plausible`). Comparaison sur `recordedAt`, jamais
+    # `receivedAt` : deux points reçus dans le même lot après une coupure
+    # réseau peuvent avoir un `recordedAt` très différent l'un de l'autre.
+    last_ping_result = await db.execute(
+        select(TruckPositionPing.recordedAt, TruckPositionPing.latitude, TruckPositionPing.longitude)
+        .where(TruckPositionPing.gpsDeviceId == device.id)
+        .order_by(TruckPositionPing.recordedAt.desc())
+        .limit(1)
+    )
+    last_ping_row = last_ping_result.first()
+    if last_ping_row is not None and not is_position_plausible(
+        last_ping_row.recordedAt, float(last_ping_row.latitude), float(last_ping_row.longitude),
+        recorded_at, data.latitude, data.longitude,
+    ):
+        logger.warning(
+            "position rejetée (vitesse implicite irréaliste) : boîtier=%s recordedAt=%s lat=%s lon=%s",
+            data.deviceIdentifier, recorded_at, data.latitude, data.longitude,
+        )
+        raise AppError(code="implausible_position", message="Position rejetée : vitesse implicite irréaliste depuis la dernière position connue.", status_code=422)
+
     ping = TruckPositionPing(
         gpsDeviceId=device.id,
         # recordedAt est une colonne TIMESTAMP WITHOUT TIME ZONE — un
@@ -4771,7 +4930,7 @@ async def ingest_truck_position(db: AsyncSession, organization_id: uuid.UUID, se
         # explicite (ex. Traccar : "+00:00"), à dépouiller avant insertion
         # (même bug que sur les endpoints de lecture positions/arrêts,
         # trouvé et corrigé plus tôt dans cette même mission).
-        recordedAt=data.recordedAt.replace(tzinfo=None) if data.recordedAt.tzinfo else data.recordedAt,
+        recordedAt=recorded_at,
         latitude=data.latitude, longitude=data.longitude,
         channel=data.channel, accuracyMeters=data.accuracyMeters, speedKmh=data.speedKmh,
         rawPayload=data.model_dump(mode="json"),
@@ -4786,8 +4945,11 @@ async def ingest_truck_position(db: AsyncSession, organization_id: uuid.UUID, se
         except Exception:
             # Best-effort : une erreur de calcul dérivé ne doit jamais faire
             # échouer l'ingestion elle-même (même discipline que le
-            # rapprochement automatique de livraison).
-            pass
+            # rapprochement automatique de livraison) — mais désormais
+            # journalisée (2026-09-13) : une erreur silencieuse ici avait
+            # caché plusieurs heures d'arrêts manquants en conditions
+            # réelles, sans aucune trace exploitable pour diagnostiquer.
+            logger.exception("échec du calcul des arrêts (best-effort) pour le camion %s", device.truckId)
 
     return TruckPositionPingResponse.model_validate(ping)
 
@@ -4816,7 +4978,19 @@ async def list_truck_current_positions(db: AsyncSession, organization_id: uuid.U
             responses.append(TruckCurrentPositionResponse(truckId=truck_id, latitude=None, longitude=None, recordedAt=None, channel=None, currentStop=None))
             continue
 
+        # Bornée à l'affectation en cours de CE camion (2026-09-13,
+        # correction) — jamais 48h de positions du boîtier sans savoir s'il
+        # était bien sur ce camion pendant tout cet intervalle.
+        current_assignment_result = await db.execute(
+            select(GpsDeviceAssignment.assignedAt)
+            .where(GpsDeviceAssignment.truckId == truck_id, GpsDeviceAssignment.gpsDeviceId == device.id, GpsDeviceAssignment.unassignedAt.is_(None))
+            .order_by(GpsDeviceAssignment.assignedAt.desc())
+            .limit(1)
+        )
+        current_assignment_start = current_assignment_result.scalar_one_or_none()
         since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=_TRUCK_STOP_LOOKBACK_HOURS)
+        if current_assignment_start is not None:
+            since = max(since, current_assignment_start)
         recent_result = await db.execute(
             select(TruckPositionPing.recordedAt, TruckPositionPing.latitude, TruckPositionPing.longitude)
             .where(TruckPositionPing.gpsDeviceId == device.id, TruckPositionPing.recordedAt >= since)
@@ -4838,20 +5012,50 @@ async def list_truck_current_positions(db: AsyncSession, organization_id: uuid.U
     return responses
 
 
+async def _get_truck_gps_assignments_for_period(db: AsyncSession, truck_id: uuid.UUID, since: datetime, until: datetime) -> list[GpsDeviceAssignment]:
+    """Périodes d'association boîtier<->camion qui chevauchent la fenêtre
+    demandée — jamais seulement le boîtier actuel (`GpsDevice.truckId`),
+    qui aurait déjà changé après une réaffectation (scénario 2 :
+    l'historique du camion A reste consultable même après que son boîtier
+    soit passé au camion B)."""
+    result = await db.execute(
+        select(GpsDeviceAssignment).where(
+            GpsDeviceAssignment.truckId == truck_id,
+            GpsDeviceAssignment.assignedAt <= until,
+            or_(GpsDeviceAssignment.unassignedAt.is_(None), GpsDeviceAssignment.unassignedAt >= since),
+        )
+    )
+    return list(result.scalars().all())
+
+
 async def list_truck_positions(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, truck_id: uuid.UUID, since: datetime, until: datetime) -> list[TruckPositionPingResponse]:
     await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
     truck = await db.get(Truck, truck_id)
     if truck is None or truck.organizationId != organization_id:
         raise AppError(code="truck_not_found", message="Camion introuvable.", status_code=404)
-    device = await _get_current_gps_device_for_truck(db, truck_id)
-    if device is None:
+    assignments = await _get_truck_gps_assignments_for_period(db, truck_id, since, until)
+    if not assignments:
         return []
-    result = await db.execute(
-        select(TruckPositionPing)
-        .where(TruckPositionPing.gpsDeviceId == device.id, TruckPositionPing.recordedAt >= since, TruckPositionPing.recordedAt <= until)
-        .order_by(TruckPositionPing.recordedAt)
-    )
-    return [TruckPositionPingResponse.model_validate(r) for r in result.scalars().all()]
+    # Chaque position n'est retenue que dans les bornes de SA propre période
+    # d'association — jamais seulement la fenêtre demandée — pour ne
+    # jamais faire fuiter les positions d'un autre camion ayant porté le
+    # même boîtier avant/après cette période précise.
+    all_positions: list[TruckPositionPing] = []
+    for assignment in assignments:
+        window_start = max(since, assignment.assignedAt)
+        window_end = min(until, assignment.unassignedAt) if assignment.unassignedAt else until
+        if window_start > window_end:
+            continue
+        result = await db.execute(
+            select(TruckPositionPing).where(
+                TruckPositionPing.gpsDeviceId == assignment.gpsDeviceId,
+                TruckPositionPing.recordedAt >= window_start,
+                TruckPositionPing.recordedAt <= window_end,
+            )
+        )
+        all_positions.extend(result.scalars().all())
+    all_positions.sort(key=lambda p: p.recordedAt)
+    return [TruckPositionPingResponse.model_validate(r) for r in all_positions]
 
 
 async def list_truck_stops(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, truck_id: uuid.UUID, since: datetime, until: datetime) -> list[TruckStopEventResponse]:
@@ -4865,6 +5069,384 @@ async def list_truck_stops(db: AsyncSession, organization_id: uuid.UUID, actor_u
         .order_by(TruckStopEvent.startAt)
     )
     return [TruckStopEventResponse.model_validate(r) for r in result.scalars().all()]
+
+
+# ================================================================
+# Tracking GPS des camions-citernes — étape 2 (flux métier, 2026-09).
+# Traccar garde son rôle strict de passerelle protocole (voir plan) : les
+# seuls appels sortants vers son API sont `POST /api/session` (login) et
+# `GET /api/devices` (liste des boîtiers), jamais ses géozones ni ses
+# rapports trajets/arrêts propres.
+# ================================================================
+
+
+async def get_traccar_connection(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID) -> TraccarConnectionResponse | None:
+    await _check_org_scope(db, organization_id, actor_user_id, TRACCAR_CONNECTION_MANAGE)
+    result = await db.execute(select(TraccarConnection).where(TraccarConnection.organizationId == organization_id))
+    connection = result.scalar_one_or_none()
+    return TraccarConnectionResponse.model_validate(connection) if connection else None
+
+
+async def _test_traccar_login(base_url: str, username: str, password: str) -> None:
+    """Tente réellement une connexion à Traccar (`POST /api/session`) —
+    jamais une simple validation de forme de l'URL. Lève `AppError` si ça
+    échoue, avec le détail réel renvoyé par Traccar (ou l'erreur réseau),
+    jamais un message générique qui masquerait la vraie cause (mauvaise
+    adresse, mauvais port, identifiants invalides...)."""
+    try:
+        async with httpx.AsyncClient(base_url=base_url, timeout=10) as client:
+            login_response = await client.post("/api/session", data={"email": username, "password": password})
+            login_response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise AppError(
+            code="traccar_connection_failed",
+            message=f"Traccar a refusé la connexion (HTTP {exc.response.status_code}) — vérifiez l'adresse du serveur et les identifiants.",
+            status_code=502,
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise AppError(code="traccar_connection_failed", message=f"Impossible de joindre Traccar à cette adresse : {exc}", status_code=502) from exc
+
+
+async def set_traccar_connection(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: TraccarConnectionRequest) -> TraccarConnectionResponse:
+    """Teste réellement la connexion à Traccar avant toute sauvegarde
+    (scénario 1, décision du commanditaire 2026-09-13) — une configuration
+    qui ne fonctionne pas n'est jamais enregistrée, l'ancienne (si elle
+    existait et fonctionnait) reste en place."""
+    await _check_org_scope(db, organization_id, actor_user_id, TRACCAR_CONNECTION_MANAGE)
+    await _test_traccar_login(data.baseUrl, data.username, data.password)
+
+    result = await db.execute(select(TraccarConnection).where(TraccarConnection.organizationId == organization_id))
+    connection = result.scalar_one_or_none()
+    if connection is None:
+        connection = TraccarConnection(organizationId=organization_id, baseUrl=data.baseUrl, username=data.username, password=data.password)
+        db.add(connection)
+    else:
+        connection.baseUrl = data.baseUrl
+        connection.username = data.username
+        connection.password = data.password
+    await db.commit()
+    await db.refresh(connection)
+    return TraccarConnectionResponse.model_validate(connection)
+
+
+async def list_traccar_devices(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID) -> list[TraccarDeviceListItem]:
+    """Liste des boîtiers déjà enregistrés dans Traccar (scénario 1) —
+    jamais de saisie manuelle d'identifiant côté Zylo Liquid. Croise avec
+    `GpsDevice`/`Truck` pour indiquer l'association actuelle, si elle
+    existe."""
+    await _check_org_scope(db, organization_id, actor_user_id, GPS_DEVICE_READ)
+    result = await db.execute(select(TraccarConnection).where(TraccarConnection.organizationId == organization_id))
+    connection = result.scalar_one_or_none()
+    if connection is None:
+        raise AppError(
+            code="traccar_connection_not_configured",
+            message="Connexion à Traccar non configurée pour cette organisation.",
+            status_code=422,
+        )
+
+    try:
+        async with httpx.AsyncClient(base_url=connection.baseUrl, timeout=10) as client:
+            login_response = await client.post("/api/session", data={"email": connection.username, "password": connection.password})
+            login_response.raise_for_status()
+            devices_response = await client.get("/api/devices")
+            devices_response.raise_for_status()
+            traccar_devices = devices_response.json()
+    except httpx.HTTPError as exc:
+        raise AppError(code="traccar_connection_failed", message=f"Impossible de joindre Traccar : {exc}", status_code=502) from exc
+
+    known_result = await db.execute(select(GpsDevice, Truck.plateNumber).outerjoin(Truck, Truck.id == GpsDevice.truckId).where(GpsDevice.organizationId == organization_id))
+    known_by_identifier = {device.deviceIdentifier: (device, plate) for device, plate in known_result.all()}
+
+    items: list[TraccarDeviceListItem] = []
+    for raw in traccar_devices:
+        unique_id = raw.get("uniqueId")
+        if not unique_id:
+            continue
+        known = known_by_identifier.get(unique_id)
+        items.append(TraccarDeviceListItem(
+            deviceIdentifier=unique_id,
+            name=raw.get("name"),
+            online=raw.get("status") == "online",
+            lastPositionAt=raw.get("lastUpdate"),
+            truckId=known[0].truckId if known else None,
+            truckPlateNumber=known[1] if known else None,
+        ))
+    return items
+
+
+async def _ensure_tracking_location_movable(db: AsyncSession, location: TruckTrackingLocation) -> None:
+    """Règle validée avec le commanditaire (scénario 3) : un lieu jamais
+    visité (aucun `TruckStopEvent` ne le référence) peut être déplacé
+    librement ; un lieu déjà visité ne peut plus être déplacé, pour ne
+    jamais fausser rétroactivement un historique déjà qualifié."""
+    result = await db.execute(select(func.count()).select_from(TruckStopEvent).where(TruckStopEvent.locationId == location.id))
+    if (result.scalar() or 0) > 0:
+        raise AppError(
+            code="tracking_location_has_history",
+            message="Ce lieu a déjà été visité — sa position ne peut plus être déplacée. Créez un nouveau lieu si l'emplacement a changé.",
+            status_code=409,
+        )
+
+
+async def create_tracking_location(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateTrackingLocationRequest) -> TrackingLocationResponse:
+    await _check_org_scope(db, organization_id, actor_user_id, TRACKING_LOCATION_MANAGE)
+    instance = TruckTrackingLocation(
+        organizationId=organization_id, name=data.name, type=data.type,
+        latitude=data.latitude, longitude=data.longitude, radiusMeters=data.radiusMeters,
+    )
+    db.add(instance)
+    await db.commit()
+    await db.refresh(instance)
+    return TrackingLocationResponse.model_validate(instance)
+
+
+async def update_tracking_location(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, location_id: uuid.UUID, data: UpdateTrackingLocationRequest) -> TrackingLocationResponse:
+    await _check_org_scope(db, organization_id, actor_user_id, TRACKING_LOCATION_MANAGE)
+    location = await db.get(TruckTrackingLocation, location_id)
+    if location is None or location.organizationId != organization_id:
+        raise AppError(code="tracking_location_not_found", message="Lieu introuvable.", status_code=404)
+    updates = data.model_dump(exclude_unset=True)
+    if ("latitude" in updates or "longitude" in updates) and (
+        (updates.get("latitude") is not None and float(updates["latitude"]) != float(location.latitude))
+        or (updates.get("longitude") is not None and float(updates["longitude"]) != float(location.longitude))
+    ):
+        await _ensure_tracking_location_movable(db, location)
+    for field, value in updates.items():
+        setattr(location, field, value)
+    await db.commit()
+    await db.refresh(location)
+    return TrackingLocationResponse.model_validate(location)
+
+
+async def delete_tracking_location(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, location_id: uuid.UUID) -> TrackingLocationResponse:
+    """Jamais de suppression physique si le lieu a déjà été visité —
+    passage en `status='deleted'`, reste visible (grisé) dans l'historique
+    des trajets qui le référencent (scénario 3)."""
+    await _check_org_scope(db, organization_id, actor_user_id, TRACKING_LOCATION_MANAGE)
+    location = await db.get(TruckTrackingLocation, location_id)
+    if location is None or location.organizationId != organization_id:
+        raise AppError(code="tracking_location_not_found", message="Lieu introuvable.", status_code=404)
+    result = await db.execute(select(func.count()).select_from(TruckStopEvent).where(TruckStopEvent.locationId == location.id))
+    has_history = (result.scalar() or 0) > 0
+    if has_history:
+        location.status = "deleted"
+    else:
+        await db.delete(location)
+    await db.commit()
+    if has_history:
+        await db.refresh(location)
+        return TrackingLocationResponse.model_validate(location)
+    return TrackingLocationResponse(id=location_id, organizationId=organization_id, name="", type="libre", latitude=0, longitude=0, radiusMeters=0, status="deleted")
+
+
+async def list_tracking_locations(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, include_deleted: bool = False) -> list[TrackingLocationResponse]:
+    await _check_org_scope(db, organization_id, actor_user_id, TRACKING_LOCATION_READ)
+    stmt = select(TruckTrackingLocation).where(TruckTrackingLocation.organizationId == organization_id)
+    if not include_deleted:
+        stmt = stmt.where(TruckTrackingLocation.status == "active")
+    result = await db.execute(stmt.order_by(TruckTrackingLocation.name))
+    return [TrackingLocationResponse.model_validate(r) for r in result.scalars().all()]
+
+
+async def get_tracking_settings(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID) -> TrackingSettingsResponse:
+    await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
+    result = await db.execute(select(TrackingSettings).where(TrackingSettings.organizationId == organization_id))
+    settings_row = result.scalar_one_or_none()
+    if settings_row is None:
+        return TrackingSettingsResponse(organizationId=organization_id, stopStabilizationMinutes=None, stopRadiusMeters=None, liveViewThrottleMs=None)
+    return TrackingSettingsResponse.model_validate(settings_row)
+
+
+async def update_tracking_settings(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: TrackingSettingsRequest) -> TrackingSettingsResponse:
+    await _check_org_scope(db, organization_id, actor_user_id, TRACKING_SETTINGS_MANAGE)
+    result = await db.execute(select(TrackingSettings).where(TrackingSettings.organizationId == organization_id))
+    settings_row = result.scalar_one_or_none()
+    updates = data.model_dump(exclude_unset=True)
+    if settings_row is None:
+        settings_row = TrackingSettings(organizationId=organization_id, **updates)
+        db.add(settings_row)
+    else:
+        for field, value in updates.items():
+            setattr(settings_row, field, value)
+    await db.commit()
+    await db.refresh(settings_row)
+    return TrackingSettingsResponse.model_validate(settings_row)
+
+
+async def _qualify_truck_stop(db: AsyncSession, organization_id: uuid.UUID, stop: TruckStopEvent) -> None:
+    """Reconnaissance automatique de lieu + alerte d'arrêt non qualifié
+    (scénarios 5/6) — appelé juste après la persistance d'un nouvel arrêt
+    confirmé, jamais rétroactivement sur les arrêts déjà qualifiés."""
+    locations_result = await db.execute(
+        select(TruckTrackingLocation.id, TruckTrackingLocation.latitude, TruckTrackingLocation.longitude, TruckTrackingLocation.radiusMeters)
+        .where(TruckTrackingLocation.organizationId == organization_id, TruckTrackingLocation.status == "active")
+    )
+    locations = [(loc_id, float(lat), float(lon), float(radius)) for loc_id, lat, lon, radius in locations_result.all()]
+    match = match_truck_stop_to_locations(float(stop.latitude), float(stop.longitude), locations) if locations else {"status": "unmatched"}
+
+    if match["status"] == "matched":
+        stop.locationId = match["locationId"]
+        stop.reconciliationStatus = "none"
+        return
+
+    if match["status"] == "ambiguous":
+        stop.reconciliationStatus = "pending"
+        db.add(TruckStopReconciliation(stopEventId=stop.id, candidateLocationIds=[str(c) for c in match["candidateIds"]]))
+        return
+
+    # unmatched : arrêt hors de tout lieu connu -> alerte immédiate
+    # (scénario 6), seuil déjà appliqué en amont par la détection d'arrêt
+    # elle-même (confirmation = seuil unique, configurable via
+    # TrackingSettings, plus de deuxième délai d'alerte séparé).
+    settings_result = await db.execute(select(TrackingSettings).where(TrackingSettings.organizationId == organization_id))
+    settings_row = settings_result.scalar_one_or_none()
+    severity = "medium"
+    alert = Alert(
+        truckId=stop.truckId, stationId=None, type="truck_stop_unqualified", severity=severity, status="active",
+        sourceType="TruckStopEvent", sourceId=stop.id, triggeredAt=stop.startAt,
+    )
+    db.add(alert)
+
+
+async def create_truck_stop_comment(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, stop_id: uuid.UUID, data: CreateTruckStopCommentRequest) -> TruckStopCommentResponse:
+    await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
+    stop = await _get_truck_stop_or_404(db, organization_id, stop_id)
+    instance = TruckStopComment(stopEventId=stop.id, authorUserId=actor_user_id, body=data.body)
+    db.add(instance)
+    await db.commit()
+    await db.refresh(instance)
+    return TruckStopCommentResponse.model_validate(instance)
+
+
+async def update_truck_stop_comment(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, comment_id: uuid.UUID, data: UpdateTruckStopCommentRequest) -> TruckStopCommentResponse:
+    comment = await db.get(TruckStopComment, comment_id)
+    if comment is None:
+        raise AppError(code="truck_stop_comment_not_found", message="Commentaire introuvable.", status_code=404)
+    stop = await _get_truck_stop_or_404(db, organization_id, comment.stopEventId)
+    await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
+    comment.body = data.body
+    await db.commit()
+    await db.refresh(comment)
+    return TruckStopCommentResponse.model_validate(comment)
+
+
+async def delete_truck_stop_comment(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, comment_id: uuid.UUID) -> None:
+    comment = await db.get(TruckStopComment, comment_id)
+    if comment is None:
+        raise AppError(code="truck_stop_comment_not_found", message="Commentaire introuvable.", status_code=404)
+    await _get_truck_stop_or_404(db, organization_id, comment.stopEventId)
+    await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
+    await db.delete(comment)
+    await db.commit()
+
+
+async def list_truck_stop_comments(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, stop_id: uuid.UUID) -> list[TruckStopCommentResponse]:
+    await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
+    await _get_truck_stop_or_404(db, organization_id, stop_id)
+    result = await db.execute(select(TruckStopComment).where(TruckStopComment.stopEventId == stop_id).order_by(TruckStopComment.createdAt))
+    return [TruckStopCommentResponse.model_validate(r) for r in result.scalars().all()]
+
+
+async def _get_truck_stop_or_404(db: AsyncSession, organization_id: uuid.UUID, stop_id: uuid.UUID) -> TruckStopEvent:
+    stop = await db.get(TruckStopEvent, stop_id)
+    if stop is None:
+        raise AppError(code="truck_stop_not_found", message="Arrêt introuvable.", status_code=404)
+    truck = await db.get(Truck, stop.truckId)
+    if truck is None or truck.organizationId != organization_id:
+        raise AppError(code="truck_stop_not_found", message="Arrêt introuvable.", status_code=404)
+    return stop
+
+
+async def list_truck_stop_reconciliations(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, status: str | None = "pending") -> list[TruckStopReconciliationResponse]:
+    await _check_org_scope(db, organization_id, actor_user_id, TRACKING_LOCATION_READ)
+    stmt = (
+        select(TruckStopReconciliation)
+        .join(TruckStopEvent, TruckStopEvent.id == TruckStopReconciliation.stopEventId)
+        .join(Truck, Truck.id == TruckStopEvent.truckId)
+        .where(Truck.organizationId == organization_id)
+    )
+    if status is not None:
+        stmt = stmt.where(TruckStopReconciliation.status == status)
+    result = await db.execute(stmt.order_by(TruckStopReconciliation.createdAt))
+    return [TruckStopReconciliationResponse.model_validate(r) for r in result.scalars().all()]
+
+
+async def resolve_truck_stop_reconciliation(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, reconciliation_id: uuid.UUID, data: ResolveTruckStopReconciliationRequest,
+) -> TruckStopReconciliationResponse:
+    await _check_org_scope(db, organization_id, actor_user_id, TRACKING_LOCATION_MANAGE)
+    reconciliation = await db.get(TruckStopReconciliation, reconciliation_id)
+    if reconciliation is None:
+        raise AppError(code="truck_stop_reconciliation_not_found", message="Réconciliation introuvable.", status_code=404)
+    stop = await _get_truck_stop_or_404(db, organization_id, reconciliation.stopEventId)
+    if data.locationId is not None and str(data.locationId) not in reconciliation.candidateLocationIds:
+        raise AppError(code="invalid_reconciliation_choice", message="Ce lieu ne fait pas partie des candidats proposés.", status_code=422)
+    reconciliation.status = "resolved"
+    reconciliation.resolvedLocationId = data.locationId
+    reconciliation.resolvedByUserId = actor_user_id
+    reconciliation.resolvedAt = datetime.now(timezone.utc).replace(tzinfo=None)
+    stop.locationId = data.locationId
+    stop.reconciliationStatus = "resolved"
+    await db.commit()
+    await db.refresh(reconciliation)
+    return TruckStopReconciliationResponse.model_validate(reconciliation)
+
+
+async def assign_truck_to_purchase_order(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, purchase_order_id: uuid.UUID, data: TruckOrderAssignmentRequest) -> TruckOrderAssignmentResponse:
+    purchase_order = await _get_purchase_order_or_404(db, organization_id, purchase_order_id)
+    station = await db.get(Station, purchase_order.stationId)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, TRUCK_ORDER_ASSIGNMENT_MANAGE)
+    truck = await db.get(Truck, data.truckId)
+    if truck is None or truck.organizationId != organization_id:
+        raise AppError(code="truck_not_found", message="Camion introuvable.", status_code=404)
+    existing_result = await db.execute(
+        select(TruckOrderAssignment).where(TruckOrderAssignment.truckId == data.truckId, TruckOrderAssignment.purchaseOrderId == purchase_order_id)
+    )
+    existing = existing_result.scalar_one_or_none()
+    if existing is not None:
+        existing.active = True
+        await db.commit()
+        await db.refresh(existing)
+        return TruckOrderAssignmentResponse.model_validate(existing)
+    instance = TruckOrderAssignment(truckId=data.truckId, purchaseOrderId=purchase_order_id, active=True)
+    db.add(instance)
+    await db.commit()
+    await db.refresh(instance)
+    return TruckOrderAssignmentResponse.model_validate(instance)
+
+
+async def unassign_truck_from_purchase_order(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, purchase_order_id: uuid.UUID, truck_id: uuid.UUID) -> None:
+    purchase_order = await _get_purchase_order_or_404(db, organization_id, purchase_order_id)
+    station = await db.get(Station, purchase_order.stationId)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, TRUCK_ORDER_ASSIGNMENT_MANAGE)
+    result = await db.execute(
+        select(TruckOrderAssignment).where(TruckOrderAssignment.truckId == truck_id, TruckOrderAssignment.purchaseOrderId == purchase_order_id)
+    )
+    existing = result.scalar_one_or_none()
+    if existing is not None:
+        existing.active = False
+        await db.commit()
+
+
+async def list_trucks_for_purchase_order(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, purchase_order_id: uuid.UUID) -> list[TruckOrderAssignmentResponse]:
+    purchase_order = await _get_purchase_order_or_404(db, organization_id, purchase_order_id)
+    station = await db.get(Station, purchase_order.stationId)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, PURCHASE_ORDER_READ)
+    result = await db.execute(
+        select(TruckOrderAssignment).where(TruckOrderAssignment.purchaseOrderId == purchase_order_id, TruckOrderAssignment.active == True)  # noqa: E712
+    )
+    return [TruckOrderAssignmentResponse.model_validate(r) for r in result.scalars().all()]
+
+
+async def list_orders_for_truck(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, truck_id: uuid.UUID) -> list[TruckOrderAssignmentResponse]:
+    await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
+    truck = await db.get(Truck, truck_id)
+    if truck is None or truck.organizationId != organization_id:
+        raise AppError(code="truck_not_found", message="Camion introuvable.", status_code=404)
+    result = await db.execute(
+        select(TruckOrderAssignment).where(TruckOrderAssignment.truckId == truck_id, TruckOrderAssignment.active == True)  # noqa: E712
+    )
+    return [TruckOrderAssignmentResponse.model_validate(r) for r in result.scalars().all()]
 
 
 async def create_purchase_order(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreatePurchaseOrderRequest) -> PurchaseOrderResponse:

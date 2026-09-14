@@ -5,6 +5,11 @@ from datetime import datetime, timezone
 os.environ["DATABASE_URL"] = os.environ.get(
     "TEST_DATABASE_URL", "postgresql+asyncpg://zylo_office:zylo_office_dev@localhost:5432/zylo_office_test"
 )
+# Le throttle de `run_truck_stop_detection` (2026-09-14) suppose des
+# positions réelles espacées dans le temps — en test, des dizaines
+# d'ingestions synthétiques partent en quelques millisecondes réelles,
+# donc désactivé ici pour que chaque appel recalcule bien comme avant.
+os.environ["TRUCK_STOP_DETECTION_THROTTLE_SECONDS"] = "0"
 
 import pytest
 from alembic import command

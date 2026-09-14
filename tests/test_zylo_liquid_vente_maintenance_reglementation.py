@@ -95,8 +95,8 @@ async def test_product_sale_transaction_multi_line_computes_total(client: AsyncC
     station_id = await _create_station(client, headers, suffix)
     currency_id = await _create_currency("PS")
 
-    product1 = (await client.post("/api/v1/zylo-liquid/sellable-products", json={"name": "Huile", "unitPriceAmount": 10000, "currencyId": currency_id}, headers=headers)).json()
-    product2 = (await client.post("/api/v1/zylo-liquid/sellable-products", json={"name": "Filtre", "unitPriceAmount": 3000, "currencyId": currency_id}, headers=headers)).json()
+    product1 = (await client.post("/api/v1/zylo-liquid/sellable-products", json={"name": "Huile", "unitPriceAmount": 10000, "currencyId": currency_id, "stockQuantity": 10}, headers=headers)).json()
+    product2 = (await client.post("/api/v1/zylo-liquid/sellable-products", json={"name": "Filtre", "unitPriceAmount": 3000, "currencyId": currency_id, "stockQuantity": 10}, headers=headers)).json()
 
     res = await client.post(
         "/api/v1/zylo-liquid/product-sales",
@@ -124,7 +124,7 @@ async def test_product_sale_credit_creates_receivable_via_new_column(client: Asy
     suffix = uuid.uuid4().hex[:8]
     station_id = await _create_station(client, headers, suffix)
     currency_id = await _create_currency("PC")
-    product = (await client.post("/api/v1/zylo-liquid/sellable-products", json={"name": "Batterie", "unitPriceAmount": 45000, "currencyId": currency_id}, headers=headers)).json()
+    product = (await client.post("/api/v1/zylo-liquid/sellable-products", json={"name": "Batterie", "unitPriceAmount": 45000, "currencyId": currency_id, "stockQuantity": 5}, headers=headers)).json()
     account = (await client.post("/api/v1/zylo-liquid/commercial-accounts", json={"name": "Client Boutique", "currencyId": currency_id, "creditLimit": 500000}, headers=headers)).json()
 
     res = await client.post(
@@ -147,7 +147,7 @@ async def test_product_sale_cancel_is_status_only(client: AsyncClient, registere
     suffix = uuid.uuid4().hex[:8]
     station_id = await _create_station(client, headers, suffix)
     currency_id = await _create_currency("PX")
-    product = (await client.post("/api/v1/zylo-liquid/sellable-products", json={"name": "Ampoule", "unitPriceAmount": 1500, "currencyId": currency_id}, headers=headers)).json()
+    product = (await client.post("/api/v1/zylo-liquid/sellable-products", json={"name": "Ampoule", "unitPriceAmount": 1500, "currencyId": currency_id, "stockQuantity": 3}, headers=headers)).json()
 
     sale = (await client.post(
         "/api/v1/zylo-liquid/product-sales",
@@ -162,6 +162,88 @@ async def test_product_sale_cancel_is_status_only(client: AsyncClient, registere
 
     already = await client.post(f"/api/v1/zylo-liquid/product-sales/{sale['id']}/cancel", headers=headers)
     assert already.status_code == 409
+
+
+# ----------------------------------------------------------------
+# Bloc 4 corrigé — Stock simple (Phase 4 mission Boutique)
+# ----------------------------------------------------------------
+
+
+async def test_product_sale_decrements_stock(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
+    headers = _headers(registered_user, zylo_liquid_organization)
+    suffix = uuid.uuid4().hex[:8]
+    station_id = await _create_station(client, headers, suffix)
+    currency_id = await _create_currency("SD")
+    product = (await client.post("/api/v1/zylo-liquid/sellable-products", json={"name": "Savon", "unitPriceAmount": 500, "currencyId": currency_id, "stockQuantity": 10}, headers=headers)).json()
+
+    res = await client.post(
+        "/api/v1/zylo-liquid/product-sales",
+        json={"stationId": station_id, "eventAt": "2026-02-01T10:00:00", "currencyId": currency_id, "paymentMethod": "cash", "lines": [{"sellableProductId": product["id"], "quantity": 4, "unitPriceAmount": 500}]},
+        headers=headers,
+    )
+    assert res.status_code == 201, res.text
+
+    updated = (await client.get("/api/v1/zylo-liquid/sellable-products", headers=headers)).json()
+    row = next(p for p in updated["data"] if p["id"] == product["id"])
+    assert row["stockQuantity"] == 6
+
+
+async def test_product_sale_rejected_when_stock_insufficient(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
+    headers = _headers(registered_user, zylo_liquid_organization)
+    suffix = uuid.uuid4().hex[:8]
+    station_id = await _create_station(client, headers, suffix)
+    currency_id = await _create_currency("SI")
+    product = (await client.post("/api/v1/zylo-liquid/sellable-products", json={"name": "Chargeur", "unitPriceAmount": 2000, "currencyId": currency_id, "stockQuantity": 2}, headers=headers)).json()
+
+    res = await client.post(
+        "/api/v1/zylo-liquid/product-sales",
+        json={"stationId": station_id, "eventAt": "2026-02-01T10:00:00", "currencyId": currency_id, "paymentMethod": "cash", "lines": [{"sellableProductId": product["id"], "quantity": 3, "unitPriceAmount": 2000}]},
+        headers=headers,
+    )
+    assert res.status_code == 409, res.text
+    assert res.json()["error"]["code"] == "insufficient_stock"
+
+    # Vente refusée -> aucune conséquence, ni sur le stock ni sur une vente fantôme.
+    unchanged = (await client.get("/api/v1/zylo-liquid/sellable-products", headers=headers)).json()
+    row = next(p for p in unchanged["data"] if p["id"] == product["id"])
+    assert row["stockQuantity"] == 2
+    sales = (await client.get(f"/api/v1/zylo-liquid/product-sales?stationId={station_id}", headers=headers)).json()
+    assert sales["meta"]["total"] == 0
+
+
+async def test_product_sale_cancel_restocks(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
+    headers = _headers(registered_user, zylo_liquid_organization)
+    suffix = uuid.uuid4().hex[:8]
+    station_id = await _create_station(client, headers, suffix)
+    currency_id = await _create_currency("RS")
+    product = (await client.post("/api/v1/zylo-liquid/sellable-products", json={"name": "Clé USB", "unitPriceAmount": 3000, "currencyId": currency_id, "stockQuantity": 5}, headers=headers)).json()
+
+    sale = (await client.post(
+        "/api/v1/zylo-liquid/product-sales",
+        json={"stationId": station_id, "eventAt": "2026-02-01T10:00:00", "currencyId": currency_id, "paymentMethod": "cash", "lines": [{"sellableProductId": product["id"], "quantity": 2, "unitPriceAmount": 3000}]},
+        headers=headers,
+    )).json()
+
+    after_sale = (await client.get("/api/v1/zylo-liquid/sellable-products", headers=headers)).json()
+    assert next(p for p in after_sale["data"] if p["id"] == product["id"])["stockQuantity"] == 3
+
+    cancel_res = await client.post(f"/api/v1/zylo-liquid/product-sales/{sale['id']}/cancel", headers=headers)
+    assert cancel_res.status_code == 200, cancel_res.text
+
+    after_cancel = (await client.get("/api/v1/zylo-liquid/sellable-products", headers=headers)).json()
+    assert next(p for p in after_cancel["data"] if p["id"] == product["id"])["stockQuantity"] == 5
+
+
+async def test_sellable_product_manual_stock_adjustment(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
+    headers = _headers(registered_user, zylo_liquid_organization)
+    currency_id = await _create_currency("MA")
+    product = (await client.post("/api/v1/zylo-liquid/sellable-products", json={"name": "Bidon 5L", "unitPriceAmount": 8000, "currencyId": currency_id, "stockQuantity": 10, "lowStockThreshold": 3}, headers=headers)).json()
+    assert product["stockQuantity"] == 10
+    assert product["lowStockThreshold"] == 3
+
+    patched = await client.patch(f"/api/v1/zylo-liquid/sellable-products/{product['id']}", json={"stockQuantity": 25}, headers=headers)
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["stockQuantity"] == 25
 
 
 # ----------------------------------------------------------------

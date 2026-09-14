@@ -1858,6 +1858,8 @@ class CreateSellableProductRequest(BaseModel):
     category: str | None = Field(default=None, max_length=60)
     unitPriceAmount: float = Field(gt=0)
     currencyId: uuid.UUID
+    stockQuantity: float = Field(default=0, ge=0)
+    lowStockThreshold: float | None = Field(default=None, ge=0)
 
 
 class UpdateSellableProductRequest(BaseModel):
@@ -1867,6 +1869,8 @@ class UpdateSellableProductRequest(BaseModel):
     category: str | None = Field(default=None, max_length=60)
     unitPriceAmount: float | None = Field(default=None, gt=0)
     active: bool | None = None
+    stockQuantity: float | None = Field(default=None, ge=0)
+    lowStockThreshold: float | None = Field(default=None, ge=0)
 
 
 class SellableProductResponse(BaseModel):
@@ -1880,6 +1884,8 @@ class SellableProductResponse(BaseModel):
     unitPriceAmount: float
     currencyId: uuid.UUID
     active: bool
+    stockQuantity: float
+    lowStockThreshold: float | None
 
     model_config = {"from_attributes": True}
 

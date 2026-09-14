@@ -1436,7 +1436,8 @@ class SellableProduct(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "zyloLiquidSellableProduct"
     __table_args__ = (
         UniqueConstraint("organizationId", "barcodeValue", name="uq_zlSellableProduct_org_barcode"),
-        {"comment": "Produit vendable non-carburant (boutique) — pas de gestion de stock intégrée (hors périmètre, Phase 3 §2.2 du plan de mission)."},
+        CheckConstraint("\"stockQuantity\" >= 0", name="ck_zlSellableProduct_stock_non_negative"),
+        {"comment": "Produit vendable non-carburant (boutique) — stock simple (quantité par produit×station, sans journal de mouvements détaillé, Phase 4 mission Boutique)."},
     )
 
     organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id", ondelete="RESTRICT"), nullable=False, index=True)
@@ -1448,6 +1449,8 @@ class SellableProduct(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     unitPriceAmount: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
     currencyId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("currency.id", ondelete="RESTRICT"), nullable=False)
     active: Mapped[bool] = mapped_column(nullable=False, default=True)
+    stockQuantity: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False, default=0)
+    lowStockThreshold: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
 
 
 # ================================================================

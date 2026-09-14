@@ -1,11 +1,15 @@
+import asyncio
+import json
+import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Header
 from sqlalchemy import select
+from starlette.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import AsyncSessionLocal, get_db
 from app.core.security import get_current_user
 from app.identity.models import User
 from app.modules.zylo_liquid import service
@@ -1454,6 +1458,58 @@ async def list_truck_current_positions(
     db: AsyncSession = Depends(get_db),
 ) -> list[TruckCurrentPositionResponse]:
     return await service.list_truck_current_positions(db, organization_id, current_user.id)
+
+
+_LIVE_POSITIONS_POLL_SECONDS = 5.0
+
+
+@router.get("/trucks/live-positions")
+async def stream_truck_live_positions(
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+) -> StreamingResponse:
+    """Flux SSE (Server-Sent Events) des positions courantes des camions
+    (2026-09-14, revue d'architecture) — aucun push depuis Traccar/le pont
+    (recherche : le mécanisme d'intégration documenté et fiable de Traccar
+    est `forward.url`, pas son WebSocket `/api/socket`, pensé pour son
+    propre client web). Le seul vrai trou identifié était en aval, entre
+    ce backend et notre frontend, qui ne se rafraîchissait jamais tout
+    seul. Réexécute simplement `list_truck_current_positions` (aucune
+    nouvelle logique métier) toutes les `_LIVE_POSITIONS_POLL_SECONDS`, le
+    temps que la connexion SSE reste ouverte — une session `AsyncSessionLocal`
+    fraîche à chaque itération, jamais une session maintenue ouverte
+    pendant tout le flux (elle serait inactive le reste du temps entre
+    deux tours, exactement le bug de connexion Neon déjà rencontré une
+    fois cette session). Pas de Redis/pub-sub : un seul process backend
+    aujourd'hui, chaque connexion SSE interroge la base indépendamment —
+    à revoir seulement si plusieurs instances backend tournent un jour en
+    parallèle.
+
+    Format SSE écrit à la main (StreamingResponse brut, 2026-09-14) —
+    aussi bien le support SSE natif de FastAPI (`fastapi.sse`, bug de
+    sérialisation constaté : `ServerSentEvent` non converti en texte) que
+    `sse-starlette` (blocage constaté à la connexion avec les versions de
+    Starlette installées ici) se sont révélés peu fiables ; le format SSE
+    lui-même est trivial (`data: <json>\\n\\n`), écrire les quelques lignes
+    à la main évite ces deux dépendances fragiles."""
+    async def event_generator():
+        while True:
+            try:
+                async with AsyncSessionLocal() as db:
+                    positions = await service.list_truck_current_positions(db, organization_id, current_user.id)
+                payload = json.dumps([p.model_dump(mode="json") for p in positions])
+                yield f"data: {payload}\n\n".encode()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logging.getLogger(__name__).exception("échec du flux de positions en direct (camion)")
+            await asyncio.sleep(_LIVE_POSITIONS_POLL_SECONDS)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/trucks/{truck_id}/positions", response_model=list[TruckPositionPingResponse])

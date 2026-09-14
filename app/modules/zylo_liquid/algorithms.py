@@ -113,6 +113,40 @@ def interpolate_height_to_volume(calibration_points: list[tuple[float, float]], 
     return None  # inatteignable si les bornes ci-dessus sont correctes
 
 
+# Correction du 2026-09-14 (constat outillé, voir
+# vente-maintenant-reglementation/validation-algorithme-livraison.md) : un
+# dépotage réel fluctue presque toujours (turbulence/mousse pendant le débit,
+# phénomène documenté — les "turbulence arresters" posés sur les tubes de
+# remplissage existent justement pour l'atténuer). Avant cette correction,
+# `peak_height` suivait la valeur BRUTE instantanée et n'était comparée qu'au
+# pic MAXIMAL JAMAIS observé : un seul pic de bruit au-dessus de la vraie
+# hauteur finale "empoisonnait" durablement ce pic de référence, empêchant
+# toute confirmation de stabilisation ensuite — vérifié : dès qu'une
+# fluctuation dépassait ±5mm (la bande de stabilité elle-même), une vraie
+# livraison de 10 000 L n'était plus jamais détectée, quelle que soit la
+# durée d'attente (le pic ne redescend jamais, donc l'écart au pic ne
+# repasse jamais sous le seuil).
+#
+# Un correctif "ancre qui se réinitialise sur le point courant" a été
+# essayé et rejeté : le bruit étant indépendant d'un point à l'autre, deux
+# points consécutifs peuvent différer de plus de `stability_delta_mm` même
+# à niveau réellement stable dès que l'amplitude de fluctuation dépasse la
+# bande de stabilité — l'ancre se réinitialise alors sans arrêt et les 15
+# minutes ne s'accumulent jamais.
+#
+# Correctif retenu : à chaque nouveau point, on maintient la plus longue
+# séquence CONTIGUË se terminant au point courant dont l'écart max-min reste
+# ≤ `stability_delta_mm` (on retire des points en tête de fenêtre tant que
+# ce n'est pas le cas — comme une fenêtre glissante à taille variable). Si
+# cette séquence couvre au moins `stabilization_minutes` (par le temps, pas
+# par un nombre de points — robuste à un échantillonnage irrégulier), la
+# livraison est confirmée. Un pic ou un creux de bruit isolé ne fait que
+# raccourcir temporairement la séquence (les points avant lui sont écartés) ;
+# dès que les points suivants redeviennent plats, la séquence recommence à
+# grandir — contrairement à l'ancien pic historique qui restait bloqué pour
+# toujours.
+
+
 def _scan_deliveries(
     measurements: list[tuple],
     rise_threshold_mm: float,
@@ -126,7 +160,13 @@ def _scan_deliveries(
     `detect_delivery_in_progress` (montée en cours, pas encore stabilisée)
     — même état, même seuils, jamais deux implémentations qui pourraient
     diverger. Retourne (événements confirmés, candidat encore ouvert à la
-    fin de la fenêtre ou None)."""
+    fin de la fenêtre ou None).
+
+    La stabilisation est évaluée sur une fenêtre glissante des dernières
+    `stabilization_minutes` minutes (voir commentaire au-dessus) plutôt que
+    par rapport au pic historique jamais dépassé — robuste à la
+    turbulence/mousse réelle d'un dépotage, qui fait fluctuer la hauteur de
+    plusieurs mm sans que ce soit un vrai second pic durable."""
     if len(measurements) < 2:
         return [], None
 
@@ -134,53 +174,48 @@ def _scan_deliveries(
     baseline_time, baseline_height = measurements[0]
     in_delivery = False
     start_time = start_height = None
-    peak_height = None
-    stabilization_start = None
+    window: list[tuple] = []  # (time, height) — plus longue séquence plate se terminant au point courant
+    stabilization_window = timedelta(minutes=stabilization_minutes)
 
     for i in range(1, len(measurements)):
         t, h = measurements[i]
-        prev_t, prev_h = measurements[i - 1]
 
         if not in_delivery:
             if h - baseline_height >= rise_threshold_mm:
                 in_delivery = True
                 start_time, start_height = baseline_time, baseline_height
-                peak_height = h
-                stabilization_start = None
+                window = [(t, h)]
             elif h <= baseline_height:
                 baseline_time, baseline_height = t, h
         else:
-            if h > peak_height:
-                peak_height = h
-                stabilization_start = None
-            elif (peak_height - h) <= stability_delta_mm:
-                # Stabilisation évaluée par rapport au pic (pas seulement à
-                # la mesure précédente) : un palier proche du pic confirme
-                # la livraison ; un palier loin en dessous — ex. consommation
-                # normale après une fausse détection — ne doit jamais la
-                # confirmer (cause du bug des livraisons à volume négatif).
-                if stabilization_start is None:
-                    stabilization_start = prev_t
-                elif (t - stabilization_start) >= timedelta(minutes=stabilization_minutes):
-                    events.append(
-                        {"startTime": start_time, "startHeightMm": start_height, "endTime": t, "endHeightMm": h}
-                    )
-                    in_delivery = False
-                    baseline_time, baseline_height = t, h
-            else:
-                stabilization_start = None
-                if h < start_height:
-                    # Retombé sous le niveau de départ sans jamais s'être
-                    # stabilisé près du pic : ce n'était pas une livraison
-                    # (juste une consommation) — on abandonne le candidat
-                    # sans enregistrer d'événement.
-                    in_delivery = False
-                    baseline_time, baseline_height = t, h
+            if h < start_height:
+                # Retombé sous le niveau de départ sans jamais s'être
+                # stabilisé : ce n'était pas une livraison (juste une
+                # consommation) — on abandonne le candidat sans enregistrer
+                # d'événement.
+                in_delivery = False
+                baseline_time, baseline_height = t, h
+                window = []
+                continue
+
+            window.append((t, h))
+            window_heights = [wh for _, wh in window]
+            while len(window) > 1 and (max(window_heights) - min(window_heights)) > stability_delta_mm:
+                window.pop(0)
+                window_heights.pop(0)
+
+            if (t - window[0][0]) >= stabilization_window:
+                events.append(
+                    {"startTime": start_time, "startHeightMm": start_height, "endTime": t, "endHeightMm": h}
+                )
+                in_delivery = False
+                baseline_time, baseline_height = t, h
+                window = []
 
     open_candidate = None
     if in_delivery:
-        last_time, last_height = measurements[-1]
-        open_candidate = {"startTime": start_time, "startHeightMm": start_height, "currentTime": last_time, "currentHeightMm": last_height}
+        last_time, last_raw = measurements[-1]
+        open_candidate = {"startTime": start_time, "startHeightMm": start_height, "currentTime": last_time, "currentHeightMm": last_raw}
 
     return events, open_candidate
 

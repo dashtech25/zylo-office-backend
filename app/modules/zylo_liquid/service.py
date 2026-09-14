@@ -1,10 +1,11 @@
 import logging
+import os
 import secrets
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 
 import httpx
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -4798,6 +4799,24 @@ async def _get_current_gps_device_for_truck(db: AsyncSession, truck_id: uuid.UUI
     return result.scalar_one_or_none()
 
 
+# Throttle de `run_truck_stop_detection` (2026-09-14, revue d'architecture) —
+# sans lui, la fonction relit et rescanne jusqu'à 48h d'historique à CHAQUE
+# position ingérée (pas d'état incrémental), un coût qui grandit en
+# O(camions × pings²) et saturerait la base bien avant d'avoir une grande
+# flotte (estimation : 20-100 camions selon la fréquence d'émission). Pas
+# une solution finale (un état incrémental persisté serait mieux), mais un
+# garde-fou simple et sûr : la fonction est idempotente et fait toujours un
+# recalcul complet quand elle tourne, donc sauter des appels rapprochés ne
+# perd jamais rien, juste retarde la détection de quelques secondes.
+# Lu depuis l'environnement (pas une constante en dur) pour que la suite de
+# tests puisse le ramener à 0 (voir conftest.py) — sinon des dizaines
+# d'ingestions synthétiques envoyées en quelques millisecondes réelles ne
+# déclencheraient plus qu'un seul calcul, avant que l'« arrêt » simulé ait
+# eu le temps de s'accumuler.
+_STOP_DETECTION_THROTTLE_SECONDS = float(os.environ.get("TRUCK_STOP_DETECTION_THROTTLE_SECONDS", "30"))
+_last_stop_detection_run: dict[uuid.UUID, datetime] = {}
+
+
 async def run_truck_stop_detection(db: AsyncSession, truck_id: uuid.UUID) -> list[TruckStopEvent]:
     """Exécute l'algorithme de détection d'arrêt (`detect_truck_stops`,
     jamais réimplémenté) sur les positions récentes du camion, et persiste
@@ -4814,6 +4833,10 @@ async def run_truck_stop_detection(db: AsyncSession, truck_id: uuid.UUID) -> lis
     affecté à un autre camion (ou à aucun), après une réaffectation en
     cours de route (scénario 2)."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+    last_run = _last_stop_detection_run.get(truck_id)
+    if last_run is not None and (now - last_run).total_seconds() < _STOP_DETECTION_THROTTLE_SECONDS:
+        return []
+    _last_stop_detection_run[truck_id] = now
     since = now - timedelta(hours=_TRUCK_STOP_LOOKBACK_HOURS)
     # `now` ne sert qu'à sélectionner les lignes d'affectation pertinentes
     # (une affectation ne peut pas commencer dans le futur) — jamais à
@@ -6415,6 +6438,8 @@ async def create_sellable_product(db: AsyncSession, organization_id: uuid.UUID, 
         category=data.category,
         unitPriceAmount=data.unitPriceAmount,
         currencyId=data.currencyId,
+        stockQuantity=data.stockQuantity,
+        lowStockThreshold=data.lowStockThreshold,
     )
     db.add(product)
     try:
@@ -6514,7 +6539,22 @@ async def create_product_sale_transaction(
             )
         )
 
-    await db.commit()
+    # Stock simple (Phase 4 mission Boutique) : décrémentation atomique en
+    # SQL (jamais lecture-puis-écriture côté Python) pour rester correcte
+    # sous ventes concurrentes — la contrainte CHECK stockQuantity >= 0 est
+    # le garde-fou final si deux ventes concurrentes visent le même produit.
+    try:
+        for line in lines:
+            await db.execute(
+                update(SellableProduct)
+                .where(SellableProduct.id == line.sellableProductId)
+                .values(stockQuantity=SellableProduct.stockQuantity - line.quantity)
+                .execution_options(synchronize_session=False)
+            )
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise AppError(code="insufficient_stock", message="Stock insuffisant pour un ou plusieurs produits du panier.", status_code=409)
     await db.refresh(transaction)
     result = await db.execute(select(ProductSaleLine).where(ProductSaleLine.transactionId == transaction.id))
     transaction_lines = result.scalars().all()
@@ -6536,6 +6576,18 @@ async def cancel_product_sale_transaction(db: AsyncSession, organization_id: uui
     transaction.status = "cancelled"
     transaction.cancelledAt = datetime.now(timezone.utc).replace(tzinfo=None)
     transaction.cancelledByUserId = actor_user_id
+
+    # Symétrique de la décrémentation à la vente (stock simple, Phase 4
+    # mission Boutique) : réincrémenter chaque ligne annulée.
+    lines_result = await db.execute(select(ProductSaleLine).where(ProductSaleLine.transactionId == transaction.id))
+    for line in lines_result.scalars().all():
+        await db.execute(
+            update(SellableProduct)
+            .where(SellableProduct.id == line.sellableProductId)
+            .values(stockQuantity=SellableProduct.stockQuantity + line.quantity)
+            .execution_options(synchronize_session=False)
+        )
+
     await record_audit_event(
         db, organization_id, actor_user_id,
         action="zyloLiquid.productSaleTransaction.cancel", entity_type="ProductSaleTransaction", entity_id=transaction.id,

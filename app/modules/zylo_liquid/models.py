@@ -353,6 +353,14 @@ class Station(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # « amélioration zylo liquid », page de station.docx : champ absent avant
     # ce commit, seules les heures quotidiennes existaient).
     closedWeekdays: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Horaires personnalisés jour par jour (P2 §5.3, audit module Stations
+    # 2026-09-16) — dict clé "1".."7" (jour ISO, lundi=1) → {"open": "HH:MM",
+    # "close": "HH:MM", "closed": bool}. NULL = pas de personnalisation,
+    # openingTime/closingTime/closedWeekdays ci-dessus restent la seule
+    # source de vérité (comportement inchangé) — jamais une des deux
+    # représentations resynchronisée automatiquement vers l'autre, pour ne
+    # jamais écraser silencieusement un réglage déjà fait dans l'autre mode.
+    weeklyHours: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     email: Mapped[str | None] = mapped_column(String(200), nullable=True)

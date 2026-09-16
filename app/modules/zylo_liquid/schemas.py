@@ -139,6 +139,28 @@ def _validate_closed_weekdays(value: str | None) -> str | None:
     return ",".join(str(d) for d in sorted(days))
 
 
+class DayHours(BaseModel):
+    """Horaires d'un jour donné (P2 §5.3, audit module Stations
+    2026-09-16). `closed=True` ferme ce jour indépendamment de
+    `closedWeekdays` (les deux mécanismes ne se combinent jamais — voir
+    `weeklyHours` sur `Station`)."""
+
+    open: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    close: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    closed: bool = False
+
+
+def _validate_weekly_hours(value: dict[str, DayHours] | None) -> dict[str, DayHours] | None:
+    if value is None:
+        return None
+    if not value:
+        return None
+    invalid_keys = set(value.keys()) - {str(d) for d in range(1, 8)}
+    if invalid_keys:
+        raise ValueError("weeklyHours doit être indexé par jour ISO (\"1\"=lundi..\"7\"=dimanche).")
+    return value
+
+
 class CreateStationRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     code: str = Field(min_length=1, max_length=20)
@@ -153,6 +175,7 @@ class CreateStationRequest(BaseModel):
     closingTime: str = "22:00"
     is24h: bool = False
     closedWeekdays: str | None = Field(default=None, description="Jours de fermeture hebdomadaire, CSV de jours ISO (1=lundi..7=dimanche), ex. \"7\" ou \"6,7\". `None`/vide = ouvert tous les jours.")
+    weeklyHours: dict[str, DayHours] | None = Field(default=None, description="Horaires personnalisés par jour (clé \"1\"=lundi..\"7\"=dimanche). `None` = pas de personnalisation, openingTime/closingTime/closedWeekdays ci-dessus s'appliquent à tous les jours ouverts.")
     notes: str | None = None
     currencyOverrideId: uuid.UUID | None = Field(default=None, description="Devise spécifique à cette station si différente de la devise par défaut de l'organisation.")
     # Champs commerce/amenities — présents sur le modèle Station depuis le
@@ -170,6 +193,7 @@ class CreateStationRequest(BaseModel):
     surfaceTotaleM2: float | None = None
 
     _validate_closed_weekdays = field_validator("closedWeekdays")(_validate_closed_weekdays)
+    _validate_weekly_hours = field_validator("weeklyHours")(_validate_weekly_hours)
 
 
 class UpdateStationRequest(BaseModel):
@@ -185,6 +209,7 @@ class UpdateStationRequest(BaseModel):
     closingTime: str | None = None
     is24h: bool | None = None
     closedWeekdays: str | None = None
+    weeklyHours: dict[str, DayHours] | None = None
     notes: str | None = None
     currencyOverrideId: uuid.UUID | None = None
     exploitationType: str | None = Field(default=None, max_length=20)
@@ -198,6 +223,7 @@ class UpdateStationRequest(BaseModel):
     surfaceTotaleM2: float | None = None
 
     _validate_closed_weekdays = field_validator("closedWeekdays")(_validate_closed_weekdays)
+    _validate_weekly_hours = field_validator("weeklyHours")(_validate_weekly_hours)
 
 
 class StationResponse(BaseModel):
@@ -216,6 +242,7 @@ class StationResponse(BaseModel):
     closingTime: str
     is24h: bool
     closedWeekdays: str | None = None
+    weeklyHours: dict[str, DayHours] | None = None
     status: str = Field(description="\"active\" ou \"inactive\" — basculé par les endpoints `/deactivate` et `/reactivate`, jamais modifié via un PATCH direct.")
     integrationDate: date | None = Field(description="Date d'entrée de la station dans le réseau/l'organisation (pas la date de création de l'enregistrement).")
     notes: str | None

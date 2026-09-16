@@ -368,7 +368,7 @@ async def test_gps_device_reassignment_preserves_history_and_removes_from_live(c
     async with AsyncSessionLocal() as db:
         from sqlalchemy import select as _select
 
-        from app.modules.zylo_liquid.models import GpsDeviceAssignment
+        from app.location.models import GpsDeviceAssignment
 
         result = await db.execute(_select(GpsDeviceAssignment).where(GpsDeviceAssignment.gpsDeviceId == uuid.UUID(device["id"])).order_by(GpsDeviceAssignment.assignedAt))
         rows = result.scalars().all()

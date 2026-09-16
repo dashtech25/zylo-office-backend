@@ -19,3 +19,4 @@ Pillow==11.0.0
 python-multipart==0.0.32
 reportlab==4.2.5
 python-docx==1.1.2
+import-linter==2.15

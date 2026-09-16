@@ -13,15 +13,31 @@ from app.core.database import Base
 # Chaque module (socle ou futur) doit importer ses modèles ici pour que
 # `alembic revision --autogenerate` les détecte — l'import seul suffit, aucun
 # appel de code n'est nécessaire, l'enregistrement se fait via Base.metadata.
+from app.alerts import models as alerts_models  # noqa: F401
 from app.audit import models as audit_models  # noqa: F401
 from app.auth import models as auth_models  # noqa: F401
 from app.billing import models as billing_models  # noqa: F401
+from app.files import models as files_models  # noqa: F401
 from app.identity import models as identity_models  # noqa: F401
+from app.location import models as location_models  # noqa: F401
 from app.modules.zylo_liquid import models as zylo_liquid_models  # noqa: F401
+from app.modules.zylo_tanker import models as zylo_tanker_models  # noqa: F401
 from app.modules_registry import models as modules_registry_models  # noqa: F401
 from app.rbac import models as rbac_models  # noqa: F401
 from app.shared import geo as shared_geo_models  # noqa: F401
 from app.shared import currency as shared_currency_models  # noqa: F401
+
+# Généralisation Zylo Tanker (2026-09-16) — `app.alerts`/`app.files`/
+# `app.location`/`app.modules.zylo_tanker` manquaient ici (gap pré-existant,
+# probablement laissé par l'extraction Files/Location/Alertes hors de
+# zylo_liquid.models — Phases 1-3 de la migration monolithe modulaire,
+# voir ARCHITECTURE.md) : sans l'import de leurs modèles, `target_metadata`
+# ne les connaît pas et `alembic revision --autogenerate` échoue en triant
+# les tables par dépendances de FK (`NoReferencedTableError` sur
+# `zyloLiquidAlert`, constaté en générant la migration de ce chantier) —
+# ou pire, verrait ces tables comme "en trop" et proposerait de les
+# supprimer. Corrigé ici une bonne fois : tout futur module devra faire de
+# même (voir le commentaire au-dessus de `target_metadata`).
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

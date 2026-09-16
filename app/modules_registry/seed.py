@@ -8,4 +8,5 @@ async def seed_known_modules() -> None:
     autant : l'activation reste une décision par organisation (Phase 7)."""
     async with AsyncSessionLocal() as db:
         await get_or_create_module(db, "zylo_liquid", "Zylo Liquid", "Gestion de station-service (cuves, sondes, HK301).")
+        await get_or_create_module(db, "zylo_tanker", "Zylo Tanker", "Supervision de navires pétroliers.")
         await db.commit()

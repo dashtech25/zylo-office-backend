@@ -1,0 +1,53 @@
+name: CI
+
+# Deux garde-fous distincts, jamais fusionnés : la suite de tests vérifie
+# le comportement, import-linter vérifie que les frontières entre modules
+# (voir ARCHITECTURE.md) sont respectées. Un changement peut casser l'un
+# sans casser l'autre — les garder séparés rend la cause immédiatement
+# lisible dans les logs CI.
+
+on:
+  push:
+    branches: [main, remy]
+  pull_request:
+    branches: [main, remy]
+
+jobs:
+  architecture-boundaries:
+    name: Frontières de modules (import-linter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: lint-imports
+
+  tests:
+    name: Suite de tests (pytest)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: zylo_office
+          POSTGRES_PASSWORD: zylo_office_dev
+          POSTGRES_DB: zylo_office_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://zylo_office:zylo_office_dev@localhost:5432/zylo_office_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: alembic upgrade head
+      - run: pytest -q

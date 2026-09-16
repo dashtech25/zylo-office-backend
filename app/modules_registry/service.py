@@ -133,6 +133,10 @@ async def activate_module(
         from app.modules.zylo_liquid.roles_seed import seed_default_roles
 
         await seed_default_roles(db, organization_id)
+    elif module_code == "zylo_tanker":
+        from app.modules.zylo_tanker.roles_seed import seed_default_roles
+
+        await seed_default_roles(db, organization_id)
 
     await grant_module_permissions_to_owner(db, organization_id, module_code)
 
@@ -232,5 +236,32 @@ def require_module_active(module_code: str):
                 message=f"Le module '{module_code}' n'est pas actif pour cette organisation.",
                 status_code=403,
             )
+
+    return dependency
+
+
+def require_module_active_any(*module_codes: str):
+    """Généralisation Zylo Tanker (2026-09-16) — pour les routes réellement
+    partagées entre deux modules (ex. `app/location/router.py`, monté à la
+    fois sous `/zylo-liquid` et `/zylo-tanker` : `/gps-devices`,
+    `/tracking-locations`, `/tracking-settings`...). Ces routes sont
+    déclarées UNE SEULE FOIS en Python mais exposées sous deux préfixes —
+    impossible d'y attacher une garde `require_module_active(module_code)`
+    figée sur un seul module sans bloquer injustement l'autre préfixe.
+    Passe dès que l'UN des modules listés est actif pour l'organisation
+    (jamais les deux exigés)."""
+
+    async def dependency(
+        organization_id: uuid.UUID = Depends(get_current_organization_id),
+        db: AsyncSession = Depends(get_db),
+    ) -> None:
+        for module_code in module_codes:
+            if await is_module_active(db, organization_id, module_code):
+                return
+        raise AppError(
+            code="module_inactive",
+            message=f"Aucun des modules {', '.join(module_codes)} n'est actif pour cette organisation.",
+            status_code=403,
+        )
 
     return dependency

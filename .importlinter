@@ -1,0 +1,211 @@
+[importlinter]
+root_package = app
+
+# Phase 0 (2026-09-15) — premier contrat, valide ce qui est déjà vrai
+# aujourd'hui : zylo_liquid ne doit jamais atteindre l'intérieur
+# d'identity/rbac, seulement leurs points d'entrée publics (service.py,
+# schemas.py, models.py — ces modules exposent déjà tout via des imports
+# de haut niveau, pas de sous-package "interne" caché chez eux). Sert de
+# test que l'outil est bien câblé, avant d'ajouter les contrats plus
+# stricts des phases suivantes (files/location/alerts/holykell : aucun
+# import direct entre eux, aucun retour vers zylo_liquid).
+
+[importlinter:contract:identity-rbac-not-reachable-from-internals]
+name = zylo_liquid ne dépend jamais des détails internes d'identity/rbac
+type = forbidden
+source_modules =
+    app.modules.zylo_liquid
+forbidden_modules =
+    app.identity.security
+    app.rbac.security
+
+# Phase 1 (2026-09-15) — extraction de Files. zylo_liquid ne doit passer
+# que par app.files.service (point d'entrée public, voir sa docstring) :
+# jamais un accès direct à app.files.models, qui casserait l'isolation
+# dès qu'on voudra un jour changer le schéma de Document sans toucher à
+# zylo_liquid.
+[importlinter:contract:zylo-liquid-files-through-service-only]
+name = zylo_liquid n'accède à Files que via son service public
+type = forbidden
+source_modules =
+    app.modules.zylo_liquid
+forbidden_modules =
+    app.files.models
+# app.files.service -> app.files.models est l'encapsulation normale du
+# module Files lui-même (voir la docstring de service.py) — seule la
+# chaîne zylo_liquid -> app.files.models EN DIRECT doit être interdite,
+# pas ce chemin transitif attendu qui passerait sinon pour une violation.
+ignore_imports =
+    app.files.service -> app.files.models
+
+# Files est une capacité partagée : elle ne doit jamais dépendre du
+# domaine qui la consomme, sinon la dépendance devient circulaire dès
+# qu'un deuxième domaine (Tank, CRM) voudra l'utiliser à son tour.
+[importlinter:contract:files-never-imports-zylo-liquid]
+name = Files ne dépend jamais de zylo_liquid
+type = forbidden
+source_modules =
+    app.files
+forbidden_modules =
+    app.modules.zylo_liquid
+
+# Phase 2 (2026-09-15) — extraction de Location. Même règle d'accès que
+# Files : zylo_liquid ne lit jamais app.location.models directement.
+[importlinter:contract:zylo-liquid-location-through-service-only]
+name = zylo_liquid n'accède à Location que via son service public
+type = forbidden
+source_modules =
+    app.modules.zylo_liquid
+forbidden_modules =
+    app.location.models
+ignore_imports =
+    app.location.service -> app.location.models
+
+# Location N'EST PAS une capacité aussi découplée que Files : elle garde
+# une dépendance délibérée et documentée vers zylo_liquid (voir la
+# docstring de app/location/service.py) pour `Truck`/`TRUCK_READ` (le
+# véhicule reste un objet métier carburant). Le contrat autorise donc
+# Location -> zylo_liquid.models/permissions mais jamais Location ->
+# zylo_liquid.service/router/schemas — Location ne doit jamais dépendre de
+# la logique métier ou des routes zylo_liquid, seulement de ses types.
+#
+# Généralisation Zylo Tanker (2026-09-16) — même règle étendue
+# symétriquement à zylo_tanker (deuxième consommateur du tracking GPS
+# généralisé, voir le plan de mission) : Location a la même dépendance
+# délibérée et documentée vers `Vessel`/`VESSEL_READ`
+# (`app.modules.zylo_tanker.models`/`permissions`) que vers
+# `Truck`/`TRUCK_READ`, mais jamais vers son service/router/schemas.
+[importlinter:contract:location-never-imports-zylo-liquid-or-zylo-tanker-logic]
+name = Location ne dépend jamais de la logique/routes de zylo_liquid ou zylo_tanker, seulement de leurs types
+type = forbidden
+source_modules =
+    app.location
+forbidden_modules =
+    app.modules.zylo_liquid.service
+    app.modules.zylo_liquid.router
+    app.modules.zylo_liquid.schemas
+    app.modules.zylo_tanker.service
+    app.modules.zylo_tanker.router
+    app.modules.zylo_tanker.schemas
+
+# Phase 3 (2026-09-15) — extraction d'Alertes. Même règle d'accès que
+# Files/Location : ni zylo_liquid ni location ne lisent app.alerts.models
+# directement (zylo_liquid pour ses ~10 fonctions productrices d'alertes,
+# location pour `_qualify_truck_stop`) — seulement app.alerts.service,
+# point d'entrée public (voir sa docstring).
+[importlinter:contract:zylo-liquid-location-alerts-through-service-only]
+name = zylo_liquid et location n'accèdent à Alertes que via son service public
+type = forbidden
+source_modules =
+    app.modules.zylo_liquid
+    app.location
+forbidden_modules =
+    app.alerts.models
+ignore_imports =
+    app.alerts.service -> app.alerts.models
+
+# Alertes, comme Location, garde une dépendance délibérée et documentée
+# vers zylo_liquid : app.alerts.service a besoin de Station/Truck/Tank
+# (app.modules.zylo_liquid.models) pour ses jointures de portée
+# (list_alerts/_get_alert_and_tank) — voir la docstring de
+# app/alerts/service.py. Le contrat autorise donc Alerts ->
+# zylo_liquid.models mais jamais Alerts -> zylo_liquid.service/router/
+# schemas — Alertes ne doit jamais dépendre de la logique métier ou des
+# routes zylo_liquid, seulement de ses types.
+#
+# Généralisation Zylo Tanker (2026-09-16) — même règle étendue
+# symétriquement à zylo_tanker : app.alerts.service a la même dépendance
+# délibérée et documentée vers `Vessel` (app.modules.zylo_tanker.models,
+# jointure de portée pour l'alerte `truck_stop_unqualified` d'un navire)
+# que vers Truck, mais jamais vers son service/router/schemas.
+[importlinter:contract:alerts-never-imports-zylo-liquid-or-zylo-tanker-logic]
+name = Alertes ne dépend jamais de la logique/routes de zylo_liquid ou zylo_tanker, seulement de leurs types
+type = forbidden
+source_modules =
+    app.alerts
+forbidden_modules =
+    app.modules.zylo_liquid.service
+    app.modules.zylo_liquid.router
+    app.modules.zylo_liquid.schemas
+    app.modules.zylo_tanker.service
+    app.modules.zylo_tanker.router
+    app.modules.zylo_tanker.schemas
+
+# Contrairement à app/alerts/service.py, app/alerts/models.py n'a besoin
+# d'aucun import de zylo_liquid/location : les FK de `Alert` vers
+# station/camion/cuve/produit sont résolues par SQLAlchemy via le nom de
+# table au moment du mapper configure, pas via un import Python (même
+# mécanisme que app/location/models.py vers zyloLiquidTruck.id — voir sa
+# docstring). Un import dans models.py signalerait un vrai couplage, pas
+# la résolution FK normale.
+[importlinter:contract:alerts-models-no-zylo-liquid-location-import]
+name = app.alerts.models n'importe rien de zylo_liquid/zylo_tanker/location (FK résolues par nom de table)
+type = forbidden
+source_modules =
+    app.alerts.models
+forbidden_modules =
+    app.modules.zylo_liquid
+    app.modules.zylo_tanker
+    app.location
+
+# Phase 4 (2026-09-16) — extraction de l'intégration Holykell. Contrairement
+# à Files/Location/Alerts, Holykell n'expose qu'un seul fichier public
+# (`app.integrations.holykell.client` : login, appels HTTP, DTO
+# `HolykellSensorReading`) — pas de `models.py` séparé à protéger, donc pas
+# de contrat "accès via service uniquement" symétrique à ceux de Files/
+# Location/Alerts : il n'existe encore rien d'autre à cacher derrière. Le
+# contrat qui compte ici est le sens interdit : l'adaptateur ne doit jamais
+# connaître le domaine qu'il sert, sinon Holykell devient aussi difficile à
+# réutiliser pour un futur fournisseur de télémétrie que le code qu'il
+# remplace (voir la docstring de `app/integrations/holykell/client.py`).
+[importlinter:contract:holykell-never-imports-zylo-liquid]
+name = L'intégration Holykell (app.integrations.holykell) ne dépend jamais de zylo_liquid
+type = forbidden
+source_modules =
+    app.integrations.holykell
+forbidden_modules =
+    app.modules.zylo_liquid
+
+# Phase 6 (2026-09-16) — dernier verrou du plan de migration : les 4
+# capacités partagées ne s'importent jamais entre elles, ni directement ni
+# indirectement (`type = independence`, le type de contrat prévu pour
+# exactement ce besoin — aucun des contrats précédents ne le couvrait,
+# chacun ne protégeant qu'un sens zylo_liquid<->capacité). Aujourd'hui
+# aucune n'a de raison d'en connaître une autre (Location a cessé de
+# connaître Alerts à la Phase 5, en passant par un événement de domaine
+# plutôt qu'un import direct — la preuve que ce contrat n'est pas
+# seulement théorique). Le jour où un vrai besoin de communication directe
+# entre deux capacités apparaît, la question à se poser d'abord est
+# toujours la même que pour zylo_liquid : appel direct ou événement (voir
+# §4) — jamais un import qui contourne ce contrat sans y réfléchir.
+[importlinter:contract:capabilities-never-import-each-other]
+name = Files/Location/Alertes/Holykell ne s'importent jamais entre eux
+type = independence
+modules =
+    app.files
+    app.location
+    app.alerts
+    app.integrations.holykell
+# Faux positif transitif : chaque routeur de capacité dépend de
+# app.modules_registry.service (require_module_active, vérifie que
+# zylo_liquid est actif — rien à voir avec une capacité qui en importe
+# une autre) ; ce service Core importe à son tour, en local et
+# paresseusement (à l'intérieur d'une fonction, uniquement au moment de
+# l'activation du module), app.modules.zylo_liquid.roles_seed, qui lui
+# importe les permissions de Files/Location — un chemin qui passe par du
+# code zylo_liquid, jamais une capacité qui en atteint une autre
+# directement. Sans cet ignore, ce contrat casserait dès qu'une
+# deuxième capacité (n'importe laquelle) existe, ce qui n'a rien à voir
+# avec ce qu'il vérifie réellement.
+#
+# Généralisation Zylo Tanker (2026-09-16) — même faux positif, même cause,
+# nouveau chemin : app.alerts.router -> app.modules_registry.service (pour
+# son propre require_module_active) -> app.modules.zylo_tanker.roles_seed
+# (activation du module zylo_tanker) -> app.location.permissions (le rôle
+# par défaut zylo_tanker_operator lit GPS_DEVICE_READ/TRACKING_LOCATION_READ).
+# Découvert en lançant `lint-imports` après l'ajout de zylo_tanker.roles_seed
+# — exactement le scénario anticipé par le paragraphe ci-dessus ("dès
+# qu'une deuxième capacité existe").
+ignore_imports =
+    app.modules_registry.service -> app.modules.zylo_liquid.roles_seed
+    app.modules_registry.service -> app.modules.zylo_tanker.roles_seed

@@ -26,13 +26,9 @@ DELIVERY_READ = "zyloLiquid.delivery.read"
 
 LEAK_EVENT_READ = "zyloLiquid.leakEvent.read"
 
-ALERT_READ = "zyloLiquid.alert.read"
-# D3/D6 (refonte alertes) : acquitter ("je m'en occupe") est une action bien
-# plus légère que résoudre manuellement avec justification — ouverte à des
-# rôles opérationnels qui n'ont pas ALERT_MANAGE (le pompiste, premier à
-# constater une fuite ou un niveau bas sur le terrain, notamment).
-ALERT_ACKNOWLEDGE = "zyloLiquid.alert.acknowledge"
-ALERT_MANAGE = "zyloLiquid.alert.manage"
+# ALERT_READ / ALERT_ACKNOWLEDGE / ALERT_MANAGE — déplacées vers
+# `app/alerts/permissions.py` (2026-09-15, Phase 3), mêmes valeurs de
+# chaîne (déjà seedées en base, jamais renommées par ce déplacement).
 
 PRICE_HISTORY_READ = "zyloLiquid.priceHistory.read"
 # La correction (PATCH) exige la même permission que la création (POST) —
@@ -85,11 +81,9 @@ RECEIVABLE_MANAGE = "zyloLiquid.receivable.manage"
 PAYMENT_READ = "zyloLiquid.payment.read"
 PAYMENT_CREATE = "zyloLiquid.payment.create"
 
-# Modèle documentaire (Phase 5 §6) — portée organisation entière : un
-# document peut être lié à des entités de nature différente (déclarative,
-# commerciale), jamais borné à une seule station.
-DOCUMENT_READ = "zyloLiquid.document.read"
-DOCUMENT_CREATE = "zyloLiquid.document.create"
+# Modèle documentaire — déplacé vers `app/files/permissions.py`
+# (2026-09-15, Phase 1). DOCUMENT_READ/CREATE/MANAGE/DELETE/READ_SENSITIVE
+# vivent maintenant là-bas, mêmes valeurs de chaîne.
 
 # Rapprochement (Phase 6, Phase 7 §2) — RECONCILIATION_READ scopé station
 # pour les types opérationnels comme les autres déclarations ; les
@@ -111,12 +105,12 @@ CARRIER_MANAGE = "zyloLiquid.carrier.manage"
 TRUCK_READ = "zyloLiquid.truck.read"
 TRUCK_MANAGE = "zyloLiquid.truck.manage"
 
-# Boîtiers GPS (mission « tracking », étape 1) — la lecture des positions/
-# arrêts est protégée par TRUCK_READ ci-dessus (pas de permission dédiée,
-# éviter la prolifération) ; seule la gestion du référentiel de boîtiers
-# a sa propre permission, même portée que TRUCK_MANAGE.
-GPS_DEVICE_READ = "zyloLiquid.gpsDevice.read"
-GPS_DEVICE_MANAGE = "zyloLiquid.gpsDevice.manage"
+# Boîtiers GPS/tracking — déplacé vers `app/location/permissions.py`
+# (2026-09-15, Phase 2). GPS_DEVICE_READ/MANAGE, TRACKING_LOCATION_READ/
+# MANAGE, TRACKING_SETTINGS_MANAGE, TRACCAR_CONNECTION_MANAGE vivent
+# maintenant là-bas, mêmes valeurs de chaîne. La lecture des positions/
+# arrêts reste protégée par TRUCK_READ ci-dessus (pas de permission
+# dédiée, éviter la prolifération).
 
 PURCHASE_ORDER_READ = "zyloLiquid.purchaseOrder.read"
 PURCHASE_ORDER_MANAGE = "zyloLiquid.purchaseOrder.manage"
@@ -161,10 +155,6 @@ PRICING_POLICY_MANAGE = "zyloLiquid.pricingPolicy.manage"
 # système de permissions.
 # ================================================================
 
-DOCUMENT_MANAGE = "zyloLiquid.document.manage"
-DOCUMENT_DELETE = "zyloLiquid.document.delete"
-DOCUMENT_READ_SENSITIVE = "zyloLiquid.document.readSensitive"
-
 SELLABLE_PRODUCT_READ = "zyloLiquid.sellableProduct.read"
 SELLABLE_PRODUCT_MANAGE = "zyloLiquid.sellableProduct.manage"
 
@@ -195,11 +185,4 @@ REGULATORY_DECLARATION_MANAGE = "zyloLiquid.regulatoryDeclaration.manage"
 # Tracking GPS des camions-citernes — étape 2 (flux métier, 2026-09).
 # ================================================================
 
-TRACKING_LOCATION_READ = "zyloLiquid.trackingLocation.read"
-TRACKING_LOCATION_MANAGE = "zyloLiquid.trackingLocation.manage"
-
 TRUCK_ORDER_ASSIGNMENT_MANAGE = "zyloLiquid.truckOrderAssignment.manage"
-
-TRACKING_SETTINGS_MANAGE = "zyloLiquid.trackingSettings.manage"
-
-TRACCAR_CONNECTION_MANAGE = "zyloLiquid.traccarConnection.manage"

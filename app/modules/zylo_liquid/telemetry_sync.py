@@ -23,9 +23,19 @@ Résolution du mapping capteur → cuve **depuis la base** à chaque cycle
 (`TankSensorMapping`, `active=True`), jamais depuis une table en mémoire
 figée au démarrage — un nouveau mapping ajouté via l'API pendant que le
 process tourne est donc pris en compte au cycle suivant, sans redémarrage.
+
+Phase 4 de la migration monolithe modulaire (2026-09-16, voir
+`ARCHITECTURE.md` §3.3) : tout le HTTP/auth vers Holykell (login, lecture
+des groupes/devices, parsing du JSON brut `sensorWayList`/`tsl`) a été
+extrait vers `app.integrations.holykell.client` — ce fichier ne fait plus
+aucun appel `httpx` direct vers Holykell, il ne connaît que les DTO propres
+(`HolykellSensorReading`) que le client lui rend, et reste seul propriétaire
+de la boucle de synchronisation et des écritures dans les modèles métier
+(`HolykellAccount`, `HolykellDeviceRegistry`, `TankMeasurement`,
+`TankSensorMapping`) — ces modèles restent dans `zylo_liquid` (configuration/
+état propres au métier tank), ils ne migrent pas vers l'intégration.
 """
 import asyncio
-import json
 import logging
 from datetime import datetime, timezone
 
@@ -34,6 +44,7 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.integrations.holykell import client as holykell_client
 from app.modules.zylo_liquid.models import (
     HolykellAccount,
     HolykellDeviceRegistry,
@@ -53,26 +64,17 @@ DEFAULT_INTERVAL_SEC = 5
 DEFAULT_STRUCTURAL_SWEEP_INTERVAL_SEC = 300
 
 
-async def _login(client: httpx.AsyncClient, base_url: str, username: str, password: str) -> tuple[str, str]:
-    resp = await client.post(f"{base_url}/admin-api/system/auth/login", json={"username": username, "password": password})
-    resp.raise_for_status()
-    data = resp.json()["data"]
-    return data["accessToken"], data["tenantId"]
-
-
 async def sync_one_account(db, client: httpx.AsyncClient, base_url: str, account: HolykellAccount) -> set:
-    """Un cycle de sondage pour un compte Holykell : login, lecture des
-    groupes/devices, écriture registre + mesure, retourne les cuves
+    """Un cycle de sondage pour un compte Holykell : login + lecture des
+    capteurs délégués à `holykell.client` (HTTP/auth/retry/timeout, DTO
+    propre en retour), puis écriture registre + mesure, retourne les cuves
     touchées (pour évaluation alertes/livraison par l'appelant)."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     try:
-        access_token, tenant_id = await _login(client, base_url, account.holykellUsername, account.holykellPassword)
-        resp = await client.get(
-            f"{base_url}/admin-api/business/deviceGroup/",
-            headers={"Authorization": f"Bearer {access_token}", "tenant-id": tenant_id},
+        access_token, tenant_id = await holykell_client.login(
+            client, base_url, account.holykellUsername, account.holykellPassword
         )
-        resp.raise_for_status()
-        groups = resp.json().get("data", [])
+        readings = await holykell_client.fetch_sensor_readings(client, base_url, access_token, tenant_id)
     except Exception as exc:
         account.lastSyncStatus = "failed"
         account.lastSyncError = repr(exc)[:500]
@@ -81,55 +83,34 @@ async def sync_one_account(db, client: httpx.AsyncClient, base_url: str, account
         return set()
 
     touched_tank_ids: set = set()
-    for g in groups:
-        for device in g.get("deviceList", []):
-            serial = device["serialNumber"]
-            status = device.get("status", 1)
-            sensor_way_list = device.get("sensorWayList") or {}
+    for reading in readings:
+        registry = (await db.execute(
+            select(HolykellDeviceRegistry).where(HolykellDeviceRegistry.hkSensorId == reading.sensor_id)
+        )).scalar_one_or_none()
+        if registry is None:
+            continue  # capteur connu de Holykell mais pas encore découvert/mappé côté Zylo Liquid
 
-            # Le TSL donne flag->sensorId ; sensorWayList donne flag->value.
-            flag_to_sensor_id = {}
-            tsl_raw = device.get("tsl")
-            if tsl_raw:
-                try:
-                    tsl = json.loads(tsl_raw)
-                    for sd in tsl.get("sensorDatas", []):
-                        flag_to_sensor_id[str(sd["flag"])] = sd["sensorId"]
-                except Exception:
-                    pass
+        registry.lastValue = reading.value
+        registry.lastValueAt = now
+        registry.hkLastStatus = 1 if reading.device_online else 0
+        # Une ingestion réussie EST une visibilité du capteur (même
+        # règle que l'ancien script — voir hkLastSeenAt affiché
+        # « Dernière visibilité » dans l'ATG).
+        registry.hkLastSeenAt = now
 
-            for flag, value in sensor_way_list.items():
-                sensor_id = flag_to_sensor_id.get(str(flag))
-                if sensor_id is None:
-                    continue
+        db.add(TankMeasurement(
+            hkSensorId=reading.sensor_id, hkDeviceSerial=reading.device_serial, hkSensorName=registry.hkSensorName,
+            hkUnit=registry.hkUnit, measuredAt=now, receivedAt=now, rawValue=reading.value, insertedAt=now,
+        ))
 
-                registry = (await db.execute(
-                    select(HolykellDeviceRegistry).where(HolykellDeviceRegistry.hkSensorId == sensor_id)
-                )).scalar_one_or_none()
-                if registry is None:
-                    continue  # capteur connu de Holykell mais pas encore découvert/mappé côté Zylo Liquid
-
-                registry.lastValue = value
-                registry.lastValueAt = now
-                registry.hkLastStatus = 1 if status == 1 else 0
-                # Une ingestion réussie EST une visibilité du capteur (même
-                # règle que l'ancien script — voir hkLastSeenAt affiché
-                # « Dernière visibilité » dans l'ATG).
-                registry.hkLastSeenAt = now
-
-                db.add(TankMeasurement(
-                    hkSensorId=sensor_id, hkDeviceSerial=serial, hkSensorName=registry.hkSensorName,
-                    hkUnit=registry.hkUnit, measuredAt=now, receivedAt=now, rawValue=value, insertedAt=now,
-                ))
-
-                mappings = (await db.execute(
-                    select(TankSensorMapping).where(
-                        TankSensorMapping.hkSensorId == sensor_id,
-                        TankSensorMapping.active == True,  # noqa: E712
-                    )
-                )).scalars().all()
-                for mapping in mappings:
-                    touched_tank_ids.add(mapping.tankId)
+        mappings = (await db.execute(
+            select(TankSensorMapping).where(
+                TankSensorMapping.hkSensorId == reading.sensor_id,
+                TankSensorMapping.active == True,  # noqa: E712
+            )
+        )).scalars().all()
+        for mapping in mappings:
+            touched_tank_ids.add(mapping.tankId)
 
     account.lastSyncAt = now
     account.lastSyncStatus = "success"

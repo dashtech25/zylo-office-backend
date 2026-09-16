@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.security import get_current_user
+from app.files.schemas import DocumentResponse
 from app.identity.models import User
 from app.modules.zylo_liquid import service
 from app.modules.zylo_liquid.algorithms import (
@@ -21,9 +22,6 @@ from app.modules.zylo_liquid.algorithms import (
 )
 from app.modules.zylo_liquid.models import FuelProduct, HolykellAccount, Station, Tank, TankSensorMapping
 from app.modules.zylo_liquid.permissions import (
-    ALERT_ACKNOWLEDGE,
-    ALERT_MANAGE,
-    ALERT_READ,
     CASH_READ,
     DELIVERY_READ,
     FUEL_PRODUCT_MANAGE,
@@ -51,8 +49,6 @@ from app.modules.zylo_liquid.schemas import (
     CreateCarrierRequest,
     CreateCommercialAccountRequest,
     CreateDeliveryDeclarationRequest,
-    CreateDocumentLinkRequest,
-    CreateDocumentRequest,
     CreateDriverRequest,
     ReconciliationRecordResponse,
     StationReconciliationSettingsResponse,
@@ -72,17 +68,11 @@ from app.modules.zylo_liquid.schemas import (
     CreateSupplierRequest,
     CreateTankRequest,
     CreateTankSensorMappingRequest,
-    CreateGpsDeviceRequest,
     CreateTruckRequest,
     CreateVehicleRequest,
-    AlertResponse,
     CreatePriceHistoryRequest,
     DeliveryDeclarationResponse,
     DeliveryDetectedResponse,
-    DocumentCountsResponse,
-    DocumentDownloadUrlResponse,
-    DocumentLinkResponse,
-    DocumentResponse,
     DriverResponse,
     FuelProductResponse,
     IncidentDeclarationResponse,
@@ -94,7 +84,6 @@ from app.modules.zylo_liquid.schemas import (
     PurchaseOrderResponse,
     QualityCheckDeclarationResponse,
     ReceivableResponse,
-    ResolveAlertRequest,
     SaleResponse,
     ShiftCashDeclarationResponse,
     StationFuelProductResponse,
@@ -107,28 +96,9 @@ from app.modules.zylo_liquid.schemas import (
     PricingPolicyResponse,
     SupplierResponse,
     TruckResponse,
-    GpsDeviceResponse,
-    TraccarConnectionRequest,
-    TraccarConnectionResponse,
-    TraccarDeviceListItem,
     TruckOrderAssignmentRequest,
     TruckOrderAssignmentResponse,
-    CreateTrackingLocationRequest,
-    UpdateTrackingLocationRequest,
-    TrackingLocationResponse,
-    TruckStopReconciliationResponse,
-    ResolveTruckStopReconciliationRequest,
-    CreateTruckStopCommentRequest,
-    UpdateTruckStopCommentRequest,
-    TruckStopCommentResponse,
-    TrackingSettingsRequest,
-    TrackingSettingsResponse,
-    IngestTruckPositionRequest,
-    TruckPositionPingResponse,
-    TruckStopEventResponse,
-    TruckCurrentPositionResponse,
     UpdateCarrierRequest,
-    UpdateGpsDeviceRequest,
     UpdateCommercialAccountRequest,
     UpdateDeliveryDeclarationRequest,
     UpdateIncidentDeclarationRequest,
@@ -210,12 +180,8 @@ async def _tank_station_scope(db: AsyncSession, organization_id: uuid.UUID, path
     return "station", tank.stationId
 
 
-async def _alert_station_scope(db: AsyncSession, organization_id: uuid.UUID, path_params: dict) -> tuple[str | None, uuid.UUID | None]:
-    raw_id = path_params.get("alert_id")
-    if raw_id is None:
-        return None, None
-    alert, _tank = await service._get_alert_and_tank(db, organization_id, uuid.UUID(str(raw_id)))
-    return "station", alert.stationId
+# _alert_station_scope — déplacée vers `app/alerts/router.py` (2026-09-15,
+# Phase 3), avec les routes /alerts* qu'elle scope.
 
 
 async def _delivery_station_scope(db: AsyncSession, organization_id: uuid.UUID, path_params: dict) -> tuple[str | None, uuid.UUID | None]:
@@ -376,7 +342,12 @@ async def update_station_fuel_product_thresholds(
     return await service.update_station_fuel_product_thresholds(db, organization_id, current_user.id, association_id, data)
 
 
-@router.get("/stations/{station_id}/fuel-products-overview", response_model=list[StationFuelProductOverviewResponse])
+@router.get(
+    "/stations/{station_id}/fuel-products-overview",
+    response_model=list[StationFuelProductOverviewResponse],
+    summary="Vue d'ensemble des produits vendus par une station",
+    description="Pour chaque produit rattaché à la station : prix courant, cuves associées et volume disponible agrégé. Pensé pour alimenter un écran de synthèse station sans agréger côté client.",
+)
 async def list_station_fuel_products_overview(
     station_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -445,6 +416,12 @@ async def update_pricing_policy(
     response_model=StationResponse,
     status_code=201,
     dependencies=[Depends(require_permission(STATION_MANAGE))],
+    summary="Créer une station-service",
+    description=(
+        "Crée une nouvelle station dans l'organisation courante. La station est créée active par "
+        "défaut ; ses cuves, produits et rattachements se paramètrent ensuite via les endpoints dédiés "
+        "(`/tanks`, `/station-fuel-products`, etc.)."
+    ),
 )
 async def create_station(
     data: CreateStationRequest,
@@ -458,6 +435,12 @@ async def create_station(
 @router.get(
     "/stations",
     response_model=Page[StationResponse],
+    summary="Lister les stations de l'organisation",
+    description=(
+        "Liste paginée des stations, filtrable par ville et par statut. Le filtrage par portée "
+        "(un utilisateur scopé à une station ne voit que la sienne) est appliqué directement dans "
+        "`service.list_stations`, pas via une dépendance de permission globale."
+    ),
 )
 async def list_stations(
     pagination: PaginationParams = Depends(),
@@ -478,6 +461,8 @@ async def list_stations(
     "/stations/{station_id}",
     response_model=StationResponse,
     dependencies=[Depends(require_permission_scoped(STATION_READ, "station", "station_id"))],
+    summary="Détail d'une station",
+    description="Retourne une station par son identifiant. Accès scopé : nécessite une lecture accordée sur cette station précise (ou une portée plus large).",
 )
 async def get_station(
     station_id: uuid.UUID,
@@ -491,6 +476,8 @@ async def get_station(
     "/stations/{station_id}",
     response_model=StationResponse,
     dependencies=[Depends(require_permission_scoped(STATION_MANAGE, "station", "station_id"))],
+    summary="Modifier une station",
+    description="Met à jour partiellement les champs d'une station (seuls les champs fournis sont modifiés). N'affecte pas le statut actif/inactif — utiliser `/deactivate` ou `/reactivate` pour cela.",
 )
 async def update_station(
     station_id: uuid.UUID,
@@ -506,6 +493,8 @@ async def update_station(
     "/stations/{station_id}/deactivate",
     response_model=StationResponse,
     dependencies=[Depends(require_permission_scoped(STATION_MANAGE, "station", "station_id"))],
+    summary="Désactiver une station",
+    description="Marque la station comme inactive sans la supprimer (les données historiques — livraisons, cuves, alertes — restent consultables). Une station désactivée peut être réactivée via `/reactivate`.",
 )
 async def deactivate_station(
     station_id: uuid.UUID,
@@ -520,6 +509,8 @@ async def deactivate_station(
     "/stations/{station_id}/reactivate",
     response_model=StationResponse,
     dependencies=[Depends(require_permission_scoped(STATION_MANAGE, "station", "station_id"))],
+    summary="Réactiver une station",
+    description="Remet une station désactivée en statut actif.",
 )
 async def reactivate_station(
     station_id: uuid.UUID,
@@ -535,6 +526,12 @@ async def reactivate_station(
     response_model=TankResponse,
     status_code=201,
     dependencies=[Depends(require_permission(TANK_MANAGE))],
+    summary="Créer une cuve",
+    description=(
+        "Crée une cuve rattachée à une station. La cuve n'a pas de portée RBAC propre : les droits "
+        "s'évaluent via la station qui la contient (cf. `_tank_station_scope`). Le capteur de niveau "
+        "se rattache séparément via `/tank-sensor-mappings`."
+    ),
 )
 async def create_tank(
     data: CreateTankRequest,
@@ -548,6 +545,8 @@ async def create_tank(
 @router.get(
     "/tanks",
     response_model=Page[TankResponse],
+    summary="Lister les cuves",
+    description="Liste paginée des cuves, filtrable par station, par produit et par statut actif/inactif.",
 )
 async def list_tanks(
     pagination: PaginationParams = Depends(),
@@ -565,6 +564,8 @@ async def list_tanks(
     "/tanks/{tank_id}",
     response_model=TankResponse,
     dependencies=[Depends(require_permission_scoped_via(TANK_READ, _tank_station_scope))],
+    summary="Détail d'une cuve",
+    description="Retourne une cuve par son identifiant. Ne contient pas le niveau/volume courant — voir `/tanks/{tank_id}/current-state` pour l'état temps réel.",
 )
 async def get_tank(
     tank_id: uuid.UUID,
@@ -578,6 +579,8 @@ async def get_tank(
     "/tanks/{tank_id}",
     response_model=TankResponse,
     dependencies=[Depends(require_permission_scoped_via(TANK_MANAGE, _tank_station_scope))],
+    summary="Modifier une cuve",
+    description="Met à jour partiellement les champs statiques d'une cuve (capacité, produit, seuils...). Ne modifie pas la table de jaugeage — voir `/tanks/{tank_id}/calibration-points` pour cela.",
 )
 async def update_tank(
     tank_id: uuid.UUID,
@@ -634,6 +637,12 @@ async def close_tank_sensor_mapping(
     "/tanks/{tank_id}/calibration-points",
     response_model=ReplaceTankCalibrationPointsResponse,
     dependencies=[Depends(require_permission(TANK_CALIBRATION_MANAGE))],
+    summary="Remplacer la table de jaugeage d'une cuve",
+    description=(
+        "Remplace intégralement la table de conversion hauteur (mm) → volume (L) utilisée pour "
+        "convertir les mesures du capteur en volume de produit. Opération destructive : l'ancienne "
+        "table est écrasée en une fois, il n'y a pas d'ajout incrémental."
+    ),
 )
 async def replace_tank_calibration_points(
     tank_id: uuid.UUID,
@@ -653,6 +662,8 @@ async def replace_tank_calibration_points(
     "/tanks/{tank_id}/calibration-points",
     response_model=list[TankCalibrationPointResponse],
     dependencies=[Depends(require_permission(TANK_CALIBRATION_READ))],
+    summary="Table de jaugeage d'une cuve",
+    description="Retourne la table de conversion hauteur → volume actuellement active pour la cuve, triée par hauteur croissante.",
 )
 async def list_tank_calibration_points(
     tank_id: uuid.UUID,
@@ -665,7 +676,12 @@ async def list_tank_calibration_points(
 @router.get(
     "/tanks/{tank_id}/current-state",
     response_model=TankCurrentStateResponse,
-    dependencies=[Depends(require_permission(TANK_READ))],
+    dependencies=[Depends(require_permission_scoped_via(TANK_READ, _tank_station_scope))],
+    summary="État courant d'une cuve",
+    description=(
+        "Dernier niveau connu de la cuve (hauteur, volume calculé via la table de jaugeage, "
+        "pourcentage de remplissage) tel que remonté par le capteur, avec l'horodatage de la mesure."
+    ),
 )
 async def get_tank_current_state(
     tank_id: uuid.UUID,
@@ -678,7 +694,9 @@ async def get_tank_current_state(
 @router.get(
     "/stations/{station_id}/current-state",
     response_model=StationCurrentStateResponse,
-    dependencies=[Depends(require_permission(STATION_READ))],
+    dependencies=[Depends(require_permission_scoped(STATION_READ, "station", "station_id"))],
+    summary="État courant d'une station",
+    description="Vue agrégée de l'état courant de toutes les cuves d'une station (niveaux, alertes actives), pratique pour un tableau de bord station sans multiplier les appels par cuve.",
 )
 async def get_station_current_state(
     station_id: uuid.UUID,
@@ -691,7 +709,9 @@ async def get_station_current_state(
 @router.get(
     "/tanks/{tank_id}/measurements",
     response_model=Page[TankMeasurementResponse],
-    dependencies=[Depends(require_permission(TANK_READ))],
+    dependencies=[Depends(require_permission_scoped_via(TANK_READ, _tank_station_scope))],
+    summary="Historique des mesures d'une cuve",
+    description="Série temporelle paginée des relevés du capteur pour la cuve, filtrable par plage de dates. Contrairement à `/current-state`, expose l'historique complet, pas seulement le dernier point.",
 )
 async def list_tank_measurements(
     tank_id: uuid.UUID,
@@ -734,6 +754,13 @@ async def get_network_snapshot(
 @router.get(
     "/deliveries",
     response_model=Page[DeliveryDetectedResponse],
+    summary="Lister les livraisons détectées",
+    description=(
+        "Liste paginée des livraisons de carburant détectées automatiquement par l'algorithme de "
+        "surveillance des cuves (montée de niveau + stabilisation, cf. `algorithms.py`), filtrable "
+        "par station, cuve et plage de dates. Il s'agit de livraisons *détectées*, pas des déclarations "
+        "manuelles du chauffeur — voir `/delivery-declarations` pour ces dernières."
+    ),
 )
 async def list_deliveries(
     pagination: PaginationParams = Depends(),
@@ -755,6 +782,8 @@ async def list_deliveries(
     "/deliveries/{delivery_id}",
     response_model=DeliveryDetectedResponse,
     dependencies=[Depends(require_permission_scoped_via(DELIVERY_READ, _delivery_station_scope))],
+    summary="Détail d'une livraison détectée",
+    description="Retourne une livraison détectée par son identifiant, avec les volumes avant/après et la fenêtre temporelle de détection.",
 )
 async def get_delivery(
     delivery_id: uuid.UUID,
@@ -768,6 +797,14 @@ async def get_delivery(
     "/deliveries-in-progress",
     response_model=list[DeliveryInProgressResponse],
     dependencies=[Depends(require_permission(DELIVERY_READ))],
+    summary="Livraisons en cours de détection",
+    description=(
+        "Liste les montées de niveau en cours d'observation, pas encore confirmées comme livraison "
+        "(le niveau doit rester stable pendant "
+        "`DELIVERY_STABILIZATION_MINUTES` avant confirmation). Utile pour un affichage temps réel, "
+        "ces entrées peuvent disparaître si la montée s'avère être du bruit de mesure plutôt qu'un "
+        "remplissage réel."
+    ),
 )
 async def list_deliveries_in_progress(
     organization_id: uuid.UUID = Depends(get_current_organization_id),
@@ -809,72 +846,10 @@ async def get_leak_event(
     return await service.get_leak_event(db, organization_id, leak_event_id)
 
 
-@router.get(
-    "/alerts",
-    response_model=Page[AlertResponse],
-)
-async def list_alerts(
-    pagination: PaginationParams = Depends(),
-    stationId: uuid.UUID | None = None,
-    truckId: uuid.UUID | None = None,
-    tankId: uuid.UUID | None = None,
-    type: str | None = None,
-    status: str | None = None,
-    fromDate: datetime | None = None,
-    toDate: datetime | None = None,
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> Page:
-    """Pas de `require_permission(ALERT_READ)` global — même principe que
-    `list_stations`/`list_deliveries`/`list_leak_events`."""
-    return await service.list_alerts(db, organization_id, current_user.id, pagination, stationId, tankId, type, status, fromDate, toDate, truckId)
-
-
-@router.get(
-    "/alerts/{alert_id}",
-    response_model=AlertResponse,
-    dependencies=[Depends(require_permission_scoped_via(ALERT_READ, _alert_station_scope))],
-)
-async def get_alert(
-    alert_id: uuid.UUID,
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> AlertResponse:
-    return await service.get_alert(db, organization_id, alert_id)
-
-
-@router.post(
-    "/alerts/{alert_id}/acknowledge",
-    response_model=AlertResponse,
-    dependencies=[Depends(require_permission_scoped_via(ALERT_ACKNOWLEDGE, _alert_station_scope))],
-)
-async def acknowledge_alert(
-    alert_id: uuid.UUID,
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> AlertResponse:
-    """D3 : « je m'en occupe » — ne referme jamais l'alerte (voir PATCH pour
-    la résolution manuelle, réservée aux types sans vérification auto)."""
-    return await service.acknowledge_alert(db, organization_id, current_user.id, alert_id)
-
-
-@router.patch(
-    "/alerts/{alert_id}",
-    response_model=AlertResponse,
-    dependencies=[Depends(require_permission_scoped_via(ALERT_MANAGE, _alert_station_scope))],
-)
-async def resolve_alert(
-    alert_id: uuid.UUID,
-    data: ResolveAlertRequest,
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> AlertResponse:
-    """D2 : réservé aux types sans vérification automatique possible — le
-    service refuse la requête (422) pour un type auto-vérifiable."""
-    return await service.resolve_alert(db, organization_id, current_user.id, alert_id, data.resolutionNote)
+# Routes /alerts* — déplacées vers `app/alerts/router.py` (2026-09-15,
+# Phase 3 de la migration monolithe modulaire), montées sous le même
+# préfixe `/zylo-liquid` (voir `app/api/v1/router.py`) : aucune URL ne
+# change côté frontend.
 
 
 @router.post(
@@ -1117,7 +1092,13 @@ async def update_supplier(
     return await service.update_supplier(db, organization_id, current_user.id, supplier_id, data)
 
 
-@router.post("/carriers", response_model=CarrierResponse, status_code=201)
+@router.post(
+    "/carriers",
+    response_model=CarrierResponse,
+    status_code=201,
+    summary="Créer un transporteur",
+    description="Enregistre un transporteur (société propriétaire ou affréteur des camions de livraison) pour l'organisation.",
+)
 async def create_carrier(
     data: CreateCarrierRequest,
     current_user: User = Depends(get_current_user),
@@ -1127,7 +1108,12 @@ async def create_carrier(
     return await service.create_carrier(db, organization_id, current_user.id, data)
 
 
-@router.get("/carriers", response_model=Page[CarrierResponse])
+@router.get(
+    "/carriers",
+    response_model=Page[CarrierResponse],
+    summary="Lister les transporteurs",
+    description="Liste paginée des transporteurs de l'organisation.",
+)
 async def list_carriers(
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_user),
@@ -1137,7 +1123,12 @@ async def list_carriers(
     return await service.list_carriers(db, organization_id, current_user.id, pagination)
 
 
-@router.patch("/carriers/{carrier_id}", response_model=CarrierResponse)
+@router.patch(
+    "/carriers/{carrier_id}",
+    response_model=CarrierResponse,
+    summary="Modifier un transporteur",
+    description="Met à jour partiellement les informations d'un transporteur.",
+)
 async def update_carrier(
     carrier_id: uuid.UUID,
     data: UpdateCarrierRequest,
@@ -1148,7 +1139,13 @@ async def update_carrier(
     return await service.update_carrier(db, organization_id, current_user.id, carrier_id, data)
 
 
-@router.post("/trucks", response_model=TruckResponse, status_code=201)
+@router.post(
+    "/trucks",
+    response_model=TruckResponse,
+    status_code=201,
+    summary="Créer un camion",
+    description="Enregistre un camion-citerne rattaché à un transporteur. Le suivi GPS (boîtier, positions) se paramètre séparément via les endpoints `/gps-devices` et `/tracking-*`.",
+)
 async def create_truck(
     data: CreateTruckRequest,
     current_user: User = Depends(get_current_user),
@@ -1158,7 +1155,12 @@ async def create_truck(
     return await service.create_truck(db, organization_id, current_user.id, data)
 
 
-@router.get("/trucks", response_model=Page[TruckResponse])
+@router.get(
+    "/trucks",
+    response_model=Page[TruckResponse],
+    summary="Lister les camions",
+    description="Liste paginée des camions de l'organisation, filtrable par transporteur.",
+)
 async def list_trucks(
     pagination: PaginationParams = Depends(),
     carrierId: uuid.UUID | None = None,
@@ -1169,7 +1171,12 @@ async def list_trucks(
     return await service.list_trucks(db, organization_id, current_user.id, pagination, carrierId)
 
 
-@router.patch("/trucks/{truck_id}", response_model=TruckResponse)
+@router.patch(
+    "/trucks/{truck_id}",
+    response_model=TruckResponse,
+    summary="Modifier un camion",
+    description="Met à jour partiellement les informations d'un camion (immatriculation, transporteur, capacité...).",
+)
 async def update_truck(
     truck_id: uuid.UUID,
     data: UpdateTruckRequest,
@@ -1180,178 +1187,15 @@ async def update_truck(
     return await service.update_truck(db, organization_id, current_user.id, truck_id, data)
 
 
-@router.post("/gps-devices", response_model=GpsDeviceResponse, status_code=201)
-async def create_gps_device(
-    data: CreateGpsDeviceRequest,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> GpsDeviceResponse:
-    return await service.create_gps_device(db, organization_id, current_user.id, data)
+# Tracking GPS des camions-citernes — routes déplacées vers
+# `app/location/router.py` (2026-09-15, Phase 2) : /gps-devices*,
+# /traccar-connection, /tracking-locations*, /truck-stop-reconciliations*,
+# /truck-stops/{id}/comments, /truck-stop-comments/{id},
+# /tracking-settings, /gps-ingest-credential*, /gps/ingest,
+# /trucks/current-positions, /trucks/live-positions,
+# /trucks/{id}/positions, /trucks/{id}/stops. Toujours montées sous le
+# même préfixe /zylo-liquid (voir app/api/v1/router.py).
 
-
-@router.get("/gps-devices", response_model=Page[GpsDeviceResponse])
-async def list_gps_devices(
-    pagination: PaginationParams = Depends(),
-    truckId: uuid.UUID | None = None,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> Page:
-    return await service.list_gps_devices(db, organization_id, current_user.id, pagination, truckId)
-
-
-@router.patch("/gps-devices/{gps_device_id}", response_model=GpsDeviceResponse)
-async def update_gps_device(
-    gps_device_id: uuid.UUID,
-    data: UpdateGpsDeviceRequest,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> GpsDeviceResponse:
-    return await service.update_gps_device(db, organization_id, current_user.id, gps_device_id, data)
-
-
-@router.post("/gps-devices/{gps_device_id}/unassign", response_model=GpsDeviceResponse)
-async def unassign_gps_device(
-    gps_device_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> GpsDeviceResponse:
-    return await service.unassign_gps_device(db, organization_id, current_user.id, gps_device_id)
-
-
-@router.get("/traccar-connection", response_model=TraccarConnectionResponse | None)
-async def get_traccar_connection(
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> TraccarConnectionResponse | None:
-    return await service.get_traccar_connection(db, organization_id, current_user.id)
-
-
-@router.post("/traccar-connection", response_model=TraccarConnectionResponse)
-async def set_traccar_connection(
-    data: TraccarConnectionRequest,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> TraccarConnectionResponse:
-    return await service.set_traccar_connection(db, organization_id, current_user.id, data)
-
-
-@router.get("/gps-devices/from-traccar", response_model=list[TraccarDeviceListItem])
-async def list_traccar_devices(
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> list[TraccarDeviceListItem]:
-    return await service.list_traccar_devices(db, organization_id, current_user.id)
-
-
-@router.post("/tracking-locations", response_model=TrackingLocationResponse, status_code=201)
-async def create_tracking_location(
-    data: CreateTrackingLocationRequest,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> TrackingLocationResponse:
-    return await service.create_tracking_location(db, organization_id, current_user.id, data)
-
-
-@router.get("/tracking-locations", response_model=list[TrackingLocationResponse])
-async def list_tracking_locations(
-    includeDeleted: bool = False,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> list[TrackingLocationResponse]:
-    return await service.list_tracking_locations(db, organization_id, current_user.id, includeDeleted)
-
-
-@router.patch("/tracking-locations/{location_id}", response_model=TrackingLocationResponse)
-async def update_tracking_location(
-    location_id: uuid.UUID,
-    data: UpdateTrackingLocationRequest,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> TrackingLocationResponse:
-    return await service.update_tracking_location(db, organization_id, current_user.id, location_id, data)
-
-
-@router.delete("/tracking-locations/{location_id}", response_model=TrackingLocationResponse)
-async def delete_tracking_location(
-    location_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> TrackingLocationResponse:
-    return await service.delete_tracking_location(db, organization_id, current_user.id, location_id)
-
-
-@router.get("/truck-stop-reconciliations", response_model=list[TruckStopReconciliationResponse])
-async def list_truck_stop_reconciliations(
-    status: str | None = "pending",
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> list[TruckStopReconciliationResponse]:
-    return await service.list_truck_stop_reconciliations(db, organization_id, current_user.id, status)
-
-
-@router.post("/truck-stop-reconciliations/{reconciliation_id}/resolve", response_model=TruckStopReconciliationResponse)
-async def resolve_truck_stop_reconciliation(
-    reconciliation_id: uuid.UUID,
-    data: ResolveTruckStopReconciliationRequest,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> TruckStopReconciliationResponse:
-    return await service.resolve_truck_stop_reconciliation(db, organization_id, current_user.id, reconciliation_id, data)
-
-
-@router.post("/truck-stops/{stop_id}/comments", response_model=TruckStopCommentResponse, status_code=201)
-async def create_truck_stop_comment(
-    stop_id: uuid.UUID,
-    data: CreateTruckStopCommentRequest,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> TruckStopCommentResponse:
-    return await service.create_truck_stop_comment(db, organization_id, current_user.id, stop_id, data)
-
-
-@router.get("/truck-stops/{stop_id}/comments", response_model=list[TruckStopCommentResponse])
-async def list_truck_stop_comments(
-    stop_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> list[TruckStopCommentResponse]:
-    return await service.list_truck_stop_comments(db, organization_id, current_user.id, stop_id)
-
-
-@router.patch("/truck-stop-comments/{comment_id}", response_model=TruckStopCommentResponse)
-async def update_truck_stop_comment(
-    comment_id: uuid.UUID,
-    data: UpdateTruckStopCommentRequest,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> TruckStopCommentResponse:
-    return await service.update_truck_stop_comment(db, organization_id, current_user.id, comment_id, data)
-
-
-@router.delete("/truck-stop-comments/{comment_id}", status_code=204)
-async def delete_truck_stop_comment(
-    comment_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> None:
-    await service.delete_truck_stop_comment(db, organization_id, current_user.id, comment_id)
 
 
 @router.post("/purchase-orders/{purchase_order_id}/trucks", response_model=TruckOrderAssignmentResponse, status_code=201)
@@ -1386,7 +1230,12 @@ async def list_trucks_for_purchase_order(
     return await service.list_trucks_for_purchase_order(db, organization_id, current_user.id, purchase_order_id)
 
 
-@router.get("/trucks/{truck_id}/orders", response_model=list[TruckOrderAssignmentResponse])
+@router.get(
+    "/trucks/{truck_id}/orders",
+    response_model=list[TruckOrderAssignmentResponse],
+    summary="Bons de commande assignés à un camion",
+    description="Liste les bons de commande (purchase orders) actuellement assignés à ce camion pour livraison.",
+)
 async def list_orders_for_truck(
     truck_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -1395,157 +1244,6 @@ async def list_orders_for_truck(
 ) -> list[TruckOrderAssignmentResponse]:
     return await service.list_orders_for_truck(db, organization_id, current_user.id, truck_id)
 
-
-@router.get("/tracking-settings", response_model=TrackingSettingsResponse)
-async def get_tracking_settings(
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> TrackingSettingsResponse:
-    return await service.get_tracking_settings(db, organization_id, current_user.id)
-
-
-@router.patch("/tracking-settings", response_model=TrackingSettingsResponse)
-async def update_tracking_settings(
-    data: TrackingSettingsRequest,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> TrackingSettingsResponse:
-    return await service.update_tracking_settings(db, organization_id, current_user.id, data)
-
-
-@router.get("/gps-ingest-credential")
-async def get_gps_ingest_credential(
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    token = await service.get_or_create_gps_ingest_credential(db, organization_id, current_user.id)
-    return {"secretToken": token}
-
-
-@router.post("/gps-ingest-credential/regenerate")
-async def regenerate_gps_ingest_credential(
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    token = await service.regenerate_gps_ingest_credential(db, organization_id, current_user.id)
-    return {"secretToken": token}
-
-
-@router.post("/gps/ingest", response_model=TruckPositionPingResponse, status_code=201)
-async def ingest_truck_position(
-    data: IngestTruckPositionRequest,
-    x_gps_ingest_secret: str = Header(...),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> TruckPositionPingResponse:
-    """Webhook appelé par Traccar (passerelle protocole GPS) — jamais un
-    utilisateur Zylo Office connecté, aucune dépendance `get_current_user`
-    ici (le routeur zylo_liquid exige tout de même X-Organization-Id pour
-    `require_module_active`, réutilisé comme défense en profondeur : le
-    secret doit correspondre à CETTE organisation précisément, pas
-    n'importe laquelle)."""
-    return await service.ingest_truck_position(db, organization_id, x_gps_ingest_secret, data)
-
-
-@router.get("/trucks/current-positions", response_model=list[TruckCurrentPositionResponse])
-async def list_truck_current_positions(
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> list[TruckCurrentPositionResponse]:
-    return await service.list_truck_current_positions(db, organization_id, current_user.id)
-
-
-_LIVE_POSITIONS_POLL_SECONDS = 5.0
-
-
-@router.get("/trucks/live-positions")
-async def stream_truck_live_positions(
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-) -> StreamingResponse:
-    """Flux SSE (Server-Sent Events) des positions courantes des camions
-    (2026-09-14, revue d'architecture) — aucun push depuis Traccar/le pont
-    (recherche : le mécanisme d'intégration documenté et fiable de Traccar
-    est `forward.url`, pas son WebSocket `/api/socket`, pensé pour son
-    propre client web). Le seul vrai trou identifié était en aval, entre
-    ce backend et notre frontend, qui ne se rafraîchissait jamais tout
-    seul. Réexécute simplement `list_truck_current_positions` (aucune
-    nouvelle logique métier) toutes les `_LIVE_POSITIONS_POLL_SECONDS`, le
-    temps que la connexion SSE reste ouverte — une session `AsyncSessionLocal`
-    fraîche à chaque itération, jamais une session maintenue ouverte
-    pendant tout le flux (elle serait inactive le reste du temps entre
-    deux tours, exactement le bug de connexion Neon déjà rencontré une
-    fois cette session). Pas de Redis/pub-sub : un seul process backend
-    aujourd'hui, chaque connexion SSE interroge la base indépendamment —
-    à revoir seulement si plusieurs instances backend tournent un jour en
-    parallèle.
-
-    Format SSE écrit à la main (StreamingResponse brut, 2026-09-14) —
-    aussi bien le support SSE natif de FastAPI (`fastapi.sse`, bug de
-    sérialisation constaté : `ServerSentEvent` non converti en texte) que
-    `sse-starlette` (blocage constaté à la connexion avec les versions de
-    Starlette installées ici) se sont révélés peu fiables ; le format SSE
-    lui-même est trivial (`data: <json>\\n\\n`), écrire les quelques lignes
-    à la main évite ces deux dépendances fragiles."""
-    async def event_generator():
-        while True:
-            try:
-                async with AsyncSessionLocal() as db:
-                    positions = await service.list_truck_current_positions(db, organization_id, current_user.id)
-                payload = json.dumps([p.model_dump(mode="json") for p in positions])
-                yield f"data: {payload}\n\n".encode()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logging.getLogger(__name__).exception("échec du flux de positions en direct (camion)")
-            await asyncio.sleep(_LIVE_POSITIONS_POLL_SECONDS)
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-@router.get("/trucks/{truck_id}/positions", response_model=list[TruckPositionPingResponse])
-async def list_truck_positions(
-    truck_id: uuid.UUID,
-    since: datetime | None = None,
-    until: datetime | None = None,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> list[TruckPositionPingResponse]:
-    # Les colonnes recordedAt/startAt sont TIMESTAMP WITHOUT TIME ZONE — un
-    # since/until fourni par le client (souvent suffixé "Z", donc tz-aware
-    # une fois parsé par Pydantic) doit être dépouillé de son fuseau avant
-    # toute comparaison, sinon asyncpg refuse (offset-naive vs offset-aware).
-    resolved_until = (until or datetime.now(timezone.utc)).replace(tzinfo=None)
-    resolved_since = (since.replace(tzinfo=None) if since else resolved_until - timedelta(hours=24))
-    return await service.list_truck_positions(db, organization_id, current_user.id, truck_id, resolved_since, resolved_until)
-
-
-@router.get("/trucks/{truck_id}/stops", response_model=list[TruckStopEventResponse])
-async def list_truck_stops(
-    truck_id: uuid.UUID,
-    since: datetime | None = None,
-    until: datetime | None = None,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> list[TruckStopEventResponse]:
-    # Les colonnes recordedAt/startAt sont TIMESTAMP WITHOUT TIME ZONE — un
-    # since/until fourni par le client (souvent suffixé "Z", donc tz-aware
-    # une fois parsé par Pydantic) doit être dépouillé de son fuseau avant
-    # toute comparaison, sinon asyncpg refuse (offset-naive vs offset-aware).
-    resolved_until = (until or datetime.now(timezone.utc)).replace(tzinfo=None)
-    resolved_since = (since.replace(tzinfo=None) if since else resolved_until - timedelta(hours=24))
-    return await service.list_truck_stops(db, organization_id, current_user.id, truck_id, resolved_since, resolved_until)
 
 
 @router.post("/purchase-orders", response_model=PurchaseOrderResponse, status_code=201)
@@ -1923,79 +1621,6 @@ async def list_payments(
 
 
 # ================================================================
-# Modèle documentaire (processus-double-sources-verite, Phase 5 §6) — Bloc 5.
-# ================================================================
-
-
-@router.post("/documents", response_model=DocumentResponse, status_code=201)
-async def create_document(
-    data: CreateDocumentRequest,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> DocumentResponse:
-    return await service.create_document(db, organization_id, current_user.id, data)
-
-
-@router.post("/document-links", response_model=DocumentLinkResponse, status_code=201)
-async def create_document_link(
-    data: CreateDocumentLinkRequest,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> DocumentLinkResponse:
-    return await service.create_document_link(db, organization_id, current_user.id, data)
-
-
-@router.get("/documents/by-entity", response_model=list[DocumentResponse])
-async def list_documents_for_entity(
-    linkedEntityType: str,
-    linkedEntityId: uuid.UUID,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> list[DocumentResponse]:
-    return await service.list_document_links_for_entity(db, organization_id, current_user.id, linkedEntityType, linkedEntityId)
-
-
-@router.get("/documents/counts-by-entity", response_model=DocumentCountsResponse)
-async def count_documents_for_entities(
-    linkedEntityType: str,
-    linkedEntityIds: str,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> DocumentCountsResponse:
-    """`linkedEntityIds` : identifiants séparés par des virgules (audit
-    performance — un seul appel réseau au lieu d'un par ligne de tableau
-    dans les écrans Réglementation/Fournisseurs)."""
-    ids = [uuid.UUID(raw) for raw in linkedEntityIds.split(",") if raw.strip()]
-    counts = await service.count_documents_by_entity(db, organization_id, current_user.id, linkedEntityType, ids)
-    return DocumentCountsResponse(counts=counts)
-
-
-@router.delete("/documents/{document_id}", response_model=DocumentResponse)
-async def delete_document(
-    document_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> DocumentResponse:
-    return await service.delete_document(db, organization_id, current_user.id, document_id)
-
-
-@router.get("/documents/{document_id}/download-url", response_model=DocumentDownloadUrlResponse)
-async def get_document_download_url(
-    document_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> DocumentDownloadUrlResponse:
-    url = await service.get_document_download_url(db, organization_id, current_user.id, document_id)
-    return DocumentDownloadUrlResponse(url=url)
-
-
-# ================================================================
 # Mission « vente-maintenant-reglementation » — Bloc 5 : catalogue de
 # produits vendables.
 # ================================================================
@@ -2196,7 +1821,12 @@ async def list_station_suppliers(
     return await service.list_station_suppliers(db, organization_id, current_user.id, pagination, stationId)
 
 
-@router.get("/stations/{station_id}/financial", response_model=StationFinancialResponse)
+@router.get(
+    "/stations/{station_id}/financial",
+    response_model=StationFinancialResponse,
+    summary="Paramètres financiers d'une station",
+    description="Retourne les paramètres financiers/comptables rattachés à la station (comptes, conditions de facturation...), distincts des données d'exploitation carburant.",
+)
 async def get_station_financial(
     station_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -2206,7 +1836,12 @@ async def get_station_financial(
     return await service.get_station_financial(db, organization_id, current_user.id, station_id)
 
 
-@router.patch("/stations/{station_id}/financial", response_model=StationFinancialResponse)
+@router.patch(
+    "/stations/{station_id}/financial",
+    response_model=StationFinancialResponse,
+    summary="Modifier les paramètres financiers d'une station",
+    description="Met à jour partiellement les paramètres financiers d'une station.",
+)
 async def update_station_financial(
     station_id: uuid.UUID,
     data: UpdateStationFinancialRequest,
@@ -2377,7 +2012,12 @@ async def list_regulatory_declarations(
 # ================================================================
 
 
-@router.get("/stations/{station_id}/reconciliation-settings", response_model=StationReconciliationSettingsResponse | None)
+@router.get(
+    "/stations/{station_id}/reconciliation-settings",
+    response_model=StationReconciliationSettingsResponse | None,
+    summary="Paramètres de réconciliation de stock d'une station",
+    description="Retourne la dérogation de réconciliation configurée pour cette station (seuils de tolérance, etc.), ou `null` si la station utilise la configuration par défaut de l'organisation.",
+)
 async def get_station_reconciliation_settings(
     station_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -2387,7 +2027,12 @@ async def get_station_reconciliation_settings(
     return await service.get_station_reconciliation_settings(db, organization_id, current_user.id, station_id)
 
 
-@router.put("/stations/{station_id}/reconciliation-settings", response_model=StationReconciliationSettingsResponse)
+@router.put(
+    "/stations/{station_id}/reconciliation-settings",
+    response_model=StationReconciliationSettingsResponse,
+    summary="Créer ou remplacer les paramètres de réconciliation d'une station",
+    description="Crée ou remplace intégralement la dérogation de réconciliation de la station. Un seul enregistrement par station : cette configuration est un état courant, pas un historique — un appel répété écrase le précédent au lieu d'en empiler un nouveau.",
+)
 async def upsert_station_reconciliation_settings(
     station_id: uuid.UUID,
     data: UpsertStationReconciliationSettingsRequest,
@@ -2446,7 +2091,18 @@ async def reconcile_quality_check_declaration(
     return await service.evaluate_quality_check_declaration_reconciliation(db, organization_id, current_user.id, declaration_id)
 
 
-@router.post("/tanks/{tank_id}/reconcile-stock", response_model=ReconciliationRecordResponse)
+@router.post(
+    "/tanks/{tank_id}/reconcile-stock",
+    response_model=ReconciliationRecordResponse,
+    summary="Réconcilier le stock d'une cuve pour une journée",
+    description=(
+        "Compare, pour la cuve et la journée donnée, le volume vendu déclaré (ventes enregistrées) "
+        "au volume vendu déduit de la télémétrie (agrégat journalier de niveau de cuve), et produit "
+        "un enregistrement de réconciliation avec l'écart constaté. Recalcule à chaque appel : "
+        "rejouer cet endpoint pour le même jour est sans effet de bord destructif mais régénère "
+        "l'enregistrement."
+    ),
+)
 async def reconcile_stock(
     tank_id: uuid.UUID,
     day: date,

@@ -144,8 +144,23 @@ async def _open_gps_device_assignment(db: AsyncSession, gps_device_id: uuid.UUID
     appelé sans avoir d'abord fermé toute période active existante pour ce
     boîtier (voir `unassign_gps_device`), sous peine de deux lignes actives
     simultanées pour le même boîtier. Généralisation Zylo Tanker
-    (2026-09-16) : `truck_id` XOR `vessel_id`, jamais les deux."""
-    db.add(GpsDeviceAssignment(gpsDeviceId=gps_device_id, truckId=truck_id, vesselId=vessel_id))
+    (2026-09-16) : `truck_id` XOR `vessel_id`, jamais les deux.
+
+    `assignedAt` fixé explicitement en Python (UTC naïf, même convention
+    que tout le reste du fichier — voir `_close_active_gps_device_assignment`
+    ci-dessous) plutôt que de laisser le `server_default=func.now()` du
+    modèle s'appliquer : ce dernier hérite du fuseau de session Postgres,
+    qui n'est UTC nulle part de façon garantie (poste local en UTC-4,
+    CI en UTC) — un écart de plusieurs heures entre `assignedAt` et les
+    `recordedAt` (toujours UTC naïf côté Python) faussait silencieusement
+    le filtrage par fenêtre d'affectation (`_list_positions_for_period`,
+    `run_truck_stop_detection`), en fonction du fuseau du serveur qui
+    exécute le test — bug trouvé en comparant un run CI (échec) à un run
+    local (vert) sur le même commit."""
+    db.add(GpsDeviceAssignment(
+        gpsDeviceId=gps_device_id, truckId=truck_id, vesselId=vessel_id,
+        assignedAt=datetime.now(timezone.utc).replace(tzinfo=None),
+    ))
 
 
 async def _close_active_gps_device_assignment(db: AsyncSession, gps_device_id: uuid.UUID) -> None:

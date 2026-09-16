@@ -144,7 +144,7 @@ async def test_tracking_location_crud_and_move_protection(client: AsyncClient, r
     assert res.status_code == 200, res.text
 
     # Génère un arrêt confirmé (>=10 min stable) au lieu déplacé, pour le qualifier.
-    base = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+    base = datetime.now(timezone.utc).replace(tzinfo=None)  # jamais avant l'ouverture de l'affectation boitier<->camion (voir _open_gps_device_assignment), sinon les positions tombent hors fenetre
     for i in range(0, 13):
         await _ingest(client, zylo_liquid_organization, secret, device["deviceIdentifier"], base + timedelta(minutes=i), 4.06, 9.70)
     # Reprise du mouvement : juste hors du rayon de détection (150m), jamais
@@ -219,7 +219,7 @@ async def test_overlapping_locations_ambiguous_go_to_reconciliation_queue(client
     )
     assert res_a.status_code == 201 and res_b.status_code == 201
 
-    base = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+    base = datetime.now(timezone.utc).replace(tzinfo=None)  # jamais avant l'ouverture de l'affectation boitier<->camion (voir _open_gps_device_assignment), sinon les positions tombent hors fenetre
     for i in range(0, 13):
         await _ingest(client, zylo_liquid_organization, secret, device["deviceIdentifier"], base + timedelta(minutes=i), 4.0505, 9.7005)
     # Reprise plausible (voir commentaire équivalent plus haut dans ce fichier).
@@ -267,7 +267,7 @@ async def test_unqualified_stop_triggers_alert_without_station(client: AsyncClie
     device = await _create_gps_device(client, headers, "ALERT-A", truck["id"])
     secret = await _get_ingest_secret(client, headers)
 
-    base = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+    base = datetime.now(timezone.utc).replace(tzinfo=None)  # jamais avant l'ouverture de l'affectation boitier<->camion (voir _open_gps_device_assignment), sinon les positions tombent hors fenetre
     for i in range(0, 13):
         await _ingest(client, zylo_liquid_organization, secret, device["deviceIdentifier"], base + timedelta(minutes=i), 1.0, 1.0)
     # Reprise plausible (voir commentaire équivalent plus haut dans ce fichier).
@@ -287,7 +287,7 @@ async def test_truck_stop_comments_multiple_editable_deletable(client: AsyncClie
     device = await _create_gps_device(client, headers, "CMT-A", truck["id"])
     secret = await _get_ingest_secret(client, headers)
 
-    base = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+    base = datetime.now(timezone.utc).replace(tzinfo=None)  # jamais avant l'ouverture de l'affectation boitier<->camion (voir _open_gps_device_assignment), sinon les positions tombent hors fenetre
     for i in range(0, 13):
         await _ingest(client, zylo_liquid_organization, secret, device["deviceIdentifier"], base + timedelta(minutes=i), 2.0, 2.0)
     # Reprise plausible (voir commentaire équivalent plus haut dans ce fichier).

@@ -116,6 +116,10 @@ SEVERITY_BY_ALERT_TYPE = {
     "price_missing": "medium",
     "sensor_mapping_missing": "medium",
     "calibration_missing": "medium",
+    # Silence complet (toutes les cuves configurées hors ligne) — plus grave
+    # qu'un `sensor_offline` isolé (une seule cuve), la station entière
+    # échappe à toute supervision (P1-9, audit module Stations 2026-09-16).
+    "station_offline": "critical",
 }
 
 # D2 : types pour lesquels une source de vérité mesurable existe et peut

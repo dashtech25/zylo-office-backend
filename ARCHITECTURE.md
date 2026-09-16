@@ -157,13 +157,17 @@ indépendamment (jamais un gros commit unique) :
 
 | Phase | Contenu | Statut |
 |---|---|---|
-| 0 | Outillage : `import-linter` + premier contrat minimal, intégré CI | voir `.importlinter` |
-| 1 | Extraire `app/files/` (`Document`/`DocumentLink`, déjà découplés par `linkedEntityType`/`linkedEntityId` texte libre, pas de FK stricte) | — |
-| 2 | Extraire `app/location/` (GPS : `GpsDevice`, `TruckPositionPing`, détection d'arrêt...) — FK stricte conservée vers `zyloLiquidTruck.id`, URLs `/api/v1/zylo-liquid/...` gardées stables côté frontend | — |
+| 0 | Outillage : `import-linter` + premier contrat minimal, intégré CI | fait — `8020c61` |
+| 1 | Extraire `app/files/` (`Document`/`DocumentLink`, déjà découplés par `linkedEntityType`/`linkedEntityId` texte libre, pas de FK stricte) | fait — `8020c61` |
+| 2 | Extraire `app/location/` (GPS : `GpsDevice`, `TruckPositionPing`, détection d'arrêt...) — FK stricte conservée vers `zyloLiquidTruck.id`, URLs `/api/v1/zylo-liquid/...` gardées stables côté frontend | fait — `8020c61` |
 | 3 | Extraire `app/alerts/` (`Alert`, FK strictes conservées vers station/truck/tank/product — pas de redesign de schéma dans cette phase) | — |
 | 4 | Extraire `app/integrations/holykell/` (client HTTP + DTO), supprimer `scripts/sync_holykell_live.py` (legacy, déjà remplacé par la boucle en process) | — |
 | 5 | `app/shared/events.py` (`subscribe`/`publish`), premier cas d'usage réel : `TruckStopUnqualified` (location → alerts) | — |
 | 6 | Étendre les contrats `import-linter` à tous les nouveaux modules, CI bloquante sur violation | — |
+
+Note : Phases 1 et 2 ont été livrées dans un même commit (`8020c61`,
+2026-09-15) — travail enchaîné sans commit intermédiaire entre les deux.
+Phase 3 et suivantes reprennent la règle « un commit par phase ».
 
 Mettre à jour la colonne Statut quand une phase est livrée (référencer le
 commit). Ne pas commencer une phase avant que la précédente soit vérifiée
@@ -196,19 +200,27 @@ un import qui viole un contrat fait échouer le build, indépendamment de la
 relecture humaine. C'est ce qui transforme les règles de ce document d'une
 convention (facile à oublier sous pression) en contrainte vérifiée.
 
-Contrat déjà en place (Phase 0, voir `.importlinter`) :
-`identity-rbac-not-reachable-from-internals` — `zylo_liquid` ne peut jamais
-importer `app.identity.security`/`app.rbac.security` (détails internes),
-seulement leurs points d'entrée publics. Sert de test que l'outil est bien
-câblé, avant les contrats plus stricts des phases suivantes.
+5 contrats en place (Phases 0-2, voir `.importlinter`) :
+- `identity-rbac-not-reachable-from-internals` — `zylo_liquid` ne peut
+  jamais importer `app.identity.security`/`app.rbac.security` (détails
+  internes), seulement leurs points d'entrée publics.
+- `zylo-liquid-files-through-service-only` / `files-never-imports-zylo-liquid`
+  — `zylo_liquid` n'accède à Files que via `app.files.service`, jamais
+  `app.files.models` ; Files ne dépend jamais de `zylo_liquid`.
+- `zylo-liquid-location-through-service-only` — même règle pour Location.
+- `location-never-imports-zylo-liquid-logic` — Location peut importer
+  `app.modules.zylo_liquid.models`/`permissions` (dépendance délibérée et
+  documentée : `Truck`/`TRUCK_READ`/`Alert`, voir §5 et la docstring de
+  `app/location/service.py`), mais jamais son `service.py`/`router.py`/
+  `schemas.py` — Location ne dépend jamais de la logique métier ou des
+  routes de zylo_liquid, seulement de ses types. Seule capacité, à ce
+  stade, où la dépendance va dans les deux sens ; Files reste strictement
+  à sens unique.
 
-Contrats prévus à mesure que Phases 1-6 avancent (à ajouter dans
+Contrats prévus à mesure que Phases 3-6 avancent (à ajouter dans
 `.importlinter` au moment de chaque extraction, pas après coup) :
-- `zylo_liquid` peut importer `app.files.service` (fonctions publiques),
-  jamais `app.files.models`.
-- `app.files`/`app.location`/`app.alerts`/`app.integrations.holykell` ne
-  s'importent jamais entre eux directement, ni ne remontent vers
-  `app.modules.zylo_liquid`.
+- `app.alerts`/`app.integrations.holykell` ne s'importent jamais entre eux
+  directement, ni ne remontent vers `app.modules.zylo_liquid`.
 - `zylo_liquid` ne peut importer que les `service.py` publics de ces
   capacités, jamais leurs `models.py`.
 

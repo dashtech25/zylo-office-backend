@@ -46,14 +46,24 @@ sur une fonction déjà interne au module.
 Dépendance délibérée et documentée vers `app.modules.zylo_liquid.models`
 (pas l'inverse) : `list_alerts`/`_get_alert_and_tank` ont besoin de
 `Station`/`Truck`/`Tank` pour leurs jointures externes de portée (une
-alerte peut être rattachée à une station OU à un camion, jamais aux deux,
-voir la contrainte CHECK sur `Alert`) et pour l'affichage (nom de cuve
-dans le résumé d'audit). C'est un accès en lecture seule à des types de
-zylo_liquid, jamais à sa logique métier (`service.py`/`router.py`) —
-même patron que `app/location/service.py` vers `Truck`/`TRUCK_READ`, voir
-sa docstring. `app/alerts/models.py`, lui, n'importe aucun modèle
-zylo_liquid (voir sa propre docstring) : seul `service.py` a ce besoin,
-pour interroger au-delà de la seule table `Alert`."""
+alerte peut être rattachée à une station, un camion OU un navire, jamais
+plus d'un, voir la contrainte CHECK sur `Alert`) et pour l'affichage (nom
+de cuve dans le résumé d'audit). C'est un accès en lecture seule à des
+types de zylo_liquid, jamais à sa logique métier (`service.py`/
+`router.py`) — même patron que `app/location/service.py` vers
+`Truck`/`TRUCK_READ`, voir sa docstring. `app/alerts/models.py`, lui,
+n'importe aucun modèle zylo_liquid (voir sa propre docstring) : seul
+`service.py` a ce besoin, pour interroger au-delà de la seule table
+`Alert`.
+
+Généralisation Zylo Tanker (2026-09-16) — même dépendance délibérée et
+documentée ajoutée vers `app.modules.zylo_tanker.models.Vessel`, pour les
+mêmes raisons (jointure externe de portée) : `upsert_active_alert`/
+`_find_open_alert`/`list_alerts`/`_get_alert_and_tank` gagnent un
+paramètre `vessel_id` optionnel, même patron que l'extension `truck_id`
+faite en Phase 3 de la migration monolithe modulaire (voir plus haut) —
+`list_alerts` gagne un troisième `outerjoin` sur `Vessel`, exactement
+comme celui déjà en place sur `Truck`."""
 
 import uuid
 from datetime import datetime, timezone
@@ -68,6 +78,7 @@ from app.audit.service import record_audit_event
 from app.core.database import AsyncSessionLocal
 from app.core.errors import AppError
 from app.modules.zylo_liquid.models import Station, Tank, Truck
+from app.modules.zylo_tanker.models import Vessel
 from app.rbac.service import list_visible_resource_ids
 from app.shared.pagination import PaginationParams
 from app.shared.schemas import Page, PageMeta
@@ -125,6 +136,7 @@ async def _find_open_alert(
     *,
     station_id: uuid.UUID | None = None,
     truck_id: uuid.UUID | None = None,
+    vessel_id: uuid.UUID | None = None,
     tank_id: uuid.UUID | None,
     product_id: uuid.UUID | None,
     alert_type: str,
@@ -133,6 +145,7 @@ async def _find_open_alert(
         select(Alert).where(
             Alert.stationId == station_id,
             Alert.truckId == truck_id,
+            Alert.vesselId == vessel_id,
             Alert.tankId == tank_id,
             Alert.productId == product_id,
             Alert.type == alert_type,
@@ -155,6 +168,7 @@ async def upsert_active_alert(
     source_type: str | None = None,
     source_id: uuid.UUID | None = None,
     truck_id: uuid.UUID | None = None,
+    vessel_id: uuid.UUID | None = None,
 ) -> Alert | None:
     """N'ouvre jamais une deuxième alerte active/acquittée du même type pour
     la même portée (cuve et/ou produit) — évite le spam. Si une alerte est
@@ -166,9 +180,13 @@ async def upsert_active_alert(
     (jamais les deux, voir la contrainte CHECK sur `Alert`) — ajouté pour
     que `location._qualify_truck_stop` (alerte `truck_stop_unqualified`)
     bénéficie de la même déduplication que les autres producteurs, au lieu
-    de construire `Alert` directement comme avant cette phase."""
+    de construire `Alert` directement comme avant cette phase.
+
+    `vessel_id` (généralisation Zylo Tanker, 2026-09-16) : même principe que
+    `truck_id`, pour la portée navire — jamais renseigné en même temps que
+    `station_id`/`truck_id` (voir la contrainte CHECK sur `Alert`)."""
     existing = await _find_open_alert(
-        db, station_id=station_id, truck_id=truck_id, tank_id=tank_id, product_id=product_id, alert_type=alert_type
+        db, station_id=station_id, truck_id=truck_id, vessel_id=vessel_id, tank_id=tank_id, product_id=product_id, alert_type=alert_type
     )
     if existing is not None:
         existing.triggeredAt = triggered_at
@@ -179,6 +197,7 @@ async def upsert_active_alert(
     alert = Alert(
         stationId=station_id,
         truckId=truck_id,
+        vesselId=vessel_id,
         tankId=tank_id,
         productId=product_id,
         type=alert_type,
@@ -204,6 +223,7 @@ async def auto_resolve_alert(
     alert_type: str,
     resolved_at,
     truck_id: uuid.UUID | None = None,
+    vessel_id: uuid.UUID | None = None,
 ) -> None:
     """D2 : referme automatiquement une alerte dont la condition réelle a
     disparu, constatée par le service qui l'a évaluée — jamais via un clic
@@ -211,7 +231,7 @@ async def auto_resolve_alert(
     `resolvedByUserId` reste NULL : personne n'a fermé l'alerte, le système
     a constaté la disparition de la condition."""
     alert = await _find_open_alert(
-        db, station_id=station_id, truck_id=truck_id, tank_id=tank_id, product_id=product_id, alert_type=alert_type
+        db, station_id=station_id, truck_id=truck_id, vessel_id=vessel_id, tank_id=tank_id, product_id=product_id, alert_type=alert_type
     )
     if alert is None:
         return
@@ -252,6 +272,7 @@ def _alert_to_response(alert: Alert) -> AlertResponse:
         id=alert.id,
         stationId=alert.stationId,
         truckId=alert.truckId,
+        vesselId=alert.vesselId,
         tankId=alert.tankId,
         productId=alert.productId,
         type=alert.type,
@@ -283,6 +304,7 @@ async def list_alerts(
     from_date,
     to_date,
     truck_id: uuid.UUID | None = None,
+    vessel_id: uuid.UUID | None = None,
 ) -> Page:
     """Corrigé — filtrait auparavant uniquement par organisation, jamais par
     la portée réelle de l'utilisateur (même constat que `list_stations`,
@@ -303,25 +325,30 @@ async def list_alerts(
         raise AppError(code="permission_denied", message=f"Permission manquante : {ALERT_READ}.", status_code=403)
 
     # Étape 2 tracking — une alerte peut désormais être rattachée à un
-    # camion (`truckId`) plutôt qu'à une station (`stationId` nullable
+    # camion (`truckId`) ou, généralisation Zylo Tanker (2026-09-16), à un
+    # navire (`vesselId`) plutôt qu'à une station (`stationId` nullable
     # depuis cette migration) : un INNER JOIN strict sur Station
-    # exclurait silencieusement toute alerte de camion. Jointure externe
-    # sur les deux, filtre d'organisation vérifié via l'une ou l'autre.
+    # exclurait silencieusement toute alerte de camion/navire. Jointure
+    # externe sur les trois, filtre d'organisation vérifié via l'une ou
+    # l'autre.
     stmt = (
         select(Alert)
         .outerjoin(Station, Station.id == Alert.stationId)
         .outerjoin(Truck, Truck.id == Alert.truckId)
-        .where(or_(Station.organizationId == organization_id, Truck.organizationId == organization_id))
+        .outerjoin(Vessel, Vessel.id == Alert.vesselId)
+        .where(or_(Station.organizationId == organization_id, Truck.organizationId == organization_id, Vessel.organizationId == organization_id))
     )
     if not sees_all:
         # Un accès scopé par station ne couvre jamais une alerte de
-        # camion (les camions ne sont pas rattachés à une station) —
+        # camion/navire (ils ne sont pas rattachés à une station) —
         # comportement inchangé pour ces utilisateurs.
         stmt = stmt.where(Alert.stationId.in_(visible_station_ids))
     if station_id is not None:
         stmt = stmt.where(Alert.stationId == station_id)
     if truck_id is not None:
         stmt = stmt.where(Alert.truckId == truck_id)
+    if vessel_id is not None:
+        stmt = stmt.where(Alert.vesselId == vessel_id)
     if tank_id is not None:
         stmt = stmt.where(Alert.tankId == tank_id)
     if type_filter is not None:
@@ -347,12 +374,16 @@ async def _get_alert_and_tank(db: AsyncSession, organization_id: uuid.UUID, aler
     result = await db.execute(
         select(Alert, Tank)
         # Étape 2 tracking — jointure externe sur Station, une alerte de
-        # camion (stationId NULL) ne doit jamais être exclue par un INNER
-        # JOIN strict (même correction que list_alerts ci-dessus).
+        # camion/navire (stationId NULL) ne doit jamais être exclue par un
+        # INNER JOIN strict (même correction que list_alerts ci-dessus).
         .outerjoin(Station, Station.id == Alert.stationId)
         .outerjoin(Truck, Truck.id == Alert.truckId)
+        .outerjoin(Vessel, Vessel.id == Alert.vesselId)
         .outerjoin(Tank, Tank.id == Alert.tankId)
-        .where(Alert.id == alert_id, or_(Station.organizationId == organization_id, Truck.organizationId == organization_id))
+        .where(
+            Alert.id == alert_id,
+            or_(Station.organizationId == organization_id, Truck.organizationId == organization_id, Vessel.organizationId == organization_id),
+        )
     )
     row = result.first()
     if row is None:
@@ -445,7 +476,8 @@ async def resolve_alert(
 
 async def handle_truck_stop_unqualified(
     *,
-    truck_id: uuid.UUID,
+    truck_id: uuid.UUID | None = None,
+    vessel_id: uuid.UUID | None = None,
     alert_type: str,
     triggered_at,
     source_type: str | None = None,
@@ -458,10 +490,14 @@ async def handle_truck_stop_unqualified(
     jamais celle de l'appelant, qui a déjà committé (ou va committer,
     selon l'ordre choisi par le producteur) au moment où cet événement est
     publié ; ce handler ne doit dépendre d'aucun état de la transaction qui
-    a déclenché l'événement, seulement du `payload` reçu."""
+    a déclenché l'événement, seulement du `payload` reçu.
+
+    `vessel_id` (généralisation Zylo Tanker, 2026-09-16) : même événement,
+    payload symétrique — `truck_id` XOR `vessel_id` selon le type de
+    véhicule à l'origine de l'arrêt non qualifié."""
     async with AsyncSessionLocal() as db:
         await upsert_active_alert(
-            db, truck_id=truck_id, alert_type=alert_type, triggered_at=triggered_at,
+            db, truck_id=truck_id, vessel_id=vessel_id, alert_type=alert_type, triggered_at=triggered_at,
             source_type=source_type, source_id=source_id,
         )
         await db.commit()

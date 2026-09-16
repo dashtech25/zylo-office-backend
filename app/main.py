@@ -15,6 +15,7 @@ from app.core.database import AsyncSessionLocal
 from app.identity.service import backfill_owner_default_permissions
 from app.modules.zylo_liquid.seed import seed_known_permissions
 from app.modules.zylo_liquid.telemetry_sync import structural_sweep_loop, sync_loop as holykell_sync_loop
+from app.modules.zylo_tanker.seed import seed_known_permissions as seed_zylo_tanker_permissions
 from app.modules_registry.seed import seed_known_modules
 from app.modules_registry.service import backfill_active_module_permissions_for_owners
 from app.rbac.seed import seed_known_permissions as seed_rbac_permissions
@@ -77,6 +78,7 @@ async def on_startup() -> None:
     await seed_rbac_permissions()
     await seed_audit_permissions()
     await seed_known_permissions()
+    await seed_zylo_tanker_permissions()
     # Répare les organisations créées avant l'ajout d'une entrée à
     # OWNER_DEFAULT_PERMISSIONS (ex. ROLE_MANAGE/GRANT_MANAGE/AUDIT_LOG_VIEW) —
     # idempotent, sans effet une fois toutes les organisations à jour.

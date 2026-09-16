@@ -94,9 +94,12 @@ from app.location.schemas import (
     UpdateGpsDeviceRequest,
     UpdateTrackingLocationRequest,
     UpdateTruckStopCommentRequest,
+    VesselCurrentPositionResponse,
 )
 from app.modules.zylo_liquid.models import Truck
 from app.modules.zylo_liquid.permissions import TRUCK_READ
+from app.modules.zylo_tanker.models import Vessel
+from app.modules.zylo_tanker.permissions import VESSEL_READ
 from app.rbac.service import user_has_permission
 from app.shared.events import publish
 from app.shared.pagination import PaginationParams
@@ -107,6 +110,18 @@ async def _check_org_scope(db: AsyncSession, organization_id: uuid.UUID, actor_u
     allowed = await user_has_permission(db, actor_user_id, organization_id, permission_code)
     if not allowed:
         raise AppError(code="permission_denied", message=f"Permission manquante : {permission_code}.", status_code=403)
+
+
+async def _check_org_scope_any(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, permission_codes: list[str]) -> None:
+    """Généralisation Zylo Tanker (2026-09-16) — passe si l'utilisateur a
+    AU MOINS une des permissions listées, utilisé pour les fonctions
+    partagées camion/navire (ex. réglages de tracking) où exiger une
+    permission spécifique à un type de véhicule bloquerait à tort
+    l'autre."""
+    for code in permission_codes:
+        if await user_has_permission(db, actor_user_id, organization_id, code):
+            return
+    raise AppError(code="permission_denied", message=f"Permission manquante : {' ou '.join(permission_codes)}.", status_code=403)
 
 
 _TRUCK_STOP_LOOKBACK_HOURS = 48.0
@@ -124,12 +139,13 @@ async def _ensure_gps_device_identifier_available(db: AsyncSession, organization
         )
 
 
-async def _open_gps_device_assignment(db: AsyncSession, gps_device_id: uuid.UUID, truck_id: uuid.UUID) -> None:
+async def _open_gps_device_assignment(db: AsyncSession, gps_device_id: uuid.UUID, *, truck_id: uuid.UUID | None = None, vessel_id: uuid.UUID | None = None) -> None:
     """Ouvre une nouvelle période d'association dans l'historique — jamais
     appelé sans avoir d'abord fermé toute période active existante pour ce
     boîtier (voir `unassign_gps_device`), sous peine de deux lignes actives
-    simultanées pour le même boîtier."""
-    db.add(GpsDeviceAssignment(gpsDeviceId=gps_device_id, truckId=truck_id))
+    simultanées pour le même boîtier. Généralisation Zylo Tanker
+    (2026-09-16) : `truck_id` XOR `vessel_id`, jamais les deux."""
+    db.add(GpsDeviceAssignment(gpsDeviceId=gps_device_id, truckId=truck_id, vesselId=vessel_id))
 
 
 async def _close_active_gps_device_assignment(db: AsyncSession, gps_device_id: uuid.UUID) -> None:
@@ -143,16 +159,24 @@ async def _close_active_gps_device_assignment(db: AsyncSession, gps_device_id: u
 
 async def create_gps_device(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateGpsDeviceRequest) -> GpsDeviceResponse:
     await _check_org_scope(db, organization_id, actor_user_id, GPS_DEVICE_MANAGE)
+    if data.truckId is not None and data.vesselId is not None:
+        raise AppError(code="gps_device_truck_or_vessel_only", message="Un boîtier ne peut être assigné qu'à un camion OU un navire, jamais les deux.", status_code=422)
     if data.truckId is not None:
         truck = await db.get(Truck, data.truckId)
         if truck is None or truck.organizationId != organization_id:
             raise AppError(code="truck_not_found", message="Camion introuvable.", status_code=404)
+    if data.vesselId is not None:
+        vessel = await db.get(Vessel, data.vesselId)
+        if vessel is None or vessel.organizationId != organization_id:
+            raise AppError(code="vessel_not_found", message="Navire introuvable.", status_code=404)
     await _ensure_gps_device_identifier_available(db, organization_id, data.deviceIdentifier)
-    instance = GpsDevice(organizationId=organization_id, truckId=data.truckId, deviceIdentifier=data.deviceIdentifier, label=data.label)
+    instance = GpsDevice(organizationId=organization_id, truckId=data.truckId, vesselId=data.vesselId, deviceIdentifier=data.deviceIdentifier, label=data.label)
     db.add(instance)
     await db.flush()
     if data.truckId is not None:
-        await _open_gps_device_assignment(db, instance.id, data.truckId)
+        await _open_gps_device_assignment(db, instance.id, truck_id=data.truckId)
+    elif data.vesselId is not None:
+        await _open_gps_device_assignment(db, instance.id, vessel_id=data.vesselId)
     await db.commit()
     await db.refresh(instance)
     return GpsDeviceResponse.model_validate(instance)
@@ -164,6 +188,8 @@ async def update_gps_device(db: AsyncSession, organization_id: uuid.UUID, actor_
     if device is None or device.organizationId != organization_id:
         raise AppError(code="gps_device_not_found", message="Boîtier GPS introuvable.", status_code=404)
     updates = data.model_dump(exclude_unset=True)
+    if updates.get("truckId") is not None and updates.get("vesselId") is not None:
+        raise AppError(code="gps_device_truck_or_vessel_only", message="Un boîtier ne peut être assigné qu'à un camion OU un navire, jamais les deux.", status_code=422)
     if updates.get("truckId") is not None:
         truck = await db.get(Truck, updates["truckId"])
         if truck is None or truck.organizationId != organization_id:
@@ -175,7 +201,27 @@ async def update_gps_device(db: AsyncSession, organization_id: uuid.UUID, actor_
             raise AppError(code="truck_already_has_device", message="Ce camion a déjà un boîtier GPS actif.", status_code=409)
         if updates["truckId"] != device.truckId:
             await _close_active_gps_device_assignment(db, device.id)
-            await _open_gps_device_assignment(db, device.id, updates["truckId"])
+            await _open_gps_device_assignment(db, device.id, truck_id=updates["truckId"])
+            # Bascule exclusive camion/navire (généralisation Zylo Tanker) —
+            # une éventuelle affectation navire précédente sur ce boîtier
+            # n'a plus de sens dès qu'il repasse camion.
+            updates["vesselId"] = None
+    # Généralisation Zylo Tanker (2026-09-16) — symétrique du bloc truckId
+    # ci-dessus, jamais exécuté (donc jamais de changement de comportement)
+    # pour une requête qui ne renseigne que truckId.
+    if updates.get("vesselId") is not None:
+        vessel = await db.get(Vessel, updates["vesselId"])
+        if vessel is None or vessel.organizationId != organization_id:
+            raise AppError(code="vessel_not_found", message="Navire introuvable.", status_code=404)
+        existing_vessel_result = await db.execute(
+            select(GpsDeviceAssignment).where(GpsDeviceAssignment.vesselId == updates["vesselId"], GpsDeviceAssignment.unassignedAt.is_(None), GpsDeviceAssignment.gpsDeviceId != device.id)
+        )
+        if existing_vessel_result.scalar_one_or_none() is not None:
+            raise AppError(code="vessel_already_has_device", message="Ce navire a déjà un boîtier GPS actif.", status_code=409)
+        if updates["vesselId"] != device.vesselId:
+            await _close_active_gps_device_assignment(db, device.id)
+            await _open_gps_device_assignment(db, device.id, vessel_id=updates["vesselId"])
+            updates["truckId"] = None
     for field, value in updates.items():
         setattr(device, field, value)
     await db.commit()
@@ -184,28 +230,34 @@ async def update_gps_device(db: AsyncSession, organization_id: uuid.UUID, actor_
 
 
 async def unassign_gps_device(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, gps_device_id: uuid.UUID) -> GpsDeviceResponse:
-    """Dissociation explicite d'un boîtier de son camion (scénario 2) — la
-    confirmation « êtes-vous sûr » reste une responsabilité du frontend,
-    cet appel exécute la dissociation dès qu'il est reçu. Ferme la période
-    d'association active dans l'historique ; les positions/arrêts déjà
-    enregistrés restent attribués au camion précédent pour toujours."""
+    """Dissociation explicite d'un boîtier de son camion/navire (scénario 2)
+    — la confirmation « êtes-vous sûr » reste une responsabilité du
+    frontend, cet appel exécute la dissociation dès qu'il est reçu. Ferme
+    la période d'association active dans l'historique ; les positions/
+    arrêts déjà enregistrés restent attribués au véhicule précédent pour
+    toujours."""
     await _check_org_scope(db, organization_id, actor_user_id, GPS_DEVICE_MANAGE)
     device = await db.get(GpsDevice, gps_device_id)
     if device is None or device.organizationId != organization_id:
         raise AppError(code="gps_device_not_found", message="Boîtier GPS introuvable.", status_code=404)
-    if device.truckId is not None:
+    if device.truckId is not None or device.vesselId is not None:
         await _close_active_gps_device_assignment(db, device.id)
         device.truckId = None
+        device.vesselId = None
     await db.commit()
     await db.refresh(device)
     return GpsDeviceResponse.model_validate(device)
 
 
-async def list_gps_devices(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, pagination: PaginationParams, truck_id: uuid.UUID | None = None) -> Page:
+async def list_gps_devices(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, pagination: PaginationParams, truck_id: uuid.UUID | None = None, vessel_id: uuid.UUID | None = None,
+) -> Page:
     await _check_org_scope(db, organization_id, actor_user_id, GPS_DEVICE_READ)
     stmt = select(GpsDevice).where(GpsDevice.organizationId == organization_id)
     if truck_id is not None:
         stmt = stmt.where(GpsDevice.truckId == truck_id)
+    if vessel_id is not None:
+        stmt = stmt.where(GpsDevice.vesselId == vessel_id)
     stmt = stmt.order_by(GpsDevice.deviceIdentifier)
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
     result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
@@ -242,10 +294,15 @@ async def regenerate_gps_ingest_credential(db: AsyncSession, organization_id: uu
     return new_token
 
 
-async def _get_current_gps_device_for_truck(db: AsyncSession, truck_id: uuid.UUID) -> GpsDevice | None:
-    """Un seul boîtier actif par camion à la fois dans ce lot (v1) — pas de
-    reconstitution d'historique à travers plusieurs boîtiers successifs."""
-    result = await db.execute(select(GpsDevice).where(GpsDevice.truckId == truck_id, GpsDevice.active == True))  # noqa: E712
+async def _get_current_gps_device_for_owner(db: AsyncSession, *, truck_id: uuid.UUID | None = None, vessel_id: uuid.UUID | None = None) -> GpsDevice | None:
+    """Un seul boîtier actif par camion/navire à la fois dans ce lot (v1) —
+    pas de reconstitution d'historique à travers plusieurs boîtiers
+    successifs. Généralisation Zylo Tanker (2026-09-16) de
+    `_get_current_gps_device_for_truck` : `truck_id` XOR `vessel_id`."""
+    if truck_id is not None:
+        result = await db.execute(select(GpsDevice).where(GpsDevice.truckId == truck_id, GpsDevice.active == True))  # noqa: E712
+    else:
+        result = await db.execute(select(GpsDevice).where(GpsDevice.vesselId == vessel_id, GpsDevice.active == True))  # noqa: E712
     return result.scalar_one_or_none()
 
 
@@ -267,26 +324,32 @@ _STOP_DETECTION_THROTTLE_SECONDS = float(os.environ.get("TRUCK_STOP_DETECTION_TH
 _last_stop_detection_run: dict[uuid.UUID, datetime] = {}
 
 
-async def run_truck_stop_detection(db: AsyncSession, truck_id: uuid.UUID) -> list[TruckStopEvent]:
+async def run_truck_stop_detection(db: AsyncSession, truck_id: uuid.UUID | None = None, vessel_id: uuid.UUID | None = None) -> list[TruckStopEvent]:
     """Exécute l'algorithme de détection d'arrêt (`detect_truck_stops`,
-    jamais réimplémenté) sur les positions récentes du camion, et persiste
-    les arrêts non encore connus (idempotent via déduplication sur
-    startAt) — même pattern que `run_delivery_detection_for_tank`.
+    jamais réimplémenté) sur les positions récentes du camion OU du navire
+    (généralisation Zylo Tanker, 2026-09-16 : `truck_id` XOR `vessel_id`,
+    positionnel `truck_id` conservé pour compatibilité avec les appelants
+    existants), et persiste les arrêts non encore connus (idempotent via
+    déduplication sur startAt) — même pattern que
+    `run_delivery_detection_for_tank`.
 
     Bornage par fenêtre d'affectation (2026-09-13, correction) — même
     principe que `list_truck_positions` : chaque position n'est prise en
     compte QUE dans la période où son boîtier était réellement affecté à
-    CE camion. Avant cette correction, la fonction regardait toutes les
-    positions du boîtier *actuel* du camion sur 48h sans regarder qui
+    CE véhicule. Avant cette correction, la fonction regardait toutes les
+    positions du boîtier *actuel* du véhicule sur 48h sans regarder qui
     l'avait porté pendant cette période — un arrêt pouvait donc être
-    attribué à un camion alors que le boîtier était, au même instant,
-    affecté à un autre camion (ou à aucun), après une réaffectation en
+    attribué à un véhicule alors que le boîtier était, au même instant,
+    affecté à un autre véhicule (ou à aucun), après une réaffectation en
     cours de route (scénario 2)."""
+    if (truck_id is None) == (vessel_id is None):
+        raise ValueError("run_truck_stop_detection requiert exactement un de truck_id/vessel_id")
+    owner_id = truck_id if truck_id is not None else vessel_id
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    last_run = _last_stop_detection_run.get(truck_id)
+    last_run = _last_stop_detection_run.get(owner_id)
     if last_run is not None and (now - last_run).total_seconds() < _STOP_DETECTION_THROTTLE_SECONDS:
         return []
-    _last_stop_detection_run[truck_id] = now
+    _last_stop_detection_run[owner_id] = now
     since = now - timedelta(hours=_TRUCK_STOP_LOOKBACK_HOURS)
     # `now` ne sert qu'à sélectionner les lignes d'affectation pertinentes
     # (une affectation ne peut pas commencer dans le futur) — jamais à
@@ -296,7 +359,7 @@ async def run_truck_stop_detection(db: AsyncSession, truck_id: uuid.UUID) -> lis
     # Plafonner au relogie serveur exclurait à tort toute position dont
     # l'horloge (ou l'injection de test) est même de quelques secondes en
     # avance sur ce process.
-    assignments = await _get_truck_gps_assignments_for_period(db, truck_id, since, now)
+    assignments = await _get_truck_gps_assignments_for_period(db, since, now, truck_id=truck_id, vessel_id=vessel_id)
     if not assignments:
         return []
     all_positions: list[tuple] = []
@@ -320,7 +383,8 @@ async def run_truck_stop_detection(db: AsyncSession, truck_id: uuid.UUID) -> lis
     if not events:
         return []
 
-    existing_result = await db.execute(select(TruckStopEvent.startAt).where(TruckStopEvent.truckId == truck_id))
+    owner_filter = TruckStopEvent.truckId == truck_id if truck_id is not None else TruckStopEvent.vesselId == vessel_id
+    existing_result = await db.execute(select(TruckStopEvent.startAt).where(owner_filter))
     existing_start_times = {row[0] for row in existing_result.all()}
 
     created = []
@@ -328,14 +392,14 @@ async def run_truck_stop_detection(db: AsyncSession, truck_id: uuid.UUID) -> lis
         if event["startTime"] in existing_start_times:
             continue
         instance = TruckStopEvent(
-            truckId=truck_id, latitude=event["latitude"], longitude=event["longitude"],
+            truckId=truck_id, vesselId=vessel_id, latitude=event["latitude"], longitude=event["longitude"],
             startAt=event["startTime"], endAt=event["endTime"],
         )
         db.add(instance)
         created.append(instance)
     if created:
         await db.flush()
-        truck = await db.get(Truck, truck_id)
+        owner = await db.get(Truck, truck_id) if truck_id is not None else await db.get(Vessel, vessel_id)
         pending_events: list[dict] = []
         for instance in created:
             # Qualification automatique (lieu connu / réconciliation /
@@ -344,7 +408,7 @@ async def run_truck_stop_detection(db: AsyncSession, truck_id: uuid.UUID) -> lis
             # doit jamais faire échouer la détection d'arrêt elle-même,
             # mais reste journalisée (jamais avalée en silence).
             try:
-                event_payload = await _qualify_truck_stop(db, truck.organizationId, instance)
+                event_payload = await _qualify_truck_stop(db, owner.organizationId, instance)
                 if event_payload is not None:
                     pending_events.append(event_payload)
             except Exception:
@@ -424,7 +488,7 @@ async def ingest_truck_position(db: AsyncSession, organization_id: uuid.UUID, se
 
     if device.truckId is not None:
         try:
-            await run_truck_stop_detection(db, device.truckId)
+            await run_truck_stop_detection(db, truck_id=device.truckId)
         except Exception:
             # Best-effort : une erreur de calcul dérivé ne doit jamais faire
             # échouer l'ingestion elle-même (même discipline que le
@@ -433,8 +497,56 @@ async def ingest_truck_position(db: AsyncSession, organization_id: uuid.UUID, se
             # caché plusieurs heures d'arrêts manquants en conditions
             # réelles, sans aucune trace exploitable pour diagnostiquer.
             logger.exception("échec du calcul des arrêts (best-effort) pour le camion %s", device.truckId)
+    elif device.vesselId is not None:
+        # Généralisation Zylo Tanker (2026-09-16) — même discipline
+        # best-effort que le camion ci-dessus, le webhook d'ingestion reste
+        # unique quel que soit le type de véhicule propriétaire du boîtier.
+        try:
+            await run_truck_stop_detection(db, vessel_id=device.vesselId)
+        except Exception:
+            logger.exception("échec du calcul des arrêts (best-effort) pour le navire %s", device.vesselId)
 
     return TruckPositionPingResponse.model_validate(ping)
+
+
+async def _resolve_owner_current_position(db: AsyncSession, device: GpsDevice | None, *, truck_id: uuid.UUID | None = None, vessel_id: uuid.UUID | None = None):
+    """Cœur partagé de `list_truck_current_positions`/
+    `list_vessel_current_positions` (généralisation Zylo Tanker,
+    2026-09-16) — jamais dupliqué. Retourne
+    (latitude, longitude, recordedAt, channel, in_progress) où `in_progress`
+    est le payload d'arrêt en cours (voir `detect_truck_stop_in_progress`)
+    ou `None`, tous `None` si aucune position exploitable."""
+    if device is None:
+        return None, None, None, None, None
+    last_ping_result = await db.execute(
+        select(TruckPositionPing).where(TruckPositionPing.gpsDeviceId == device.id).order_by(TruckPositionPing.recordedAt.desc()).limit(1)
+    )
+    last_ping = last_ping_result.scalar_one_or_none()
+    if last_ping is None:
+        return None, None, None, None, None
+
+    # Bornée à l'affectation en cours de CE véhicule (2026-09-13,
+    # correction) — jamais 48h de positions du boîtier sans savoir s'il
+    # était bien sur ce véhicule pendant tout cet intervalle.
+    owner_filter = GpsDeviceAssignment.truckId == truck_id if truck_id is not None else GpsDeviceAssignment.vesselId == vessel_id
+    current_assignment_result = await db.execute(
+        select(GpsDeviceAssignment.assignedAt)
+        .where(owner_filter, GpsDeviceAssignment.gpsDeviceId == device.id, GpsDeviceAssignment.unassignedAt.is_(None))
+        .order_by(GpsDeviceAssignment.assignedAt.desc())
+        .limit(1)
+    )
+    current_assignment_start = current_assignment_result.scalar_one_or_none()
+    since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=_TRUCK_STOP_LOOKBACK_HOURS)
+    if current_assignment_start is not None:
+        since = max(since, current_assignment_start)
+    recent_result = await db.execute(
+        select(TruckPositionPing.recordedAt, TruckPositionPing.latitude, TruckPositionPing.longitude)
+        .where(TruckPositionPing.gpsDeviceId == device.id, TruckPositionPing.recordedAt >= since)
+        .order_by(TruckPositionPing.recordedAt)
+    )
+    recent_positions = [(recordedAt, float(lat), float(lon)) for recordedAt, lat, lon in recent_result.all()]
+    in_progress = detect_truck_stop_in_progress(recent_positions, TRUCK_STOP_RADIUS_METERS_DEFAULT, TRUCK_STOP_STABILIZATION_MINUTES_DEFAULT) if len(recent_positions) >= 2 else None
+    return float(last_ping.latitude), float(last_ping.longitude), last_ping.recordedAt, last_ping.channel, in_progress
 
 
 async def list_truck_current_positions(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID) -> list[TruckCurrentPositionResponse]:
@@ -449,61 +561,60 @@ async def list_truck_current_positions(db: AsyncSession, organization_id: uuid.U
 
     responses: list[TruckCurrentPositionResponse] = []
     for truck_id in truck_ids:
-        device = await _get_current_gps_device_for_truck(db, truck_id)
-        if device is None:
-            responses.append(TruckCurrentPositionResponse(truckId=truck_id, latitude=None, longitude=None, recordedAt=None, channel=None, currentStop=None))
-            continue
-        last_ping_result = await db.execute(
-            select(TruckPositionPing).where(TruckPositionPing.gpsDeviceId == device.id).order_by(TruckPositionPing.recordedAt.desc()).limit(1)
-        )
-        last_ping = last_ping_result.scalar_one_or_none()
-        if last_ping is None:
-            responses.append(TruckCurrentPositionResponse(truckId=truck_id, latitude=None, longitude=None, recordedAt=None, channel=None, currentStop=None))
-            continue
-
-        # Bornée à l'affectation en cours de CE camion (2026-09-13,
-        # correction) — jamais 48h de positions du boîtier sans savoir s'il
-        # était bien sur ce camion pendant tout cet intervalle.
-        current_assignment_result = await db.execute(
-            select(GpsDeviceAssignment.assignedAt)
-            .where(GpsDeviceAssignment.truckId == truck_id, GpsDeviceAssignment.gpsDeviceId == device.id, GpsDeviceAssignment.unassignedAt.is_(None))
-            .order_by(GpsDeviceAssignment.assignedAt.desc())
-            .limit(1)
-        )
-        current_assignment_start = current_assignment_result.scalar_one_or_none()
-        since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=_TRUCK_STOP_LOOKBACK_HOURS)
-        if current_assignment_start is not None:
-            since = max(since, current_assignment_start)
-        recent_result = await db.execute(
-            select(TruckPositionPing.recordedAt, TruckPositionPing.latitude, TruckPositionPing.longitude)
-            .where(TruckPositionPing.gpsDeviceId == device.id, TruckPositionPing.recordedAt >= since)
-            .order_by(TruckPositionPing.recordedAt)
-        )
-        recent_positions = [(recordedAt, float(lat), float(lon)) for recordedAt, lat, lon in recent_result.all()]
-        in_progress = detect_truck_stop_in_progress(recent_positions, TRUCK_STOP_RADIUS_METERS_DEFAULT, TRUCK_STOP_STABILIZATION_MINUTES_DEFAULT) if len(recent_positions) >= 2 else None
+        device = await _get_current_gps_device_for_owner(db, truck_id=truck_id)
+        latitude, longitude, recorded_at, channel, in_progress = await _resolve_owner_current_position(db, device, truck_id=truck_id)
         current_stop = None
         if in_progress is not None:
             current_stop = TruckStopEventResponse(
                 id=uuid.uuid4(), truckId=truck_id, latitude=in_progress["latitude"], longitude=in_progress["longitude"],
                 startAt=in_progress["startTime"], endAt=None,
             )
-
         responses.append(TruckCurrentPositionResponse(
-            truckId=truck_id, latitude=float(last_ping.latitude), longitude=float(last_ping.longitude),
-            recordedAt=last_ping.recordedAt, channel=last_ping.channel, currentStop=current_stop,
+            truckId=truck_id, latitude=latitude, longitude=longitude,
+            recordedAt=recorded_at, channel=channel, currentStop=current_stop,
         ))
     return responses
 
 
-async def _get_truck_gps_assignments_for_period(db: AsyncSession, truck_id: uuid.UUID, since: datetime, until: datetime) -> list[GpsDeviceAssignment]:
-    """Périodes d'association boîtier<->camion qui chevauchent la fenêtre
-    demandée — jamais seulement le boîtier actuel (`GpsDevice.truckId`),
-    qui aurait déjà changé après une réaffectation (scénario 2 :
+async def list_vessel_current_positions(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID) -> list[VesselCurrentPositionResponse]:
+    """Généralisation Zylo Tanker (2026-09-16) de `list_truck_current_positions`
+    — même cœur partagé (`_resolve_owner_current_position`), jamais dupliqué."""
+    await _check_org_scope(db, organization_id, actor_user_id, VESSEL_READ)
+    vessels_result = await db.execute(select(Vessel.id).where(Vessel.organizationId == organization_id))
+    vessel_ids = [row[0] for row in vessels_result.all()]
+    if not vessel_ids:
+        return []
+
+    responses: list[VesselCurrentPositionResponse] = []
+    for vessel_id in vessel_ids:
+        device = await _get_current_gps_device_for_owner(db, vessel_id=vessel_id)
+        latitude, longitude, recorded_at, channel, in_progress = await _resolve_owner_current_position(db, device, vessel_id=vessel_id)
+        current_stop = None
+        if in_progress is not None:
+            current_stop = TruckStopEventResponse(
+                id=uuid.uuid4(), vesselId=vessel_id, latitude=in_progress["latitude"], longitude=in_progress["longitude"],
+                startAt=in_progress["startTime"], endAt=None,
+            )
+        responses.append(VesselCurrentPositionResponse(
+            vesselId=vessel_id, latitude=latitude, longitude=longitude,
+            recordedAt=recorded_at, channel=channel, currentStop=current_stop,
+        ))
+    return responses
+
+
+async def _get_truck_gps_assignments_for_period(
+    db: AsyncSession, since: datetime, until: datetime, *, truck_id: uuid.UUID | None = None, vessel_id: uuid.UUID | None = None,
+) -> list[GpsDeviceAssignment]:
+    """Périodes d'association boîtier<->camion (ou boîtier<->navire,
+    généralisation Zylo Tanker 2026-09-16) qui chevauchent la fenêtre
+    demandée — jamais seulement le boîtier actuel (`GpsDevice.truckId`/
+    `vesselId`), qui aurait déjà changé après une réaffectation (scénario 2 :
     l'historique du camion A reste consultable même après que son boîtier
     soit passé au camion B)."""
+    owner_filter = GpsDeviceAssignment.truckId == truck_id if truck_id is not None else GpsDeviceAssignment.vesselId == vessel_id
     result = await db.execute(
         select(GpsDeviceAssignment).where(
-            GpsDeviceAssignment.truckId == truck_id,
+            owner_filter,
             GpsDeviceAssignment.assignedAt <= until,
             or_(GpsDeviceAssignment.unassignedAt.is_(None), GpsDeviceAssignment.unassignedAt >= since),
         )
@@ -511,17 +622,15 @@ async def _get_truck_gps_assignments_for_period(db: AsyncSession, truck_id: uuid
     return list(result.scalars().all())
 
 
-async def list_truck_positions(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, truck_id: uuid.UUID, since: datetime, until: datetime) -> list[TruckPositionPingResponse]:
-    await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
-    truck = await db.get(Truck, truck_id)
-    if truck is None or truck.organizationId != organization_id:
-        raise AppError(code="truck_not_found", message="Camion introuvable.", status_code=404)
-    assignments = await _get_truck_gps_assignments_for_period(db, truck_id, since, until)
+async def _list_positions_for_period(db: AsyncSession, since: datetime, until: datetime, *, truck_id: uuid.UUID | None = None, vessel_id: uuid.UUID | None = None) -> list[TruckPositionPingResponse]:
+    """Cœur partagé de `list_truck_positions`/`list_vessel_positions`
+    (généralisation Zylo Tanker, 2026-09-16) — jamais dupliqué."""
+    assignments = await _get_truck_gps_assignments_for_period(db, since, until, truck_id=truck_id, vessel_id=vessel_id)
     if not assignments:
         return []
     # Chaque position n'est retenue que dans les bornes de SA propre période
     # d'association — jamais seulement la fenêtre demandée — pour ne
-    # jamais faire fuiter les positions d'un autre camion ayant porté le
+    # jamais faire fuiter les positions d'un autre véhicule ayant porté le
     # même boîtier avant/après cette période précise.
     all_positions: list[TruckPositionPing] = []
     for assignment in assignments:
@@ -541,17 +650,52 @@ async def list_truck_positions(db: AsyncSession, organization_id: uuid.UUID, act
     return [TruckPositionPingResponse.model_validate(r) for r in all_positions]
 
 
+async def list_truck_positions(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, truck_id: uuid.UUID, since: datetime, until: datetime) -> list[TruckPositionPingResponse]:
+    await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
+    truck = await db.get(Truck, truck_id)
+    if truck is None or truck.organizationId != organization_id:
+        raise AppError(code="truck_not_found", message="Camion introuvable.", status_code=404)
+    return await _list_positions_for_period(db, since, until, truck_id=truck_id)
+
+
+async def list_vessel_positions(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, vessel_id: uuid.UUID, since: datetime, until: datetime) -> list[TruckPositionPingResponse]:
+    """Généralisation Zylo Tanker (2026-09-16) de `list_truck_positions` —
+    réutilise `TruckPositionPingResponse` tel quel (déjà agnostique du type
+    de véhicule, voir `app/location/models.py::TruckPositionPing`)."""
+    await _check_org_scope(db, organization_id, actor_user_id, VESSEL_READ)
+    vessel = await db.get(Vessel, vessel_id)
+    if vessel is None or vessel.organizationId != organization_id:
+        raise AppError(code="vessel_not_found", message="Navire introuvable.", status_code=404)
+    return await _list_positions_for_period(db, since, until, vessel_id=vessel_id)
+
+
+async def _list_stops_for_period(db: AsyncSession, since: datetime, until: datetime, *, truck_id: uuid.UUID | None = None, vessel_id: uuid.UUID | None = None) -> list[TruckStopEventResponse]:
+    """Cœur partagé de `list_truck_stops`/`list_vessel_stops`
+    (généralisation Zylo Tanker, 2026-09-16) — jamais dupliqué."""
+    owner_filter = TruckStopEvent.truckId == truck_id if truck_id is not None else TruckStopEvent.vesselId == vessel_id
+    result = await db.execute(
+        select(TruckStopEvent)
+        .where(owner_filter, TruckStopEvent.startAt >= since, TruckStopEvent.startAt <= until)
+        .order_by(TruckStopEvent.startAt)
+    )
+    return [TruckStopEventResponse.model_validate(r) for r in result.scalars().all()]
+
+
 async def list_truck_stops(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, truck_id: uuid.UUID, since: datetime, until: datetime) -> list[TruckStopEventResponse]:
     await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
     truck = await db.get(Truck, truck_id)
     if truck is None or truck.organizationId != organization_id:
         raise AppError(code="truck_not_found", message="Camion introuvable.", status_code=404)
-    result = await db.execute(
-        select(TruckStopEvent)
-        .where(TruckStopEvent.truckId == truck_id, TruckStopEvent.startAt >= since, TruckStopEvent.startAt <= until)
-        .order_by(TruckStopEvent.startAt)
-    )
-    return [TruckStopEventResponse.model_validate(r) for r in result.scalars().all()]
+    return await _list_stops_for_period(db, since, until, truck_id=truck_id)
+
+
+async def list_vessel_stops(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, vessel_id: uuid.UUID, since: datetime, until: datetime) -> list[TruckStopEventResponse]:
+    """Généralisation Zylo Tanker (2026-09-16) de `list_truck_stops`."""
+    await _check_org_scope(db, organization_id, actor_user_id, VESSEL_READ)
+    vessel = await db.get(Vessel, vessel_id)
+    if vessel is None or vessel.organizationId != organization_id:
+        raise AppError(code="vessel_not_found", message="Navire introuvable.", status_code=404)
+    return await _list_stops_for_period(db, since, until, vessel_id=vessel_id)
 
 
 # ================================================================
@@ -732,7 +876,11 @@ async def list_tracking_locations(db: AsyncSession, organization_id: uuid.UUID, 
 
 
 async def get_tracking_settings(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID) -> TrackingSettingsResponse:
-    await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
+    # Réglages partagés camion/navire (généralisation Zylo Tanker,
+    # 2026-09-16) — TRUCK_READ OU VESSEL_READ suffit, jamais les deux
+    # exigés : un opérateur navire sans TRUCK_READ doit pouvoir lire les
+    # réglages de tracking de son organisation comme un opérateur camion.
+    await _check_org_scope_any(db, organization_id, actor_user_id, [TRUCK_READ, VESSEL_READ])
     result = await db.execute(select(TrackingSettings).where(TrackingSettings.organizationId == organization_id))
     settings_row = result.scalar_one_or_none()
     if settings_row is None:
@@ -789,6 +937,7 @@ async def _qualify_truck_stop(db: AsyncSession, organization_id: uuid.UUID, stop
     # celle de `app.shared.events`).
     return {
         "truck_id": stop.truckId,
+        "vessel_id": stop.vesselId,
         "alert_type": "truck_stop_unqualified",
         "triggered_at": stop.startAt,
         "source_type": "TruckStopEvent",
@@ -796,9 +945,20 @@ async def _qualify_truck_stop(db: AsyncSession, organization_id: uuid.UUID, stop
     }
 
 
+def _stop_read_permission(stop: TruckStopEvent) -> str:
+    """Généralisation Zylo Tanker (2026-09-16) — la permission de lecture
+    requise pour un arrêt dépend du type de véhicule propriétaire, jamais
+    figée à TRUCK_READ (qui bloquerait à tort un opérateur navire)."""
+    return TRUCK_READ if stop.truckId is not None else VESSEL_READ
+
+
 async def create_truck_stop_comment(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, stop_id: uuid.UUID, data: CreateTruckStopCommentRequest) -> TruckStopCommentResponse:
-    await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
+    # Ordre changé (généralisation Zylo Tanker, 2026-09-16) : l'arrêt doit
+    # être résolu AVANT de savoir quelle permission vérifier (TRUCK_READ ou
+    # VESSEL_READ selon son propriétaire) — un stop_id inconnu répond donc
+    # désormais 404 avant tout contrôle de permission, jamais l'inverse.
     stop = await _get_truck_stop_or_404(db, organization_id, stop_id)
+    await _check_org_scope(db, organization_id, actor_user_id, _stop_read_permission(stop))
     instance = TruckStopComment(stopEventId=stop.id, authorUserId=actor_user_id, body=data.body)
     db.add(instance)
     await db.commit()
@@ -811,7 +971,7 @@ async def update_truck_stop_comment(db: AsyncSession, organization_id: uuid.UUID
     if comment is None:
         raise AppError(code="truck_stop_comment_not_found", message="Commentaire introuvable.", status_code=404)
     stop = await _get_truck_stop_or_404(db, organization_id, comment.stopEventId)
-    await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
+    await _check_org_scope(db, organization_id, actor_user_id, _stop_read_permission(stop))
     comment.body = data.body
     await db.commit()
     await db.refresh(comment)
@@ -822,26 +982,35 @@ async def delete_truck_stop_comment(db: AsyncSession, organization_id: uuid.UUID
     comment = await db.get(TruckStopComment, comment_id)
     if comment is None:
         raise AppError(code="truck_stop_comment_not_found", message="Commentaire introuvable.", status_code=404)
-    await _get_truck_stop_or_404(db, organization_id, comment.stopEventId)
-    await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
+    stop = await _get_truck_stop_or_404(db, organization_id, comment.stopEventId)
+    await _check_org_scope(db, organization_id, actor_user_id, _stop_read_permission(stop))
     await db.delete(comment)
     await db.commit()
 
 
 async def list_truck_stop_comments(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, stop_id: uuid.UUID) -> list[TruckStopCommentResponse]:
-    await _check_org_scope(db, organization_id, actor_user_id, TRUCK_READ)
-    await _get_truck_stop_or_404(db, organization_id, stop_id)
+    stop = await _get_truck_stop_or_404(db, organization_id, stop_id)
+    await _check_org_scope(db, organization_id, actor_user_id, _stop_read_permission(stop))
     result = await db.execute(select(TruckStopComment).where(TruckStopComment.stopEventId == stop_id).order_by(TruckStopComment.createdAt))
     return [TruckStopCommentResponse.model_validate(r) for r in result.scalars().all()]
 
 
 async def _get_truck_stop_or_404(db: AsyncSession, organization_id: uuid.UUID, stop_id: uuid.UUID) -> TruckStopEvent:
+    """Généralisation Zylo Tanker (2026-09-16) — résout le propriétaire de
+    l'arrêt (camion OU navire, jamais les deux, voir la contrainte CHECK
+    sur `TruckStopEvent`) et vérifie sa portée d'organisation quel que soit
+    le type de véhicule."""
     stop = await db.get(TruckStopEvent, stop_id)
     if stop is None:
         raise AppError(code="truck_stop_not_found", message="Arrêt introuvable.", status_code=404)
-    truck = await db.get(Truck, stop.truckId)
-    if truck is None or truck.organizationId != organization_id:
-        raise AppError(code="truck_stop_not_found", message="Arrêt introuvable.", status_code=404)
+    if stop.truckId is not None:
+        truck = await db.get(Truck, stop.truckId)
+        if truck is None or truck.organizationId != organization_id:
+            raise AppError(code="truck_stop_not_found", message="Arrêt introuvable.", status_code=404)
+    else:
+        vessel = await db.get(Vessel, stop.vesselId)
+        if vessel is None or vessel.organizationId != organization_id:
+            raise AppError(code="truck_stop_not_found", message="Arrêt introuvable.", status_code=404)
     return stop
 
 
@@ -852,6 +1021,24 @@ async def list_truck_stop_reconciliations(db: AsyncSession, organization_id: uui
         .join(TruckStopEvent, TruckStopEvent.id == TruckStopReconciliation.stopEventId)
         .join(Truck, Truck.id == TruckStopEvent.truckId)
         .where(Truck.organizationId == organization_id)
+    )
+    if status is not None:
+        stmt = stmt.where(TruckStopReconciliation.status == status)
+    result = await db.execute(stmt.order_by(TruckStopReconciliation.createdAt))
+    return [TruckStopReconciliationResponse.model_validate(r) for r in result.scalars().all()]
+
+
+async def list_vessel_stop_reconciliations(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, status: str | None = "pending") -> list[TruckStopReconciliationResponse]:
+    """Généralisation Zylo Tanker (2026-09-16) de
+    `list_truck_stop_reconciliations` — même requête, jointure sur
+    `Vessel` au lieu de `Truck` (seule différence : la table qui porte la
+    portée d'organisation)."""
+    await _check_org_scope(db, organization_id, actor_user_id, TRACKING_LOCATION_READ)
+    stmt = (
+        select(TruckStopReconciliation)
+        .join(TruckStopEvent, TruckStopEvent.id == TruckStopReconciliation.stopEventId)
+        .join(Vessel, Vessel.id == TruckStopEvent.vesselId)
+        .where(Vessel.organizationId == organization_id)
     )
     if status is not None:
         stmt = stmt.where(TruckStopReconciliation.status == status)

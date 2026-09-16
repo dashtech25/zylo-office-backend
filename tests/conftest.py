@@ -70,6 +70,7 @@ async def client():
     from app.core.database import engine
     from app.main import app
     from app.modules.zylo_liquid.seed import seed_known_permissions
+    from app.modules.zylo_tanker.seed import seed_known_permissions as seed_zylo_tanker_permissions
     from app.modules_registry.seed import seed_known_modules
 
     # pytest-asyncio donne à chaque test sa propre boucle d'événements, mais
@@ -87,6 +88,7 @@ async def client():
     # test et toute FK vers module.code/permission.code échoue.
     await seed_known_modules()
     await seed_known_permissions()
+    await seed_zylo_tanker_permissions()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

@@ -14,13 +14,15 @@ from pydantic import BaseModel, Field
 
 
 class CreateGpsDeviceRequest(BaseModel):
-    truckId: uuid.UUID | None = Field(default=None, description="Camion à associer dès la création — laisser vide pour enregistrer un boîtier en stock, non encore posé sur un véhicule.")
+    truckId: uuid.UUID | None = Field(default=None, description="Camion à associer dès la création — laisser vide pour enregistrer un boîtier en stock, non encore posé sur un véhicule. Mutuellement exclusif de vesselId.")
+    vesselId: uuid.UUID | None = Field(default=None, description="Navire à associer dès la création (généralisation Zylo Tanker) — mutuellement exclusif de truckId.")
     deviceIdentifier: str = Field(min_length=1, max_length=50, description="Identifiant unique du boîtier tel que configuré côté Traccar (ex. 'uniqueId') — doit être unique par organisation.")
     label: str | None = Field(default=None, max_length=150, description="Libellé libre affiché à l'utilisateur, distinct de deviceIdentifier.")
 
 
 class UpdateGpsDeviceRequest(BaseModel):
-    truckId: uuid.UUID | None = Field(default=None, description="Réaffecter à un autre camion ferme automatiquement la période d'association active précédente et en ouvre une nouvelle.")
+    truckId: uuid.UUID | None = Field(default=None, description="Réaffecter à un autre camion ferme automatiquement la période d'association active précédente et en ouvre une nouvelle. Mutuellement exclusif de vesselId dans la même requête.")
+    vesselId: uuid.UUID | None = Field(default=None, description="Réaffecter à un autre navire (généralisation Zylo Tanker) — même mécanique que truckId, mutuellement exclusif dans la même requête.")
     label: str | None = Field(default=None, max_length=150)
     active: bool | None = None
 
@@ -29,6 +31,7 @@ class GpsDeviceResponse(BaseModel):
     id: uuid.UUID
     organizationId: uuid.UUID
     truckId: uuid.UUID | None
+    vesselId: uuid.UUID | None = None
     deviceIdentifier: str
     label: str | None
     active: bool
@@ -191,14 +194,21 @@ class TruckPositionPingResponse(BaseModel):
 
 
 class TruckStopEventResponse(BaseModel):
+    """`truckId`/`vesselId` : exactement l'un des deux est renseigné selon le
+    type de véhicule à l'origine de l'arrêt (généralisation Zylo Tanker,
+    2026-09-16) — réutilisé tel quel pour les arrêts de navire, jamais un
+    second schéma dupliqué (le reste des champs est déjà agnostique du
+    type de véhicule)."""
+
     id: uuid.UUID
-    truckId: uuid.UUID
+    truckId: uuid.UUID | None = None
+    vesselId: uuid.UUID | None = None
     latitude: float
     longitude: float
     startAt: datetime
-    endAt: datetime | None = Field(description="null tant que l'arrêt est en cours (camion toujours immobile) — rempli une fois le camion reparti.")
+    endAt: datetime | None = Field(description="null tant que l'arrêt est en cours (véhicule toujours immobile) — rempli une fois le véhicule reparti.")
     locationId: uuid.UUID | None = Field(default=None, description="Lieu de tracking reconnu automatiquement — null si non rattaché (hors de tout lieu connu, ou en attente de réconciliation manuelle).")
-    reconciliationStatus: str = Field(default="none", description="'none' (pas d'ambiguïté), 'pending' (ambigu, en attente d'arbitrage via /truck-stop-reconciliations) ou 'resolved' (ambiguïté tranchée manuellement).")
+    reconciliationStatus: str = Field(default="none", description="'none' (pas d'ambiguïté), 'pending' (ambigu, en attente d'arbitrage via /truck-stop-reconciliations ou /vessel-stop-reconciliations) ou 'resolved' (ambiguïté tranchée manuellement).")
 
     model_config = {"from_attributes": True}
 
@@ -214,3 +224,16 @@ class TruckCurrentPositionResponse(BaseModel):
     recordedAt: datetime | None = Field(description="Horodatage de la dernière position connue — null dans les mêmes cas que latitude/longitude.")
     channel: str | None
     currentStop: TruckStopEventResponse | None = Field(default=None, description="Arrêt en cours si le camion est actuellement immobile depuis le seuil de stabilisation configuré — null s'il est en mouvement ou sans position.")
+
+
+class VesselCurrentPositionResponse(BaseModel):
+    """Symétrique de `TruckCurrentPositionResponse` pour un navire
+    (généralisation Zylo Tanker, 2026-09-16) — une entrée existe pour
+    chaque navire de l'organisation, mêmes règles de champs null."""
+
+    vesselId: uuid.UUID
+    latitude: float | None = Field(description="null si le navire n'a pas de boîtier GPS assigné ou n'a jamais émis de position.")
+    longitude: float | None = Field(description="null si le navire n'a pas de boîtier GPS assigné ou n'a jamais émis de position.")
+    recordedAt: datetime | None = Field(description="Horodatage de la dernière position connue — null dans les mêmes cas que latitude/longitude.")
+    channel: str | None
+    currentStop: TruckStopEventResponse | None = Field(default=None, description="Arrêt en cours si le navire est actuellement immobile depuis le seuil de stabilisation configuré — null s'il est en mouvement ou sans position.")

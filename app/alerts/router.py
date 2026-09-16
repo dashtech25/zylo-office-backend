@@ -52,6 +52,7 @@ async def list_alerts(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
     truckId: uuid.UUID | None = None,
+    vesselId: uuid.UUID | None = None,
     tankId: uuid.UUID | None = None,
     type: str | None = None,
     status: str | None = None,
@@ -63,7 +64,7 @@ async def list_alerts(
 ) -> Page:
     """Pas de `require_permission(ALERT_READ)` global — même principe que
     `list_stations`/`list_deliveries`/`list_leak_events`."""
-    return await service.list_alerts(db, organization_id, current_user.id, pagination, stationId, tankId, type, status, fromDate, toDate, truckId)
+    return await service.list_alerts(db, organization_id, current_user.id, pagination, stationId, tankId, type, status, fromDate, toDate, truckId, vesselId)
 
 
 @router.get(

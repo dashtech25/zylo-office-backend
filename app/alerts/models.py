@@ -18,7 +18,12 @@ au moment du mapper configure, tant que les deux modules partagent la même
 repris ici à l'identique. `app/alerts/service.py`, en revanche, a besoin
 d'importer `Station`/`Truck` de `zylo_liquid.models` pour les jointures de
 portée (`list_alerts`/`_get_alert_and_tank`) — dépendance sanctionnée et
-documentée dans la docstring de `service.py`, jamais ici dans `models.py`."""
+documentée dans la docstring de `service.py`, jamais ici dans `models.py`.
+
+Généralisation Zylo Tanker (2026-09-16) — `Alert.vesselId`, ajouté à côté
+de `truckId`, référence `zyloTankerVessel.id` par le même mécanisme de
+résolution par nom de table, pour que l'alerte `truck_stop_unqualified`
+(arrêt non qualifié) puisse aussi être ouverte pour un navire."""
 
 import uuid
 from datetime import datetime
@@ -75,10 +80,11 @@ class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "\"resolutionMethod\" IS NULL OR \"resolutionMethod\" IN ('auto_verified','manual_justified')",
             name="ck_zlAlert_resolutionMethod",
         ),
-        # Étape 2 tracking — un camion n'est pas toujours rattaché à une
-        # station (arrêt hors lieu connu) : au moins l'un des deux doit
-        # être renseigné, jamais une alerte totalement orpheline.
-        CheckConstraint("\"stationId\" IS NOT NULL OR \"truckId\" IS NOT NULL", name="ck_zlAlert_station_or_truck"),
+        # Étape 2 tracking — un camion (ou, généralisation Zylo Tanker
+        # 2026-09-16, un navire) n'est pas toujours rattaché à une station
+        # (arrêt hors lieu connu) : au moins l'un des trois doit être
+        # renseigné, jamais une alerte totalement orpheline.
+        CheckConstraint("\"stationId\" IS NOT NULL OR \"truckId\" IS NOT NULL OR \"vesselId\" IS NOT NULL", name="ck_zlAlert_station_or_truck_or_vessel"),
         {"comment": "Alerte déclenchée automatiquement — cycle de vie active/acknowledged/resolved (refonte 2026-09, voir docstring)."},
     )
 
@@ -90,6 +96,13 @@ class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # où). Mutuellement complémentaire de stationId, voir CHECK ci-dessus.
     truckId: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("zyloLiquidTruck.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    # Généralisation Zylo Tanker (2026-09-16) — même principe que truckId,
+    # pour l'alerte `truck_stop_unqualified` (arrêt non qualifié) d'un
+    # navire. Mutuellement complémentaire de stationId/truckId, voir CHECK
+    # ci-dessus.
+    vesselId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloTankerVessel.id", ondelete="CASCADE"), nullable=True, index=True
     )
     tankId: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="CASCADE"), nullable=True, index=True

@@ -11,7 +11,20 @@ effort de redesign. À revoir seulement si un autre domaine a un jour
 besoin de suivi GPS indépendant. SQLAlchemy résout ces FK par nom de table
 au moment du mapper configure — elles fonctionnent tant que les deux
 modules partagent la même `Base` (`app.core.database.Base`), sans import
-Python direct entre les fichiers de modèles."""
+Python direct entre les fichiers de modèles.
+
+Généralisation Zylo Tanker (2026-09-16) — le deuxième consommateur anticipé
+par le paragraphe ci-dessus vient d'apparaître : `GpsDevice`,
+`GpsDeviceAssignment` et `TruckStopEvent` gagnent chacun une colonne
+`vesselId` nullable (même mécanisme de résolution de FK par nom de table,
+vers `zyloTankerVessel.id`), avec une contrainte CHECK qui interdit de
+renseigner `truckId` ET `vesselId` en même temps — même patron que
+`Alert.stationId`/`truckId`/`vesselId` (`app/alerts/models.py`).
+`TruckPositionPing` (déjà rattachée uniquement à `gpsDeviceId`, jamais à un
+véhicule directement) et `TruckTrackingLocation`/`TruckStopReconciliation`/
+`TruckStopComment`/`TrackingSettings` (jamais de FK véhicule directe) n'ont
+besoin d'aucune modification — voir le plan de mission pour le détail de
+cette vérification."""
 
 import uuid
 from datetime import datetime
@@ -63,19 +76,22 @@ class GpsIngestCredential(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class GpsDevice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Boîtier GPS enregistré — référentiel réseau, même portée que
-    `Truck`. `deviceIdentifier` est l'IMEI/numéro de série du boîtier,
-    fourni par Traccar dans chaque position pour retrouver le camion
-    correspondant. `truckId` nullable : un boîtier peut être enregistré
-    avant d'être posé sur un camion précis."""
+    `Truck`/`Vessel`. `deviceIdentifier` est l'IMEI/numéro de série du
+    boîtier, fourni par Traccar dans chaque position pour retrouver le
+    véhicule correspondant. `truckId`/`vesselId` nullables : un boîtier
+    peut être enregistré avant d'être posé sur un véhicule précis — jamais
+    les deux à la fois (voir la contrainte CHECK)."""
 
     __tablename__ = "zyloLiquidGpsDevice"
     __table_args__ = (
         UniqueConstraint("organizationId", "deviceIdentifier", name="uq_zlGpsDevice_org_identifier"),
-        {"comment": "Boîtier GPS — référentiel réseau, rattaché optionnellement à un camion."},
+        CheckConstraint("NOT (\"truckId\" IS NOT NULL AND \"vesselId\" IS NOT NULL)", name="ck_zlGpsDevice_truck_or_vessel"),
+        {"comment": "Boîtier GPS — référentiel réseau, rattaché optionnellement à un camion OU un navire, jamais les deux."},
     )
 
     organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id", ondelete="RESTRICT"), nullable=False, index=True)
     truckId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTruck.id", ondelete="SET NULL"), nullable=True, index=True)
+    vesselId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloTankerVessel.id", ondelete="SET NULL"), nullable=True, index=True)
     deviceIdentifier: Mapped[str] = mapped_column(String(50), nullable=False)
     label: Mapped[str | None] = mapped_column(String(150), nullable=True)
     active: Mapped[bool] = mapped_column(nullable=False, default=True)
@@ -114,11 +130,17 @@ class TruckStopEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "zyloLiquidTruckStopEvent"
     __table_args__ = (
         Index("ix_zlTruckStopEvent_truckId_startAt", "truckId", "startAt"),
+        Index("ix_zlTruckStopEvent_vesselId_startAt", "vesselId", "startAt"),
         CheckConstraint("\"reconciliationStatus\" IN ('none','pending','resolved')", name="ck_zlTruckStopEvent_reconciliationStatus"),
-        {"comment": "Arrêt détecté d'un camion — dérivé du flux de positions, jamais un second système de vérité."},
+        CheckConstraint(
+            "((\"truckId\" IS NOT NULL)::int + (\"vesselId\" IS NOT NULL)::int) = 1",
+            name="ck_zlTruckStopEvent_truck_xor_vessel",
+        ),
+        {"comment": "Arrêt détecté d'un camion ou d'un navire — dérivé du flux de positions, jamais un second système de vérité."},
     )
 
-    truckId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTruck.id", ondelete="RESTRICT"), nullable=False, index=True)
+    truckId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTruck.id", ondelete="RESTRICT"), nullable=True, index=True)
+    vesselId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloTankerVessel.id", ondelete="RESTRICT"), nullable=True, index=True)
     latitude: Mapped[float] = mapped_column(Numeric(10, 7), nullable=False)
     longitude: Mapped[float] = mapped_column(Numeric(10, 7), nullable=False)
     startAt: Mapped[datetime] = mapped_column(nullable=False)
@@ -151,11 +173,17 @@ class GpsDeviceAssignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         Index("ix_zlGpsDeviceAssignment_gpsDeviceId_assignedAt", "gpsDeviceId", "assignedAt"),
         Index("ix_zlGpsDeviceAssignment_truckId_assignedAt", "truckId", "assignedAt"),
-        {"comment": "Historique des périodes d'association boîtier<->camion — jamais réécrit, une réaffectation ferme la ligne active et en ouvre une nouvelle."},
+        Index("ix_zlGpsDeviceAssignment_vesselId_assignedAt", "vesselId", "assignedAt"),
+        CheckConstraint(
+            "((\"truckId\" IS NOT NULL)::int + (\"vesselId\" IS NOT NULL)::int) = 1",
+            name="ck_zlGpsDeviceAssignment_truck_xor_vessel",
+        ),
+        {"comment": "Historique des périodes d'association boîtier<->camion ou boîtier<->navire — jamais réécrit, une réaffectation ferme la ligne active et en ouvre une nouvelle."},
     )
 
     gpsDeviceId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidGpsDevice.id", ondelete="CASCADE"), nullable=False, index=True)
-    truckId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTruck.id", ondelete="CASCADE"), nullable=False, index=True)
+    truckId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTruck.id", ondelete="CASCADE"), nullable=True, index=True)
+    vesselId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloTankerVessel.id", ondelete="CASCADE"), nullable=True, index=True)
     assignedAt: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     unassignedAt: Mapped[datetime | None] = mapped_column(nullable=True)
 

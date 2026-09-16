@@ -1,8 +1,30 @@
-"""Routes du module Location (tracking GPS des camions-citernes) —
-extraites de `app/modules/zylo_liquid/router.py` (2026-09-15, Phase 2).
-Montées sous le même préfixe `/zylo-liquid` que précédemment (voir
-`app/api/v1/router.py`) : le déplacement du code entre modules Python ne
-doit jamais casser une URL déjà consommée par le frontend."""
+"""Routes du module Location (tracking GPS des camions-citernes ET,
+généralisation Zylo Tanker 2026-09-16, des navires) — extraites de
+`app/modules/zylo_liquid/router.py` (2026-09-15, Phase 2). Ce routeur est
+désormais monté DEUX FOIS dans `app/api/v1/router.py` : sous `/zylo-liquid`
+(comportement historique, inchangé) et sous `/zylo-tanker` (nouveau) — le
+déplacement/la duplication de montage ne doit jamais casser une URL déjà
+consommée par le frontend zylo_liquid.
+
+Faille de sécurité corrigée ici (2026-09-16, voir le plan de mission) :
+avant cette généralisation, `router = APIRouter()` n'avait AUCUNE garde
+`require_module_active` au niveau du routeur — contrairement à
+`zylo_liquid/router.py`, qui pose `Depends(require_module_active("zylo_liquid"))`
+une seule fois pour tout le routeur. Les routes de ce fichier
+(`/gps-devices`, `/trucks/current-positions`...) étaient donc accessibles
+même si l'organisation n'avait JAMAIS activé zylo_liquid. Avec deux modules
+consommateurs, une garde unique de routeur n'est de toute façon plus
+possible : chaque route reçoit maintenant une garde explicite —
+`require_module_active("zylo_liquid")` pour les routes camion,
+`require_module_active("zylo_tanker")` pour les routes navire, et
+`require_module_active_any("zylo_liquid", "zylo_tanker")`
+(`app/modules_registry/service.py`) pour les routes réellement partagées
+(boîtiers GPS, connexion Traccar, lieux nommés, réglages de tracking,
+secret d'ingestion) qui n'ont pas de deuxième URL dédiée — accessibles dès
+que l'UN des deux modules est actif. Seul le webhook d'ingestion
+(`POST /gps/ingest`) reste sans garde de module : Traccar ne sait pas
+distinguer camion/navire et n'a pas à le savoir, protégé uniquement par le
+secret d'ingestion de l'organisation."""
 
 import asyncio
 import json
@@ -39,38 +61,47 @@ from app.location.schemas import (
     UpdateGpsDeviceRequest,
     UpdateTrackingLocationRequest,
     UpdateTruckStopCommentRequest,
+    VesselCurrentPositionResponse,
 )
+from app.modules_registry.service import require_module_active, require_module_active_any
 from app.rbac.service import get_current_organization_id
 from app.shared.pagination import PaginationParams
 from app.shared.schemas import Page
 
 router = APIRouter()
 
+_ZYLO_LIQUID = Depends(require_module_active("zylo_liquid"))
+_ZYLO_TANKER = Depends(require_module_active("zylo_tanker"))
+_SHARED = Depends(require_module_active_any("zylo_liquid", "zylo_tanker"))
 
-@router.post("/gps-devices", response_model=GpsDeviceResponse, status_code=201, summary="Enregistrer un nouveau boîtier GPS")
+
+@router.post("/gps-devices", response_model=GpsDeviceResponse, status_code=201, summary="Enregistrer un nouveau boîtier GPS", dependencies=[_SHARED])
 async def create_gps_device(
     data: CreateGpsDeviceRequest,
     current_user: User = Depends(get_current_user),
     organization_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ) -> GpsDeviceResponse:
-    """Crée le boîtier et, si `truckId` est fourni, ouvre immédiatement une
-    période d'association dans l'historique boîtier<->camion."""
+    """Crée le boîtier et, si `truckId` (ou `vesselId`, généralisation Zylo
+    Tanker) est fourni, ouvre immédiatement une période d'association dans
+    l'historique boîtier<->véhicule. Route partagée entre `/zylo-liquid` et
+    `/zylo-tanker` (accessible dès que l'un des deux modules est actif)."""
     return await service.create_gps_device(db, organization_id, current_user.id, data)
 
 
-@router.get("/gps-devices", response_model=Page[GpsDeviceResponse], summary="Lister les boîtiers GPS de l'organisation")
+@router.get("/gps-devices", response_model=Page[GpsDeviceResponse], summary="Lister les boîtiers GPS de l'organisation", dependencies=[_SHARED])
 async def list_gps_devices(
     pagination: PaginationParams = Depends(),
     truckId: uuid.UUID | None = None,
+    vesselId: uuid.UUID | None = None,
     current_user: User = Depends(get_current_user),
     organization_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ) -> Page:
-    return await service.list_gps_devices(db, organization_id, current_user.id, pagination, truckId)
+    return await service.list_gps_devices(db, organization_id, current_user.id, pagination, truckId, vesselId)
 
 
-@router.patch("/gps-devices/{gps_device_id}", response_model=GpsDeviceResponse, summary="Modifier un boîtier GPS")
+@router.patch("/gps-devices/{gps_device_id}", response_model=GpsDeviceResponse, summary="Modifier un boîtier GPS", dependencies=[_SHARED])
 async def update_gps_device(
     gps_device_id: uuid.UUID,
     data: UpdateGpsDeviceRequest,
@@ -78,13 +109,14 @@ async def update_gps_device(
     organization_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ) -> GpsDeviceResponse:
-    """Réaffecter `truckId` à un nouveau camion ferme automatiquement la
-    période d'association active précédente et en ouvre une nouvelle —
-    refusé (409) si le camion cible a déjà un autre boîtier actif."""
+    """Réaffecter `truckId`/`vesselId` à un nouveau véhicule ferme
+    automatiquement la période d'association active précédente et en ouvre
+    une nouvelle — refusé (409) si le véhicule cible a déjà un autre
+    boîtier actif, ou (422) si les deux champs sont renseignés à la fois."""
     return await service.update_gps_device(db, organization_id, current_user.id, gps_device_id, data)
 
 
-@router.post("/gps-devices/{gps_device_id}/unassign", response_model=GpsDeviceResponse, summary="Dissocier un boîtier GPS de son camion")
+@router.post("/gps-devices/{gps_device_id}/unassign", response_model=GpsDeviceResponse, summary="Dissocier un boîtier GPS de son véhicule", dependencies=[_SHARED])
 async def unassign_gps_device(
     gps_device_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -92,13 +124,13 @@ async def unassign_gps_device(
     db: AsyncSession = Depends(get_db),
 ) -> GpsDeviceResponse:
     """Ferme la période d'association active dans l'historique — les
-    positions/arrêts déjà enregistrés restent attribués au camion précédent
-    pour toujours. Aucune étape de confirmation ici : la dissociation est
-    exécutée dès réception de l'appel."""
+    positions/arrêts déjà enregistrés restent attribués au véhicule
+    précédent pour toujours. Aucune étape de confirmation ici : la
+    dissociation est exécutée dès réception de l'appel."""
     return await service.unassign_gps_device(db, organization_id, current_user.id, gps_device_id)
 
 
-@router.get("/traccar-connection", response_model=TraccarConnectionResponse | None, summary="Lire la configuration de connexion à Traccar")
+@router.get("/traccar-connection", response_model=TraccarConnectionResponse | None, summary="Lire la configuration de connexion à Traccar", dependencies=[_SHARED])
 async def get_traccar_connection(
     current_user: User = Depends(get_current_user),
     organization_id: uuid.UUID = Depends(get_current_organization_id),
@@ -110,7 +142,7 @@ async def get_traccar_connection(
     return await service.get_traccar_connection(db, organization_id, current_user.id)
 
 
-@router.post("/traccar-connection", response_model=TraccarConnectionResponse, summary="Configurer (ou remplacer) la connexion à Traccar")
+@router.post("/traccar-connection", response_model=TraccarConnectionResponse, summary="Configurer (ou remplacer) la connexion à Traccar", dependencies=[_SHARED])
 async def set_traccar_connection(
     data: TraccarConnectionRequest,
     current_user: User = Depends(get_current_user),
@@ -124,7 +156,7 @@ async def set_traccar_connection(
     return await service.set_traccar_connection(db, organization_id, current_user.id, data)
 
 
-@router.get("/gps-devices/from-traccar", response_model=list[TraccarDeviceListItem], summary="Lister les boîtiers disponibles côté Traccar")
+@router.get("/gps-devices/from-traccar", response_model=list[TraccarDeviceListItem], summary="Lister les boîtiers disponibles côté Traccar", dependencies=[_SHARED])
 async def list_traccar_devices(
     current_user: User = Depends(get_current_user),
     organization_id: uuid.UUID = Depends(get_current_organization_id),
@@ -138,7 +170,7 @@ async def list_traccar_devices(
     return await service.list_traccar_devices(db, organization_id, current_user.id)
 
 
-@router.post("/tracking-locations", response_model=TrackingLocationResponse, status_code=201, summary="Créer un lieu de tracking nommé")
+@router.post("/tracking-locations", response_model=TrackingLocationResponse, status_code=201, summary="Créer un lieu de tracking nommé", dependencies=[_SHARED])
 async def create_tracking_location(
     data: CreateTrackingLocationRequest,
     current_user: User = Depends(get_current_user),
@@ -147,11 +179,13 @@ async def create_tracking_location(
 ) -> TrackingLocationResponse:
     """Un lieu connu (port, entrepôt, dépôt fournisseur ou lieu libre) que
     la détection d'arrêt tente ensuite de reconnaître automatiquement —
-    voir `resolve_truck_stop_reconciliation` pour le cas ambigu."""
+    voir `resolve_truck_stop_reconciliation` pour le cas ambigu. Partagé
+    entre camions et navires (le type 'port' sert aussi bien à qualifier
+    l'arrêt d'un camion que celui d'un navire)."""
     return await service.create_tracking_location(db, organization_id, current_user.id, data)
 
 
-@router.get("/tracking-locations", response_model=list[TrackingLocationResponse], summary="Lister les lieux de tracking")
+@router.get("/tracking-locations", response_model=list[TrackingLocationResponse], summary="Lister les lieux de tracking", dependencies=[_SHARED])
 async def list_tracking_locations(
     includeDeleted: bool = False,
     current_user: User = Depends(get_current_user),
@@ -161,7 +195,7 @@ async def list_tracking_locations(
     return await service.list_tracking_locations(db, organization_id, current_user.id, includeDeleted)
 
 
-@router.patch("/tracking-locations/{location_id}", response_model=TrackingLocationResponse, summary="Modifier un lieu de tracking")
+@router.patch("/tracking-locations/{location_id}", response_model=TrackingLocationResponse, summary="Modifier un lieu de tracking", dependencies=[_SHARED])
 async def update_tracking_location(
     location_id: uuid.UUID,
     data: UpdateTrackingLocationRequest,
@@ -176,7 +210,7 @@ async def update_tracking_location(
     return await service.update_tracking_location(db, organization_id, current_user.id, location_id, data)
 
 
-@router.delete("/tracking-locations/{location_id}", response_model=TrackingLocationResponse, summary="Supprimer un lieu de tracking")
+@router.delete("/tracking-locations/{location_id}", response_model=TrackingLocationResponse, summary="Supprimer un lieu de tracking", dependencies=[_SHARED])
 async def delete_tracking_location(
     location_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -189,7 +223,7 @@ async def delete_tracking_location(
     return await service.delete_tracking_location(db, organization_id, current_user.id, location_id)
 
 
-@router.get("/truck-stop-reconciliations", response_model=list[TruckStopReconciliationResponse], summary="Lister les arrêts en attente de réconciliation manuelle")
+@router.get("/truck-stop-reconciliations", response_model=list[TruckStopReconciliationResponse], summary="Lister les arrêts camion en attente de réconciliation manuelle", dependencies=[_ZYLO_LIQUID])
 async def list_truck_stop_reconciliations(
     status: str | None = "pending",
     current_user: User = Depends(get_current_user),
@@ -203,7 +237,7 @@ async def list_truck_stop_reconciliations(
     return await service.list_truck_stop_reconciliations(db, organization_id, current_user.id, status)
 
 
-@router.post("/truck-stop-reconciliations/{reconciliation_id}/resolve", response_model=TruckStopReconciliationResponse, summary="Trancher manuellement un arrêt ambigu entre plusieurs lieux candidats")
+@router.post("/truck-stop-reconciliations/{reconciliation_id}/resolve", response_model=TruckStopReconciliationResponse, summary="Trancher manuellement un arrêt camion ambigu entre plusieurs lieux candidats", dependencies=[_ZYLO_LIQUID])
 async def resolve_truck_stop_reconciliation(
     reconciliation_id: uuid.UUID,
     data: ResolveTruckStopReconciliationRequest,
@@ -218,7 +252,33 @@ async def resolve_truck_stop_reconciliation(
     return await service.resolve_truck_stop_reconciliation(db, organization_id, current_user.id, reconciliation_id, data)
 
 
-@router.post("/truck-stops/{stop_id}/comments", response_model=TruckStopCommentResponse, status_code=201, summary="Ajouter un commentaire sur un arrêt de camion")
+@router.get("/vessel-stop-reconciliations", response_model=list[TruckStopReconciliationResponse], summary="Lister les arrêts navire en attente de réconciliation manuelle", dependencies=[_ZYLO_TANKER])
+async def list_vessel_stop_reconciliations(
+    status: str | None = "pending",
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[TruckStopReconciliationResponse]:
+    """Symétrique de `/truck-stop-reconciliations` (généralisation Zylo
+    Tanker, 2026-09-16), pour les navires."""
+    return await service.list_vessel_stop_reconciliations(db, organization_id, current_user.id, status)
+
+
+@router.post("/vessel-stop-reconciliations/{reconciliation_id}/resolve", response_model=TruckStopReconciliationResponse, summary="Trancher manuellement un arrêt navire ambigu entre plusieurs lieux candidats", dependencies=[_ZYLO_TANKER])
+async def resolve_vessel_stop_reconciliation(
+    reconciliation_id: uuid.UUID,
+    data: ResolveTruckStopReconciliationRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TruckStopReconciliationResponse:
+    """Réutilise `service.resolve_truck_stop_reconciliation`, déjà
+    agnostique du type de véhicule (résout l'arrêt via `_get_truck_stop_or_404`,
+    généralisé) — jamais de logique dupliquée, seule la route/garde diffère."""
+    return await service.resolve_truck_stop_reconciliation(db, organization_id, current_user.id, reconciliation_id, data)
+
+
+@router.post("/truck-stops/{stop_id}/comments", response_model=TruckStopCommentResponse, status_code=201, summary="Ajouter un commentaire sur un arrêt de camion", dependencies=[_ZYLO_LIQUID])
 async def create_truck_stop_comment(
     stop_id: uuid.UUID,
     data: CreateTruckStopCommentRequest,
@@ -229,7 +289,7 @@ async def create_truck_stop_comment(
     return await service.create_truck_stop_comment(db, organization_id, current_user.id, stop_id, data)
 
 
-@router.get("/truck-stops/{stop_id}/comments", response_model=list[TruckStopCommentResponse], summary="Lister les commentaires d'un arrêt de camion")
+@router.get("/truck-stops/{stop_id}/comments", response_model=list[TruckStopCommentResponse], summary="Lister les commentaires d'un arrêt de camion", dependencies=[_ZYLO_LIQUID])
 async def list_truck_stop_comments(
     stop_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -239,7 +299,7 @@ async def list_truck_stop_comments(
     return await service.list_truck_stop_comments(db, organization_id, current_user.id, stop_id)
 
 
-@router.patch("/truck-stop-comments/{comment_id}", response_model=TruckStopCommentResponse, summary="Modifier un commentaire d'arrêt")
+@router.patch("/truck-stop-comments/{comment_id}", response_model=TruckStopCommentResponse, summary="Modifier un commentaire d'arrêt de camion", dependencies=[_ZYLO_LIQUID])
 async def update_truck_stop_comment(
     comment_id: uuid.UUID,
     data: UpdateTruckStopCommentRequest,
@@ -250,7 +310,7 @@ async def update_truck_stop_comment(
     return await service.update_truck_stop_comment(db, organization_id, current_user.id, comment_id, data)
 
 
-@router.delete("/truck-stop-comments/{comment_id}", status_code=204, summary="Supprimer un commentaire d'arrêt")
+@router.delete("/truck-stop-comments/{comment_id}", status_code=204, summary="Supprimer un commentaire d'arrêt de camion", dependencies=[_ZYLO_LIQUID])
 async def delete_truck_stop_comment(
     comment_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -260,7 +320,52 @@ async def delete_truck_stop_comment(
     await service.delete_truck_stop_comment(db, organization_id, current_user.id, comment_id)
 
 
-@router.get("/tracking-settings", response_model=TrackingSettingsResponse, summary="Lire les réglages de tracking de l'organisation")
+@router.post("/vessel-stops/{stop_id}/comments", response_model=TruckStopCommentResponse, status_code=201, summary="Ajouter un commentaire sur un arrêt de navire", dependencies=[_ZYLO_TANKER])
+async def create_vessel_stop_comment(
+    stop_id: uuid.UUID,
+    data: CreateTruckStopCommentRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TruckStopCommentResponse:
+    """Symétrique de `/truck-stops/{stop_id}/comments` — réutilise
+    `service.create_truck_stop_comment`, déjà agnostique du type de
+    véhicule (voir sa docstring)."""
+    return await service.create_truck_stop_comment(db, organization_id, current_user.id, stop_id, data)
+
+
+@router.get("/vessel-stops/{stop_id}/comments", response_model=list[TruckStopCommentResponse], summary="Lister les commentaires d'un arrêt de navire", dependencies=[_ZYLO_TANKER])
+async def list_vessel_stop_comments(
+    stop_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[TruckStopCommentResponse]:
+    return await service.list_truck_stop_comments(db, organization_id, current_user.id, stop_id)
+
+
+@router.patch("/vessel-stop-comments/{comment_id}", response_model=TruckStopCommentResponse, summary="Modifier un commentaire d'arrêt de navire", dependencies=[_ZYLO_TANKER])
+async def update_vessel_stop_comment(
+    comment_id: uuid.UUID,
+    data: UpdateTruckStopCommentRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> TruckStopCommentResponse:
+    return await service.update_truck_stop_comment(db, organization_id, current_user.id, comment_id, data)
+
+
+@router.delete("/vessel-stop-comments/{comment_id}", status_code=204, summary="Supprimer un commentaire d'arrêt de navire", dependencies=[_ZYLO_TANKER])
+async def delete_vessel_stop_comment(
+    comment_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await service.delete_truck_stop_comment(db, organization_id, current_user.id, comment_id)
+
+
+@router.get("/tracking-settings", response_model=TrackingSettingsResponse, summary="Lire les réglages de tracking de l'organisation", dependencies=[_SHARED])
 async def get_tracking_settings(
     current_user: User = Depends(get_current_user),
     organization_id: uuid.UUID = Depends(get_current_organization_id),
@@ -268,11 +373,11 @@ async def get_tracking_settings(
 ) -> TrackingSettingsResponse:
     """Un champ à `null` signifie qu'aucun réglage personnalisé n'a été
     défini pour cette organisation — le backend applique alors ses valeurs
-    par défaut internes (non exposées ici)."""
+    par défaut internes (non exposées ici). Partagé camion/navire."""
     return await service.get_tracking_settings(db, organization_id, current_user.id)
 
 
-@router.patch("/tracking-settings", response_model=TrackingSettingsResponse, summary="Modifier les réglages de tracking de l'organisation")
+@router.patch("/tracking-settings", response_model=TrackingSettingsResponse, summary="Modifier les réglages de tracking de l'organisation", dependencies=[_SHARED])
 async def update_tracking_settings(
     data: TrackingSettingsRequest,
     current_user: User = Depends(get_current_user),
@@ -282,7 +387,7 @@ async def update_tracking_settings(
     return await service.update_tracking_settings(db, organization_id, current_user.id, data)
 
 
-@router.get("/gps-ingest-credential", summary="Lire (ou générer au premier appel) le secret d'ingestion GPS")
+@router.get("/gps-ingest-credential", summary="Lire (ou générer au premier appel) le secret d'ingestion GPS", dependencies=[_SHARED])
 async def get_gps_ingest_credential(
     current_user: User = Depends(get_current_user),
     organization_id: uuid.UUID = Depends(get_current_organization_id),
@@ -291,12 +396,13 @@ async def get_gps_ingest_credential(
     """Ce secret est celui à renseigner dans la configuration de renvoi
     (forwarding) Traccar vers `POST /gps/ingest` — il n'est jamais
     rejournalisé après sa création, seul ce endpoint permet de le
-    reconsulter."""
+    reconsulter. Un seul secret par organisation, quel que soit le nombre
+    de boîtiers camion/navire qui l'utilisent."""
     token = await service.get_or_create_gps_ingest_credential(db, organization_id, current_user.id)
     return {"secretToken": token}
 
 
-@router.post("/gps-ingest-credential/regenerate", summary="Régénérer le secret d'ingestion GPS")
+@router.post("/gps-ingest-credential/regenerate", summary="Régénérer le secret d'ingestion GPS", dependencies=[_SHARED])
 async def regenerate_gps_ingest_credential(
     current_user: User = Depends(get_current_user),
     organization_id: uuid.UUID = Depends(get_current_organization_id),
@@ -318,14 +424,15 @@ async def ingest_truck_position(
 ) -> TruckPositionPingResponse:
     """Webhook appelé par Traccar (passerelle protocole GPS) — jamais un
     utilisateur Zylo Office connecté, aucune dépendance `get_current_user`
-    ici (le routeur zylo_liquid exige tout de même X-Organization-Id pour
-    `require_module_active`, réutilisé comme défense en profondeur : le
-    secret doit correspondre à CETTE organisation précisément, pas
-    n'importe laquelle)."""
+    ici. Volontairement SANS garde `require_module_active` (ni zylo_liquid
+    ni zylo_tanker ni la variante `_any`) : un seul webhook sert les deux
+    types de boîtier, Traccar ne sait pas la différence et n'a pas à la
+    savoir — protégé uniquement par le secret d'ingestion de l'organisation
+    (`X-Gps-Ingest-Secret`), vérifié dans `service.ingest_truck_position`."""
     return await service.ingest_truck_position(db, organization_id, x_gps_ingest_secret, data)
 
 
-@router.get("/trucks/current-positions", response_model=list[TruckCurrentPositionResponse], summary="Dernière position connue de chaque camion (pour la carte)")
+@router.get("/trucks/current-positions", response_model=list[TruckCurrentPositionResponse], summary="Dernière position connue de chaque camion (pour la carte)", dependencies=[_ZYLO_LIQUID])
 async def list_truck_current_positions(
     current_user: User = Depends(get_current_user),
     organization_id: uuid.UUID = Depends(get_current_organization_id),
@@ -342,10 +449,21 @@ async def list_truck_current_positions(
     return await service.list_truck_current_positions(db, organization_id, current_user.id)
 
 
+@router.get("/vessels/current-positions", response_model=list[VesselCurrentPositionResponse], summary="Dernière position connue de chaque navire (pour la carte)", dependencies=[_ZYLO_TANKER])
+async def list_vessel_current_positions(
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[VesselCurrentPositionResponse]:
+    """Symétrique de `/trucks/current-positions` (généralisation Zylo
+    Tanker, 2026-09-16)."""
+    return await service.list_vessel_current_positions(db, organization_id, current_user.id)
+
+
 _LIVE_POSITIONS_POLL_SECONDS = 5.0
 
 
-@router.get("/trucks/live-positions", summary="Flux SSE des positions courantes de tous les camions")
+@router.get("/trucks/live-positions", summary="Flux SSE des positions courantes de tous les camions", dependencies=[_ZYLO_LIQUID])
 async def stream_truck_live_positions(
     current_user: User = Depends(get_current_user),
     organization_id: uuid.UUID = Depends(get_current_organization_id),
@@ -394,7 +512,36 @@ async def stream_truck_live_positions(
     )
 
 
-@router.get("/trucks/{truck_id}/positions", response_model=list[TruckPositionPingResponse], summary="Historique des positions GPS d'un camion")
+@router.get("/vessels/live-positions", summary="Flux SSE des positions courantes de tous les navires", dependencies=[_ZYLO_TANKER])
+async def stream_vessel_live_positions(
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+) -> StreamingResponse:
+    """Symétrique de `/trucks/live-positions` (généralisation Zylo Tanker,
+    2026-09-16) — même mécanique (polling `AsyncSessionLocal` frais à
+    chaque itération), jamais dupliquée en profondeur, seule la fonction
+    de résolution des positions courantes diffère."""
+    async def event_generator():
+        while True:
+            try:
+                async with AsyncSessionLocal() as db:
+                    positions = await service.list_vessel_current_positions(db, organization_id, current_user.id)
+                payload = json.dumps([p.model_dump(mode="json") for p in positions])
+                yield f"data: {payload}\n\n".encode()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logging.getLogger(__name__).exception("échec du flux de positions en direct (navire)")
+            await asyncio.sleep(_LIVE_POSITIONS_POLL_SECONDS)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/trucks/{truck_id}/positions", response_model=list[TruckPositionPingResponse], summary="Historique des positions GPS d'un camion", dependencies=[_ZYLO_LIQUID])
 async def list_truck_positions(
     truck_id: uuid.UUID,
     since: datetime | None = None,
@@ -417,7 +564,23 @@ async def list_truck_positions(
     return await service.list_truck_positions(db, organization_id, current_user.id, truck_id, resolved_since, resolved_until)
 
 
-@router.get("/trucks/{truck_id}/stops", response_model=list[TruckStopEventResponse], summary="Historique des arrêts détectés d'un camion")
+@router.get("/vessels/{vessel_id}/positions", response_model=list[TruckPositionPingResponse], summary="Historique des positions GPS d'un navire", dependencies=[_ZYLO_TANKER])
+async def list_vessel_positions(
+    vessel_id: uuid.UUID,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[TruckPositionPingResponse]:
+    """Symétrique de `/trucks/{truck_id}/positions` (généralisation Zylo
+    Tanker, 2026-09-16)."""
+    resolved_until = (until or datetime.now(timezone.utc)).replace(tzinfo=None)
+    resolved_since = (since.replace(tzinfo=None) if since else resolved_until - timedelta(hours=24))
+    return await service.list_vessel_positions(db, organization_id, current_user.id, vessel_id, resolved_since, resolved_until)
+
+
+@router.get("/trucks/{truck_id}/stops", response_model=list[TruckStopEventResponse], summary="Historique des arrêts détectés d'un camion", dependencies=[_ZYLO_LIQUID])
 async def list_truck_stops(
     truck_id: uuid.UUID,
     since: datetime | None = None,
@@ -439,3 +602,20 @@ async def list_truck_stops(
     resolved_since = (since.replace(tzinfo=None) if since else resolved_until - timedelta(hours=24))
     return await service.list_truck_stops(db, organization_id, current_user.id, truck_id, resolved_since, resolved_until)
 
+
+@router.get("/vessels/{vessel_id}/stops", response_model=list[TruckStopEventResponse], summary="Historique des arrêts détectés d'un navire", dependencies=[_ZYLO_TANKER])
+async def list_vessel_stops(
+    vessel_id: uuid.UUID,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[TruckStopEventResponse]:
+    """Symétrique de `/trucks/{truck_id}/stops` (généralisation Zylo
+    Tanker, 2026-09-16) — même algorithme de détection d'arrêt
+    (`detect_truck_stops`), même reconnaissance automatique de lieu connu,
+    même file de réconciliation (`/vessel-stop-reconciliations`)."""
+    resolved_until = (until or datetime.now(timezone.utc)).replace(tzinfo=None)
+    resolved_since = (since.replace(tzinfo=None) if since else resolved_until - timedelta(hours=24))
+    return await service.list_vessel_stops(db, organization_id, current_user.id, vessel_id, resolved_since, resolved_until)

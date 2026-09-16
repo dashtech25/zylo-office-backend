@@ -21,6 +21,7 @@ class AlertResponse(BaseModel):
     id: uuid.UUID
     stationId: uuid.UUID | None = Field(default=None, description="Station à laquelle l'alerte est rattachée. Mutuellement exclusif de `truckId` en pratique (une alerte a une seule origine, station ou camion) même si la contrainte en base exige seulement qu'au moins l'un des deux soit renseigné.")
     truckId: uuid.UUID | None = Field(default=None, description="Camion auquel l'alerte est rattachée, en alternative à `stationId` (ex. type `truck_stop_unqualified` : arrêt hors de tout lieu connu).")
+    vesselId: uuid.UUID | None = Field(default=None, description="Navire auquel l'alerte est rattachée, en alternative à `stationId`/`truckId` (ex. type `truck_stop_unqualified` pour un arrêt de navire hors de tout lieu connu).")
     tankId: uuid.UUID | None
     productId: uuid.UUID | None
     type: str = Field(description="Nature de l'alerte (ex. seuil de niveau, fuite suspectée, écart de réconciliation) — détermine si elle peut être vérifiée/résolue automatiquement.")

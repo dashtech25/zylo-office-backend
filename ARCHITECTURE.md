@@ -129,10 +129,14 @@ l'appelant connaît l'API publique de l'appelé.
 code signale un fait qui vient de se produire, sans savoir ni se soucier de
 qui réagit (zéro, un ou plusieurs abonnés, aujourd'hui ou demain). L'émetteur
 ne référence jamais le module abonné.
-> Exemple prévu (Phase 5) : la détection d'arrêt non qualifié dans
-> `location` publie `TruckStopUnqualified` au lieu d'appeler directement
-> `app.alerts.service._upsert_active_alert`. `alerts` s'abonne à cet
-> événement. `location` n'importe jamais `app.alerts` — si demain un second
+> Exemple en place (Phase 5) : la détection d'arrêt non qualifié dans
+> `location` publie `TruckStopUnqualified` (`app.shared.events.publish`)
+> au lieu d'appeler directement `app.alerts.service.upsert_active_alert`
+> comme le faisait la Phase 3. `alerts` s'abonne à cet événement via
+> `handle_truck_stop_unqualified` — inscription faite dans `app/main.py`
+> (le point de composition central, le seul endroit autorisé à faire se
+> connaître deux modules qui, sinon, n'ont plus besoin de s'importer).
+> `location` n'importe plus `app.alerts` du tout — si demain un second
 > module veut aussi réagir à un arrêt non qualifié (ex. notifications), il
 > s'abonne au même événement sans que `location` change une ligne.
 
@@ -162,7 +166,7 @@ indépendamment (jamais un gros commit unique) :
 | 2 | Extraire `app/location/` (GPS : `GpsDevice`, `TruckPositionPing`, détection d'arrêt...) — FK stricte conservée vers `zyloLiquidTruck.id`, URLs `/api/v1/zylo-liquid/...` gardées stables côté frontend | fait — `8020c61` |
 | 3 | Extraire `app/alerts/` (`Alert`, FK strictes conservées vers station/truck/tank/product — pas de redesign de schéma dans cette phase) | fait — `74e772c` |
 | 4 | Extraire `app/integrations/holykell/` (client HTTP + DTO) | fait — `a78ca84` (suppression de `scripts/sync_holykell_live.py` non faite, voir note) |
-| 5 | `app/shared/events.py` (`subscribe`/`publish`), premier cas d'usage réel : `TruckStopUnqualified` (location → alerts) | — |
+| 5 | `app/shared/events.py` (`subscribe`/`publish`), premier cas d'usage réel : `TruckStopUnqualified` (location → alerts) | fait — `fb648e0` |
 | 6 | Étendre les contrats `import-linter` à tous les nouveaux modules, CI bloquante sur violation | — |
 
 Note : Phases 1 et 2 ont été livrées dans un même commit (`8020c61`,

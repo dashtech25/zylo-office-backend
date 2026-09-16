@@ -167,7 +167,7 @@ indépendamment (jamais un gros commit unique) :
 | 3 | Extraire `app/alerts/` (`Alert`, FK strictes conservées vers station/truck/tank/product — pas de redesign de schéma dans cette phase) | fait — `74e772c` |
 | 4 | Extraire `app/integrations/holykell/` (client HTTP + DTO) | fait — `a78ca84` (suppression de `scripts/sync_holykell_live.py` non faite, voir note) |
 | 5 | `app/shared/events.py` (`subscribe`/`publish`), premier cas d'usage réel : `TruckStopUnqualified` (location → alerts) | fait — `fb648e0` |
-| 6 | Étendre les contrats `import-linter` à tous les nouveaux modules, CI bloquante sur violation | — |
+| 6 | Étendre les contrats `import-linter` à tous les nouveaux modules, CI bloquante sur violation | fait — `f3d5819` |
 
 Note : Phases 1 et 2 ont été livrées dans un même commit (`8020c61`,
 2026-09-15) — travail enchaîné sans commit intermédiaire entre les deux.
@@ -215,7 +215,7 @@ un import qui viole un contrat fait échouer le build, indépendamment de la
 relecture humaine. C'est ce qui transforme les règles de ce document d'une
 convention (facile à oublier sous pression) en contrainte vérifiée.
 
-9 contrats en place (Phases 0-4, voir `.importlinter`) :
+10 contrats en place (Phases 0-6, voir `.importlinter`) :
 - `identity-rbac-not-reachable-from-internals` — `zylo_liquid` ne peut
   jamais importer `app.identity.security`/`app.rbac.security` (détails
   internes), seulement leurs points d'entrée publics.
@@ -254,12 +254,21 @@ convention (facile à oublier sous pression) en contrainte vérifiée.
   (`app.integrations.holykell.client` : login, appels HTTP, DTO
   `HolykellSensorReading`), pas de `models.py` séparé à protéger — il n'y a
   encore rien d'autre à cacher derrière.
+- `capabilities-never-import-each-other` (Phase 6, `type = independence`)
+  — Files/Location/Alertes/Holykell ne s'importent jamais entre elles, ni
+  directement ni indirectement. Seul type de contrat `import-linter` conçu
+  pour ce besoin précis : les 9 contrats précédents ne protègent chacun
+  qu'un sens `zylo_liquid`<->capacité, jamais capacité<->capacité. Un
+  `ignore_imports` documenté dans `.importlinter` élimine un faux positif
+  transitif réel (chaque routeur de capacité dépend de
+  `app.modules_registry.service` pour `require_module_active`, qui importe
+  paresseusement `zylo_liquid.roles_seed` au moment de l'activation du
+  module — rien à voir avec une capacité qui en atteint une autre).
 
-Contrats prévus à mesure que la Phase 6 avance (à ajouter dans
-`.importlinter` au moment de chaque extraction, pas après coup) :
-- Étendre les contrats existants si un jour `app.integrations.holykell`
-  gagne un sous-module interne (ex. un futur second fournisseur de
-  télémétrie) qui devrait rester caché derrière `client.py`.
+Migration terminée (Phases 0-6) — plus de contrats "prévus" en attente.
+Le prochain contrat à écrire sera celui du prochain module qui s'extrait,
+suivant exactement le même patron que ci-dessus (jamais une nouvelle
+convention à inventer).
 
 Ce qu'`import-linter` ne vérifie pas (à garder en tête, ce ne sont pas des
 trous dans l'outil mais des limites connues) : il ne vérifie ni la

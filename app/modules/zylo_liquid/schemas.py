@@ -255,6 +255,9 @@ class UpdateTankRequest(BaseModel):
     capacityLiters: float | None = Field(default=None, gt=0)
     calibratedCapacityLiters: float | None = Field(default=None, description="Capacité réelle mesurée par jaugeage (peut différer de `capacityLiters`, la capacité nominale constructeur) — utilisée pour les calculs de volume quand disponible.")
     tankHeightMm: float | None = Field(default=None, gt=0)
+    fuelProductId: uuid.UUID | None = Field(default=None, description="Nouveau produit carburant existant à associer à la cuve — exclusif avec newFuelProductName/newFuelProductCode (P0-1, audit module Stations 2026-09-16).")
+    newFuelProductName: str | None = Field(default=None, min_length=1, max_length=100, description="Crée un nouveau produit carburant à la volée puis l'associe à la cuve — exclusif avec fuelProductId, requiert newFuelProductCode.")
+    newFuelProductCode: str | None = Field(default=None, min_length=1, max_length=10)
     heightAlarmMm: float | None = Field(default=None, description="Seuil haut critique (mm), voir `CreateTankRequest.heightAlarmMm`.")
     heightAlertMm: float | None = Field(default=None, description="Seuil haut d'alerte (mm), voir `CreateTankRequest.heightAlertMm`.")
     lowAlarmMm: float | None = Field(default=None, description="Seuil bas critique (mm), voir `CreateTankRequest.lowAlarmMm`.")
@@ -1508,6 +1511,24 @@ class CreateStationStaffResponse(BaseModel):
     aucun autre endpoint (StationStaffResponse ne le porte pas)."""
 
     staff: StationStaffResponse
+    temporaryPassword: str
+
+
+class ChangeStationStaffRoleRequest(BaseModel):
+    """Remplace, pour ce membre du personnel, l'attribution de rôle scopée à
+    sa station d'affectation — jamais une attribution organisation entière
+    (voir `change_station_staff_role`, qui réutilise `assign_role`/
+    `unassign_role` du RBAC générique avec la même protection anti-escalade
+    de privilèges)."""
+
+    roleId: uuid.UUID
+
+
+class ResetStationStaffPasswordResponse(BaseModel):
+    """Même contrat que `CreateStationStaffResponse.temporaryPassword` : le
+    mot de passe temporaire n'apparaît qu'ici, une seule fois, jamais stocké
+    en clair ni rejouable ensuite."""
+
     temporaryPassword: str
 
 

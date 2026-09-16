@@ -17,7 +17,8 @@ from app.files.schemas import DocumentResponse
 from app.core.security import hash_password
 from app.identity.models import OrganizationUser, User
 from app.identity.service import build_user, check_email_available
-from app.rbac.service import assign_role
+from app.rbac.models import UserRole
+from app.rbac.service import assign_role, unassign_role
 from app.shared.simple_cache import TTLCache
 from app.shared.storage import get_storage_backend
 
@@ -233,6 +234,8 @@ from app.modules.zylo_liquid.schemas import (
     UpdateStationStaffRequest,
     StationStaffResponse,
     CreateStationStaffResponse,
+    ChangeStationStaffRoleRequest,
+    ResetStationStaffPasswordResponse,
     UpdateStationFuelProductThresholdsRequest,
     StationFuelProductOverviewResponse,
     CreateStationServiceRequest,
@@ -877,14 +880,52 @@ async def get_tank(db: AsyncSession, organization_id: uuid.UUID, tank_id: uuid.U
     return tank
 
 
+_TANK_PRODUCT_UPDATE_FIELDS = {"fuelProductId", "newFuelProductName", "newFuelProductCode"}
+
+
 async def update_tank(
     db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, tank_id: uuid.UUID, data: UpdateTankRequest
 ) -> Tank:
     tank = await get_tank(db, organization_id, tank_id)
-    updates = data.model_dump(exclude_unset=True)
+    updates = data.model_dump(exclude_unset=True, exclude=_TANK_PRODUCT_UPDATE_FIELDS)
     before = {field: getattr(tank, field) for field in updates}
     for field, value in updates.items():
         setattr(tank, field, value)
+
+    # Changement de produit carburant (P0-1, audit module Stations
+    # 2026-09-16) — traité à part du reste car il exige de résoudre/créer un
+    # FuelProduct, exactement comme `create_tank` : soit un produit
+    # existant, soit un nouveau créé à la volée, jamais aucun des deux ni les
+    # deux à la fois. `productSince` n'est mis à jour que si le produit
+    # résolu diffère réellement de l'actuel, pour ne jamais réinitialiser
+    # cette date lors d'une simple modification de seuils.
+    has_existing_product = data.fuelProductId is not None
+    has_new_product = data.newFuelProductName is not None or data.newFuelProductCode is not None
+    if has_existing_product or has_new_product:
+        if has_existing_product and has_new_product:
+            raise AppError(
+                code="fuel_product_selection_invalid",
+                message="Fournir soit fuelProductId, soit newFuelProductName + newFuelProductCode — jamais les deux.",
+                status_code=422,
+            )
+        if has_existing_product:
+            fuel_product = await get_fuel_product(db, organization_id, data.fuelProductId)
+        else:
+            if not data.newFuelProductName or not data.newFuelProductCode:
+                raise AppError(
+                    code="fuel_product_selection_invalid",
+                    message="newFuelProductName et newFuelProductCode sont tous deux requis pour créer un produit à la volée.",
+                    status_code=422,
+                )
+            fuel_product = await create_fuel_product(
+                db, organization_id, CreateFuelProductRequest(name=data.newFuelProductName, code=data.newFuelProductCode)
+            )
+        if fuel_product.id != tank.fuelProductId:
+            before["fuelProductId"] = tank.fuelProductId
+            updates["fuelProductId"] = fuel_product.id
+            tank.fuelProductId = fuel_product.id
+            tank.productSince = date.today()
+
     await record_audit_event(
         db,
         organization_id,
@@ -5726,6 +5767,73 @@ async def deactivate_station_staff_access(db: AsyncSession, organization_id: uui
     await db.refresh(profile)
     await db.refresh(user)
     return _station_staff_response(profile, user)
+
+
+async def change_station_staff_role(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, user_id: uuid.UUID, data: ChangeStationStaffRoleRequest
+) -> StationStaffResponse:
+    """Remplace l'attribution de rôle de ce membre du personnel, scopée à sa
+    station d'affectation (mission « fiche Personnel — gestion des droits »,
+    2026-09-16). Contourne volontairement les endpoints RBAC génériques
+    (`POST /rbac/.../user-roles`), qui exigent `ROLE_MANAGE` organisation
+    entière et sont donc inutilisables par un gérant de station — même
+    pattern que `create_station_staff_member` : `assign_role` est appelé
+    directement en tant que fonction de service, après vérification de
+    `STATION_STAFF_MANAGE` scopée à la station. La protection anti-escalade
+    de privilèges d'`assign_role` (`_assert_no_privilege_escalation`)
+    s'applique sans changement : un gérant ne peut jamais attribuer un rôle
+    plus puissant que le sien sur cette même station."""
+    profile, user = await _get_station_staff_or_404(db, organization_id, user_id)
+    if profile.assignedStationId is None:
+        raise AppError(code="station_staff_not_assigned", message="Ce membre du personnel n'est rattaché à aucune station.", status_code=422)
+    station = await get_station(db, organization_id, profile.assignedStationId)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_MANAGE)
+
+    result = await db.execute(
+        select(UserRole).where(
+            UserRole.organizationId == organization_id,
+            UserRole.userId == user_id,
+            UserRole.resourceType == "station",
+            UserRole.resourceId == profile.assignedStationId,
+        )
+    )
+    for existing_assignment in result.scalars().all():
+        await unassign_role(db, organization_id, actor_user_id, existing_assignment.id)
+
+    await assign_role(db, organization_id, actor_user_id, user_id, data.roleId, resource_type="station", resource_id=profile.assignedStationId)
+    await db.refresh(profile)
+    await db.refresh(user)
+    return _station_staff_response(profile, user)
+
+
+async def reset_station_staff_password(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, user_id: uuid.UUID
+) -> str:
+    """Réinitialisation d'un mot de passe PAR UN TIERS (fiche Personnel) —
+    distinct de `change_password` (libre-service, exige l'ancien mot de
+    passe). Même mécanisme que la création d'un membre du personnel
+    (`create_station_staff_member`) : mot de passe temporaire généré côté
+    serveur, jamais choisi par la personne, retourné en clair une seule fois
+    dans cette réponse, jamais stocké ni rejouable ensuite — force un
+    changement via `POST /auth/change-password` à la prochaine connexion."""
+    profile, user = await _get_station_staff_or_404(db, organization_id, user_id)
+    if profile.assignedStationId is not None:
+        station = await get_station(db, organization_id, profile.assignedStationId)
+        await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_MANAGE)
+    else:
+        await _check_org_scope(db, organization_id, actor_user_id, STATION_STAFF_MANAGE)
+
+    temporary_password = secrets.token_urlsafe(9)
+    user.hashedPassword = hash_password(temporary_password)
+    user.mustChangePassword = True
+    await record_audit_event(
+        db, organization_id, actor_user_id,
+        action="zyloLiquid.stationStaff.passwordReset", entity_type="User", entity_id=user.id,
+        summary=f"Réinitialisation du mot de passe de {user.fullName}",
+        scope_resource_type="station", scope_resource_id=profile.assignedStationId,
+    )
+    await db.commit()
+    return temporary_password
 
 
 async def list_station_staff_profiles(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_id: uuid.UUID) -> list[StationStaffResponse]:

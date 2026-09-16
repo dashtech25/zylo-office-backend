@@ -161,6 +161,8 @@ from app.modules.zylo_liquid.schemas import (
     UpdateStationStaffRequest,
     StationStaffResponse,
     CreateStationStaffResponse,
+    ChangeStationStaffRoleRequest,
+    ResetStationStaffPasswordResponse,
 )
 from app.modules_registry.service import require_module_active
 from app.rbac.service import get_current_organization_id, require_permission, require_permission_scoped, require_permission_scoped_via
@@ -1881,6 +1883,28 @@ async def deactivate_station_staff_member(
     db: AsyncSession = Depends(get_db),
 ) -> StationStaffResponse:
     return await service.deactivate_station_staff_access(db, organization_id, current_user.id, user_id)
+
+
+@router.put("/station-staff/{user_id}/role", response_model=StationStaffResponse)
+async def change_station_staff_member_role(
+    user_id: uuid.UUID,
+    data: ChangeStationStaffRoleRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> StationStaffResponse:
+    return await service.change_station_staff_role(db, organization_id, current_user.id, user_id, data)
+
+
+@router.post("/station-staff/{user_id}/reset-password", response_model=ResetStationStaffPasswordResponse)
+async def reset_station_staff_member_password(
+    user_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> ResetStationStaffPasswordResponse:
+    temporary_password = await service.reset_station_staff_password(db, organization_id, current_user.id, user_id)
+    return ResetStationStaffPasswordResponse(temporaryPassword=temporary_password)
 
 
 @router.get("/station-staff", response_model=list[StationStaffResponse])

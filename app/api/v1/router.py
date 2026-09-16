@@ -15,6 +15,7 @@ from app.audit.router import router as audit_router
 from app.shared.currency_router import currency_router, exchange_rate_router
 from app.shared.export_router import export_router
 from app.shared.geo_router import country_router, geo_router
+from app.shared.import_router import import_router
 from app.shared.storage_router import storage_router
 
 api_router = APIRouter()
@@ -52,4 +53,5 @@ api_router.include_router(exchange_rate_router, prefix="/exchange-rates", tags=[
 api_router.include_router(geo_router, prefix="/cities", tags=["geo"])
 api_router.include_router(country_router, prefix="/countries", tags=["geo"])
 api_router.include_router(export_router, prefix="/export", tags=["export"])
+api_router.include_router(import_router, prefix="/import", tags=["import"])
 api_router.include_router(storage_router, prefix="/storage", tags=["storage"])

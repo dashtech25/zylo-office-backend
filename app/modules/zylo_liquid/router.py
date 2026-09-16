@@ -910,10 +910,11 @@ async def get_price_history(
 async def update_price_history(
     price_id: uuid.UUID,
     data: UpdatePriceHistoryRequest,
+    current_user: User = Depends(get_current_user),
     organization_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ) -> PriceHistoryResponse:
-    return await service.update_price_history(db, organization_id, price_id, data)
+    return await service.update_price_history(db, organization_id, current_user.id, price_id, data)
 
 
 @router.get(

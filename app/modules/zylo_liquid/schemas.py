@@ -1,9 +1,9 @@
 import colorsys
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_serializer, field_validator
 
 # Reflète exactement ck_zlSale_paymentMethod / ck_zlProductSaleTransaction_paymentMethod
 # (app/modules/zylo_liquid/models.py) — élargi mission
@@ -501,6 +501,17 @@ class PriceHistoryResponse(BaseModel):
     isFuture: bool = False
 
     model_config = {"from_attributes": True}
+
+    @field_serializer("effectiveFrom")
+    def _serialize_effective_from(self, value: datetime) -> str:
+        # `effectiveFrom` est stocké naïf-UTC (convention du module, voir
+        # `_to_naive_utc`) — sans marqueur de fuseau explicite, `new Date()`
+        # côté frontend le réinterprète comme heure LOCALE au lieu d'UTC,
+        # provoquant un horodatage décalé de l'offset du fuseau de
+        # l'utilisateur (P0-6, audit module Stations 2026-09-16). On force
+        # ici le suffixe UTC explicite sur ce champ précis, sans toucher au
+        # type de colonne ni aux autres champs naïfs du module.
+        return value.replace(tzinfo=timezone.utc).isoformat()
 
 
 class HolykellAccountSyncStatusResponse(BaseModel):

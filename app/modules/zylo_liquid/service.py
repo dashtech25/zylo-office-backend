@@ -2673,7 +2673,7 @@ async def _get_price_history_and_station(db: AsyncSession, organization_id: uuid
 
 
 async def update_price_history(
-    db: AsyncSession, organization_id: uuid.UUID, price_id: uuid.UUID, data: UpdatePriceHistoryRequest
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, price_id: uuid.UUID, data: UpdatePriceHistoryRequest
 ) -> PriceHistoryResponse:
     """Correction ciblée uniquement — jamais la période, la station ou le
     produit (Point 2 §7.4) : `UpdatePriceHistoryRequest` ne les expose pas,
@@ -2685,8 +2685,26 @@ async def update_price_history(
         currency_result = await db.execute(select(Currency).where(Currency.id == updates["currencyId"]))
         if currency_result.scalar_one_or_none() is None:
             raise AppError(code="currency_not_found", message="Devise introuvable.", status_code=404)
+    before = {field: str(getattr(price, field)) for field in updates}
     for field, value in updates.items():
         setattr(price, field, value)
+    fuel_product = await get_fuel_product(db, organization_id, price.fuelProductId)
+    # Contrairement à la création (create_price_history), aucun événement
+    # d'audit n'était jamais enregistré ici — une correction de prix
+    # n'avait donc aucun horodatage traçable du tout (P0-6, audit module
+    # Stations 2026-09-16).
+    await record_audit_event(
+        db,
+        organization_id,
+        actor_user_id,
+        action="zyloLiquid.price.correct",
+        entity_type="PriceHistory",
+        entity_id=price.id,
+        summary=f"Correction du prix {fuel_product.name}",
+        changes={field: {"before": before[field], "after": str(value)} for field, value in updates.items()},
+        scope_resource_type="station" if price.stationId is not None else None,
+        scope_resource_id=price.stationId,
+    )
     await db.commit()
     await db.refresh(price)
     return PriceHistoryResponse.model_validate(price)

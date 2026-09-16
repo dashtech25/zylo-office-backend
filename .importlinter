@@ -127,3 +127,21 @@ source_modules =
 forbidden_modules =
     app.modules.zylo_liquid
     app.location
+
+# Phase 4 (2026-09-16) — extraction de l'intégration Holykell. Contrairement
+# à Files/Location/Alerts, Holykell n'expose qu'un seul fichier public
+# (`app.integrations.holykell.client` : login, appels HTTP, DTO
+# `HolykellSensorReading`) — pas de `models.py` séparé à protéger, donc pas
+# de contrat "accès via service uniquement" symétrique à ceux de Files/
+# Location/Alerts : il n'existe encore rien d'autre à cacher derrière. Le
+# contrat qui compte ici est le sens interdit : l'adaptateur ne doit jamais
+# connaître le domaine qu'il sert, sinon Holykell devient aussi difficile à
+# réutiliser pour un futur fournisseur de télémétrie que le code qu'il
+# remplace (voir la docstring de `app/integrations/holykell/client.py`).
+[importlinter:contract:holykell-never-imports-zylo-liquid]
+name = L'intégration Holykell (app.integrations.holykell) ne dépend jamais de zylo_liquid
+type = forbidden
+source_modules =
+    app.integrations.holykell
+forbidden_modules =
+    app.modules.zylo_liquid

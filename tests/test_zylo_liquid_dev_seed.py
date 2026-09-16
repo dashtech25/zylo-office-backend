@@ -46,7 +46,11 @@ async def test_seed_demo_network_populates_a_realistic_network(
     res = await client.get("/api/v1/zylo-liquid/alerts?status=active", headers=headers)
     assert res.status_code == 200
     alert_types = {a["type"] for a in res.json()["data"]}
-    assert alert_types == {"sensor_offline", "level_high", "level_low", "leak"}
+    # "delivery_undeclared" : la livraison synthétique de DELIVERY_TANK_KEY
+    # (dev_seed.py) n'a volontairement aucune DeliveryDeclaration associée —
+    # _reverse_match_delivery_detected (service.py) lève donc correctement
+    # cette alerte, comportement attendu de la démo de rapprochement.
+    assert alert_types == {"sensor_offline", "level_high", "level_low", "leak", "delivery_undeclared"}
 
     res = await client.get("/api/v1/zylo-liquid/deliveries", headers=headers)
     assert res.status_code == 200

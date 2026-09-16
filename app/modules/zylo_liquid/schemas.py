@@ -152,14 +152,14 @@ class CreateStationRequest(BaseModel):
     openingTime: str = "06:00"
     closingTime: str = "22:00"
     is24h: bool = False
-    closedWeekdays: str | None = None
+    closedWeekdays: str | None = Field(default=None, description="Jours de fermeture hebdomadaire, CSV de jours ISO (1=lundi..7=dimanche), ex. \"7\" ou \"6,7\". `None`/vide = ouvert tous les jours.")
     notes: str | None = None
-    currencyOverrideId: uuid.UUID | None = None
+    currencyOverrideId: uuid.UUID | None = Field(default=None, description="Devise spécifique à cette station si différente de la devise par défaut de l'organisation.")
     # Champs commerce/amenities — présents sur le modèle Station depuis le
     # début (phase-1-database.md §5) mais jamais exposés par aucun schéma
     # jusqu'ici (Centre administratif et opérationnel de la station, domaines
     # Exploitation/Infrastructure).
-    exploitationType: str = Field(default="propre", max_length=20)
+    exploitationType: str = Field(default="propre", max_length=20, description="Mode d'exploitation de la station (ex. \"propre\" pour une station en gestion directe, vs. gérance/franchise) — pas de contrainte enum en base, valeur libre.")
     hasShop: bool = False
     shopName: str | None = Field(default=None, max_length=120)
     shopSurfaceM2: float | None = None
@@ -216,10 +216,10 @@ class StationResponse(BaseModel):
     closingTime: str
     is24h: bool
     closedWeekdays: str | None = None
-    status: str
-    integrationDate: date | None
+    status: str = Field(description="\"active\" ou \"inactive\" — basculé par les endpoints `/deactivate` et `/reactivate`, jamais modifié via un PATCH direct.")
+    integrationDate: date | None = Field(description="Date d'entrée de la station dans le réseau/l'organisation (pas la date de création de l'enregistrement).")
     notes: str | None
-    activeTankCount: int = 0
+    activeTankCount: int = Field(default=0, description="Nombre de cuves actives rattachées à la station, calculé à la volée — jamais stocké en base.")
     currencyOverrideId: uuid.UUID | None = None
     exploitationType: str = "propre"
     hasShop: bool = False
@@ -243,22 +243,22 @@ class CreateTankRequest(BaseModel):
     fuelProductId: uuid.UUID | None = None
     newFuelProductName: str | None = Field(default=None, min_length=1, max_length=100)
     newFuelProductCode: str | None = Field(default=None, min_length=1, max_length=10)
-    heightAlarmMm: float = Field(gt=0)
-    heightAlertMm: float = Field(gt=0)
-    lowAlarmMm: float = Field(gt=0)
-    alertWaterMaxMm: float = 25.00
-    dataSourceType: str = "console"
+    heightAlarmMm: float = Field(gt=0, description="Seuil haut critique (mm) : hauteur de produit au-delà de laquelle une alarme de débordement se déclenche.")
+    heightAlertMm: float = Field(gt=0, description="Seuil haut d'alerte (mm), plus bas que `heightAlarmMm` — signale un remplissage important sans être encore critique.")
+    lowAlarmMm: float = Field(gt=0, description="Seuil bas critique (mm) : hauteur de produit en-dessous de laquelle la cuve est considérée en stock bas (déclenche l'indicateur visuel réservé, cf. `_reject_reserved_red`).")
+    alertWaterMaxMm: float = Field(default=25.00, description="Hauteur d'eau maximale tolérée au fond de la cuve (mm) avant déclenchement d'une alerte eau — l'eau se dépose sous le carburant et fausse le jaugeage si elle s'accumule.")
+    dataSourceType: str = Field(default="console", description="Origine des mesures de niveau pour cette cuve (ex. \"console\" pour une jauge manuelle, capteur télémétrique sinon) — détermine si un mapping capteur Holykell est attendu.")
 
 
 class UpdateTankRequest(BaseModel):
     displayName: str | None = Field(default=None, min_length=1, max_length=100)
     capacityLiters: float | None = Field(default=None, gt=0)
-    calibratedCapacityLiters: float | None = None
+    calibratedCapacityLiters: float | None = Field(default=None, description="Capacité réelle mesurée par jaugeage (peut différer de `capacityLiters`, la capacité nominale constructeur) — utilisée pour les calculs de volume quand disponible.")
     tankHeightMm: float | None = Field(default=None, gt=0)
-    heightAlarmMm: float | None = None
-    heightAlertMm: float | None = None
-    lowAlarmMm: float | None = None
-    alertWaterMaxMm: float | None = None
+    heightAlarmMm: float | None = Field(default=None, description="Seuil haut critique (mm), voir `CreateTankRequest.heightAlarmMm`.")
+    heightAlertMm: float | None = Field(default=None, description="Seuil haut d'alerte (mm), voir `CreateTankRequest.heightAlertMm`.")
+    lowAlarmMm: float | None = Field(default=None, description="Seuil bas critique (mm), voir `CreateTankRequest.lowAlarmMm`.")
+    alertWaterMaxMm: float | None = Field(default=None, description="Hauteur d'eau maximale tolérée (mm), voir `CreateTankRequest.alertWaterMaxMm`.")
     active: bool | None = None
     notes: str | None = None
 
@@ -270,7 +270,7 @@ class TankResponse(BaseModel):
     tankNumber: int
     displayName: str
     capacityLiters: float
-    calibratedCapacityLiters: float | None
+    calibratedCapacityLiters: float | None = Field(description="Capacité réelle mesurée par jaugeage, si elle a été établie — sinon `None` et `capacityLiters` (capacité nominale) fait foi.")
     tankHeightMm: float | None
     dataSourceType: str
     heightAlarmMm: float
@@ -278,7 +278,7 @@ class TankResponse(BaseModel):
     lowAlarmMm: float
     alertWaterMaxMm: float
     active: bool
-    productSince: date | None
+    productSince: date | None = Field(description="Date depuis laquelle la cuve contient son produit actuel (pertinent après un changement de produit).")
     notes: str | None
 
     model_config = {"from_attributes": True}
@@ -355,18 +355,18 @@ class TankCurrentStateResponse(BaseModel):
     tankId: uuid.UUID
     tankNumber: int
     displayName: str
-    sensorStatus: str  # "online" | "offline" | "not_configured"
+    sensorStatus: str = Field(description="\"online\" (mesures récentes reçues), \"offline\" (capteur mappé mais silencieux) ou \"not_configured\" (aucun capteur mappé à cette cuve).")
     heightMm: float | None
-    volumeLiters: float | None
-    volumeNotCalculableReason: str | None
-    volumeLiters15C: float | None
-    sellableVolumeLiters: float | None
+    volumeLiters: float | None = Field(description="Volume brut déduit de la hauteur via la table de jaugeage. `None` si non calculable — voir `volumeNotCalculableReason`.")
+    volumeNotCalculableReason: str | None = Field(description="Explique pourquoi `volumeLiters` est `None` (ex. pas de mesure récente, table de jaugeage absente) — jamais de volume inventé par défaut.")
+    volumeLiters15C: float | None = Field(description="Volume corrigé à 15°C (référence standard carburant) via le coefficient de dilatation thermique du produit, quand la température est disponible.")
+    sellableVolumeLiters: float | None = Field(description="Volume net moins le seuil bas (`lowAlarmMm`) de la cuve : le volume réellement vendable, jamais rien sous ce seuil.")
     waterHeightMm: float | None
     waterVolumeLiters: float | None
     temperatureC: float | None
-    emptyVolumeLiters: float | None
+    emptyVolumeLiters: float | None = Field(description="Volume restant disponible avant d'atteindre la capacité (calibrée ou nominale) de la cuve — utile pour dimensionner une prochaine livraison.")
     lastMeasurementAt: datetime | None
-    monetaryValue: float | None = None
+    monetaryValue: float | None = Field(default=None, description="Valeur monétaire du stock courant (volume × prix unitaire courant). `None` si non calculable — voir `monetaryValueNotCalculableReason`.")
     currencyCode: str | None = None
     monetaryValueNotCalculableReason: str | None = None
     unitPriceAmount: float | None = None
@@ -380,10 +380,10 @@ class StationCurrentStateResponse(BaseModel):
 class TankMeasurementResponse(BaseModel):
     id: int
     measuredAt: datetime
-    rawValue: float
+    rawValue: float = Field(description="Valeur brute remontée par le capteur, dans l'unité indiquée par `unit` (pas forcément un volume — peut être une hauteur selon le type de mesure).")
     unit: str | None
-    volumeLiters: float | None
-    isCorrection: bool
+    volumeLiters: float | None = Field(description="Volume dérivé de `rawValue` via la table de jaugeage, si applicable et calculable au moment de la mesure.")
+    isCorrection: bool = Field(description="True si ce point est une correction manuelle a posteriori plutôt qu'une mesure brute du capteur (ex. recalage après vérification physique).")
 
     model_config = {"from_attributes": True}
 
@@ -424,11 +424,11 @@ class DeliveryDetectedResponse(BaseModel):
     id: uuid.UUID
     tankId: uuid.UUID
     stationId: uuid.UUID
-    startTime: datetime
+    startTime: datetime = Field(description="Début de la montée de niveau détectée par l'algorithme de surveillance (pas l'heure d'arrivée du camion, qui n'est pas connue ici).")
     startHeightMm: float
-    endTime: datetime
+    endTime: datetime = Field(description="Moment où le niveau s'est stabilisé (`DELIVERY_STABILIZATION_MINUTES` sans variation significative), marquant la livraison comme terminée.")
     endHeightMm: float
-    volumeLiters: float | None
+    volumeLiters: float | None = Field(description="Volume livré, déduit de la différence de hauteur via la table de jaugeage. `None` si non calculable (ex. table de jaugeage absente sur la période).")
 
     model_config = {"from_attributes": True}
 
@@ -475,19 +475,19 @@ class AlertResponse(BaseModel):
     truckId: uuid.UUID | None = None
     tankId: uuid.UUID | None
     productId: uuid.UUID | None
-    type: str
+    type: str = Field(description="Nature de l'alerte (ex. seuil de niveau, fuite suspectée, écart de réconciliation) — détermine si elle peut être vérifiée/résolue automatiquement.")
     severity: str
-    status: str
-    sourceType: str | None
+    status: str = Field(description="Cycle de vie : déclenchée -> (optionnellement) acquittée via `/acknowledge` -> résolue (automatiquement, ou manuellement via `PATCH` pour les types qui le permettent).")
+    sourceType: str | None = Field(description="Type de l'entité à l'origine du déclenchement (ex. mesure de cuve, résultat de réconciliation) — avec `sourceId`, permet de remonter à la donnée source de l'alerte.")
     sourceId: uuid.UUID | None
     triggeredAt: datetime
-    triggeredValue: float | None
+    triggeredValue: float | None = Field(description="Valeur mesurée ayant déclenché l'alerte, à comparer à `thresholdValue` — unité dépendante du `type` d'alerte.")
     thresholdValue: float | None
     acknowledgedAt: datetime | None
     acknowledgedByUserId: uuid.UUID | None
     resolvedAt: datetime | None
     resolvedByUserId: uuid.UUID | None
-    resolutionMethod: str | None
+    resolutionMethod: str | None = Field(description="\"auto_verified\" si le contrôle sous-jacent est repassé sous le seuil de lui-même, \"manual_justified\" si résolue via `PATCH /alerts/{alert_id}` avec note obligatoire — jamais les deux en même temps.")
     resolutionNote: str | None
 
     model_config = {"from_attributes": True}
@@ -1139,72 +1139,10 @@ class PaymentResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ================================================================
-# Modèle documentaire (Phase 5 §6) — Bloc 5.
-# ================================================================
-
-
-class CreateDocumentRequest(BaseModel):
-    storageReference: str = Field(min_length=1, max_length=500)
-    fileName: str = Field(min_length=1, max_length=255)
-    mimeType: str | None = None
-    # Lien initial optionnel — un document peut aussi être créé sans lien et
-    # rattaché ensuite via POST /document-links (association logique, Phase
-    # 5 §6 : plusieurs entités peuvent référencer le même Document).
-    linkedEntityType: str | None = None
-    linkedEntityId: uuid.UUID | None = None
-    # Mission « vente-maintenant-reglementation », Phase 5 §4 — 'normal' par
-    # défaut, 'restreint' nécessite DOCUMENT_READ_SENSITIVE pour être relu.
-    sensitivityLevel: str = "normal"
-    supersedesDocumentId: uuid.UUID | None = None
-
-    @field_validator("sensitivityLevel")
-    @classmethod
-    def _validate_sensitivity_level(cls, value: str) -> str:
-        if value not in ("normal", "restreint"):
-            raise ValueError("sensitivityLevel doit être 'normal' ou 'restreint'.")
-        return value
-
-
-class DocumentResponse(BaseModel):
-    id: uuid.UUID
-    organizationId: uuid.UUID
-    storageReference: str
-    fileName: str
-    mimeType: str | None
-    uploadedByUserId: uuid.UUID
-    sensitivityLevel: str
-    supersedesDocumentId: uuid.UUID | None
-    deletedAt: datetime | None
-
-    model_config = {"from_attributes": True}
-
-
-class CreateDocumentLinkRequest(BaseModel):
-    documentId: uuid.UUID
-    linkedEntityType: str = Field(min_length=1, max_length=40)
-    linkedEntityId: uuid.UUID
-
-
-class DocumentLinkResponse(BaseModel):
-    id: uuid.UUID
-    documentId: uuid.UUID
-    linkedEntityType: str
-    linkedEntityId: uuid.UUID
-
-    model_config = {"from_attributes": True}
-
-
-class DocumentDownloadUrlResponse(BaseModel):
-    url: str
-
-
-class DocumentCountsResponse(BaseModel):
-    """Nombre de pièces jointes par entité (audit performance — remplace
-    un appel par ligne de tableau). Une entité absente des clés n'a
-    simplement aucun document, jamais une erreur."""
-
-    counts: dict[uuid.UUID, int]
+# Modèle documentaire — déplacé vers `app/files/schemas.py` (2026-09-15,
+# Phase 1 de la migration monolithe modulaire). Import direct depuis ce
+# module public pour l'unique appelant restant ici
+# (`generate_purchase_order_document`), jamais une redéfinition locale.
 
 
 # ================================================================
@@ -1217,11 +1155,11 @@ class UpsertStationReconciliationSettingsRequest(BaseModel):
     """Un seul schéma pour créer ou remplacer la dérogation d'une station —
     chaque champ NULL/absent signifie repli sur le défaut réseau (Phase 7 §1)."""
 
-    deliveryWindowHours: float | None = Field(default=None, gt=0)
-    deliveryVolumeToleranceFixedLiters: float | None = Field(default=None, ge=0)
-    deliveryVolumeTolerancePercent: float | None = Field(default=None, ge=0)
-    gaugingHeightToleranceMm: float | None = Field(default=None, ge=0)
-    qualityCheckWindowHours: float | None = Field(default=None, gt=0)
+    deliveryWindowHours: float | None = Field(default=None, gt=0, description="Fenêtre de temps (heures) autour d'une livraison déclarée dans laquelle on cherche une livraison détectée correspondante.")
+    deliveryVolumeToleranceFixedLiters: float | None = Field(default=None, ge=0, description="Écart de volume (litres) toléré entre déclaré et détecté avant de considérer une livraison en discordance — tolérance fixe, cumulable avec la tolérance en pourcentage.")
+    deliveryVolumeTolerancePercent: float | None = Field(default=None, ge=0, description="Écart de volume toléré, exprimé en pourcentage du volume détecté.")
+    gaugingHeightToleranceMm: float | None = Field(default=None, ge=0, description="Écart de hauteur (mm) toléré entre un jaugeage manuel déclaré et la hauteur mesurée par le capteur au même instant.")
+    qualityCheckWindowHours: float | None = Field(default=None, gt=0, description="Fenêtre de temps (heures) dans laquelle un contrôle qualité déclaré doit se rattacher à une livraison pour être réconcilié avec elle.")
 
 
 class StationReconciliationSettingsResponse(BaseModel):
@@ -1238,15 +1176,15 @@ class StationReconciliationSettingsResponse(BaseModel):
 
 class ReconciliationRecordResponse(BaseModel):
     id: uuid.UUID
-    subjectType: str
+    subjectType: str = Field(description="Type de l'entité côté « déclaré » comparée (ex. \"TankStockDay\" pour un rapprochement de stock journalier) — avec `subjectId`, identifie la donnée source de la comparaison.")
     subjectId: uuid.UUID
-    counterpartType: str | None
+    counterpartType: str | None = Field(description="Type de l'entité côté « mesuré/détecté » comparée (ex. l'agrégat télémétrique). `None` si le rapprochement n'a pas de contrepartie distincte.")
     counterpartId: str | None
-    family: str
-    status: str
-    discrepancyValue: float | None
+    family: str = Field(description="Catégorie de rapprochement (ex. \"quantitative\") — regroupe les différents types de vérifications (stock, livraison, jaugeage...) par nature de comparaison.")
+    status: str = Field(description="\"matched\" si l'écart est dans la tolérance, \"discrepancy\" au-delà, \"insufficient_data\" si la contrepartie mesurée n'est pas disponible pour calculer un écart.")
+    discrepancyValue: float | None = Field(description="Écart absolu constaté entre déclaré et mesuré, dans l'unité `discrepancyUnit`. `None` si `status` est \"insufficient_data\".")
     discrepancyUnit: str | None
-    toleranceApplied: float | None
+    toleranceApplied: float | None = Field(description="Seuil de tolérance effectivement utilisé pour ce calcul (issu de la dérogation station ou, à défaut, du défaut réseau) — permet d'auditer a posteriori quel seuil a produit le statut.")
     evaluatedAt: datetime
     evaluatedByUserId: uuid.UUID | None
 
@@ -1341,10 +1279,10 @@ class CarrierResponse(BaseModel):
 
 
 class CreateTruckRequest(BaseModel):
-    carrierId: uuid.UUID | None = None
+    carrierId: uuid.UUID | None = Field(default=None, description="Transporteur propriétaire/affréteur du camion. Optionnel : un camion peut être créé avant d'être rattaché à un transporteur.")
     plateNumber: str = Field(min_length=1, max_length=50)
     capacityLiters: float | None = Field(default=None, gt=0)
-    compartmentsCount: int | None = Field(default=None, gt=0, le=20)
+    compartmentsCount: int | None = Field(default=None, gt=0, le=20, description="Nombre de compartiments de la citerne (chaque compartiment peut transporter un produit différent) — plafonné à 20.")
 
 
 class UpdateTruckRequest(BaseModel):
@@ -1439,7 +1377,7 @@ class TruckOrderAssignmentResponse(BaseModel):
     id: uuid.UUID
     truckId: uuid.UUID
     purchaseOrderId: uuid.UUID
-    active: bool
+    active: bool = Field(description="False si l'assignation a été retirée (`DELETE /purchase-orders/{purchase_order_id}/trucks/{truck_id}`) — l'historique des assignations est conservé, pas supprimé.")
 
     model_config = {"from_attributes": True}
 

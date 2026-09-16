@@ -2206,6 +2206,35 @@ async def evaluate_calibration_missing_alert(db: AsyncSession, tank: Tank) -> No
         )
 
 
+async def evaluate_station_offline_alert(db: AsyncSession, station: Station, tanks: list[Tank]) -> None:
+    """Une station dont AUCUNE cuve configurée (mapping capteur actif
+    `product_level` ayant déjà reçu au moins une mesure) ne transmet plus de
+    données est en silence complet — jamais remontée comme alerte dédiée
+    jusqu'ici, alors qu'une action rapide (contacter la station) serait
+    utile (P1-9, audit module Stations 2026-09-16). Critère volontairement
+    plus strict que le badge « en ligne » de la liste des stations
+    (`computeStationOnlineStatus` côté frontend, P0-5 : TOUTES les cuves
+    configurées en ligne) — une seule cuve en défaut ne doit pas déclencher
+    une alerte « contacter la station », réservée au silence total."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    configured_count = 0
+    online_count = 0
+    for tank in tanks:
+        registry = await _get_active_registry_entry(db, tank.id, "product_level")
+        if registry is None or registry.lastValue is None:
+            continue
+        configured_count += 1
+        if registry.hkLastStatus == 1:
+            online_count += 1
+
+    if configured_count > 0 and online_count == 0:
+        await alerts_service.upsert_active_alert(db, station_id=station.id, alert_type="station_offline", triggered_at=now)
+    else:
+        await alerts_service.auto_resolve_alert(
+            db, station_id=station.id, tank_id=None, product_id=None, alert_type="station_offline", resolved_at=now,
+        )
+
+
 async def evaluate_structural_alerts_for_organization(db: AsyncSession, organization_id: uuid.UUID) -> None:
     """Un balayage périodique (pas piloté par la télémétrie, contrairement à
     `run_alert_evaluation_for_tank`) — toutes les stations de l'organisation,
@@ -2224,6 +2253,7 @@ async def evaluate_structural_alerts_for_organization(db: AsyncSession, organiza
         for tank in tanks:
             await evaluate_sensor_mapping_missing_alert(db, tank)
             await evaluate_calibration_missing_alert(db, tank)
+        await evaluate_station_offline_alert(db, station, tanks)
     await db.commit()
 
 

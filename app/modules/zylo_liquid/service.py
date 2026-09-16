@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
+from app.alerts import service as alerts_service
 from app.audit.service import record_audit_event
 from app.core.errors import AppError
 from app.files import service as files_service
@@ -28,7 +29,6 @@ from app.shared.storage import get_storage_backend
 # valeur périmée survivant une écriture dans le même process.
 fuel_product_list_cache = TTLCache(default_ttl_seconds=60.0)
 from app.modules.zylo_liquid.permissions import (
-    ALERT_READ,
     CARRIER_MANAGE,
     CARRIER_READ,
     COMMERCIAL_ACCOUNT_MANAGE,
@@ -122,7 +122,6 @@ from app.modules.zylo_liquid.algorithms import (
 )
 from app.modules.zylo_liquid.document_generation import generate_purchase_order_docx, generate_purchase_order_pdf
 from app.modules.zylo_liquid.models import (
-    Alert,
     Authorization,
     Carrier,
     CommercialAccount,
@@ -172,7 +171,6 @@ from app.modules.zylo_liquid.models import (
     Vehicle,
 )
 from app.modules.zylo_liquid.schemas import (
-    AlertResponse,
     AuthorizationResponse,
     CarrierResponse,
     CommercialAccountResponse,
@@ -1870,7 +1868,7 @@ async def run_leak_test_for_tank(db: AsyncSession, tank_id: uuid.UUID, start_tim
         # D2 (refonte alertes) : un test de fuite négatif EST la vérité
         # mesurée qui referme l'alerte — jamais un clic humain qui
         # déclarerait la fuite réglée sans nouveau test.
-        await _auto_resolve_alert(
+        await alerts_service.auto_resolve_alert(
             db, station_id=tank.stationId, tank_id=tank_id, product_id=None,
             alert_type="leak", resolved_at=end_time,
         )
@@ -1954,128 +1952,35 @@ async def get_leak_event(db: AsyncSession, organization_id: uuid.UUID, leak_even
     return _leak_event_to_response(record, tank)
 
 
-# Refonte alertes Étape 2 (2026-09, décisions D2/D3/D4/D7) — gravité
-# calculée une seule fois ici (plus jamais dérivée côté frontend depuis un
-# `Set` dupliqué) ; reprend exactement l'ancien `CRITICAL_TYPES` frontend
-# pour les 4 valeurs "critical", complété pour les types restants.
-SEVERITY_BY_ALERT_TYPE = {
-    "level_high": "critical",
-    "leak": "critical",
-    "delivery_discrepancy": "critical",
-    "delivery_undeclared": "critical",
-    "level_high_pre_alarm": "high",
-    "level_low": "high",
-    "water": "high",
-    "sensor_offline": "medium",
-    "delivery_declaration_pending": "low",
-    "price_missing": "medium",
-    "sensor_mapping_missing": "medium",
-    "calibration_missing": "medium",
-}
-
-# D2 : types pour lesquels une source de vérité mesurable existe et peut
-# être relue automatiquement — `resolve_alert` (résolution manuelle
-# déclarative) leur est interdit, seule la fermeture automatique
-# (`_auto_resolve_alert`, appelée par l'évaluation qui a créé l'alerte) peut
-# les refermer. Un utilisateur qui veut signaler une prise en charge sans
-# attendre la vérification automatique utilise `acknowledge_alert` — jamais
-# `resolve_alert`.
-AUTO_VERIFIABLE_ALERT_TYPES = {
-    "level_high", "level_high_pre_alarm", "level_low", "water", "sensor_offline",
-    "leak", "delivery_discrepancy", "delivery_undeclared", "delivery_declaration_pending",
-}
-
-
-async def _find_open_alert(
-    db: AsyncSession, *, station_id: uuid.UUID, tank_id: uuid.UUID | None, product_id: uuid.UUID | None, alert_type: str
-) -> Alert | None:
-    result = await db.execute(
-        select(Alert).where(
-            Alert.stationId == station_id,
-            Alert.tankId == tank_id,
-            Alert.productId == product_id,
-            Alert.type == alert_type,
-            Alert.status.in_(["active", "acknowledged"]),
-        )
-    )
-    return result.scalar_one_or_none()
-
-
-async def _upsert_active_alert(
-    db: AsyncSession,
-    *,
-    station_id: uuid.UUID,
-    alert_type: str,
-    triggered_at,
-    triggered_value: float | None = None,
-    threshold_value: float | None = None,
-    tank_id: uuid.UUID | None = None,
-    product_id: uuid.UUID | None = None,
-    source_type: str | None = None,
-    source_id: uuid.UUID | None = None,
-) -> Alert | None:
-    """N'ouvre jamais une deuxième alerte active/acquittée du même type pour
-    la même portée (cuve et/ou produit) — évite le spam. Si une alerte est
-    déjà ouverte, sa valeur est mise à jour (avant cette refonte,
-    `triggeredValue` restait figé à la première détection tant que l'alerte
-    restait active — Étape 1, constat #7)."""
-    existing = await _find_open_alert(db, station_id=station_id, tank_id=tank_id, product_id=product_id, alert_type=alert_type)
-    if existing is not None:
-        existing.triggeredAt = triggered_at
-        existing.triggeredValue = triggered_value
-        existing.thresholdValue = threshold_value
-        await db.flush()
-        return None
-    alert = Alert(
-        stationId=station_id,
-        tankId=tank_id,
-        productId=product_id,
-        type=alert_type,
-        severity=SEVERITY_BY_ALERT_TYPE.get(alert_type, "medium"),
-        status="active",
-        triggeredAt=triggered_at,
-        triggeredValue=triggered_value,
-        thresholdValue=threshold_value,
-        sourceType=source_type,
-        sourceId=source_id,
-    )
-    db.add(alert)
-    await db.flush()
-    return alert
+# SEVERITY_BY_ALERT_TYPE / AUTO_VERIFIABLE_ALERT_TYPES / _find_open_alert /
+# _upsert_active_alert — déplacés vers `app/alerts/service.py` (2026-09-15,
+# Phase 3 de la migration monolithe modulaire, renommée `upsert_active_alert`
+# — voir la docstring de ce fichier). Les fonctions productrices d'alertes
+# restées ici appellent désormais `alerts_service.upsert_active_alert`.
 
 
 async def _create_alert_if_not_already_active(
     db: AsyncSession, tank_id: uuid.UUID, alert_type: str, triggered_at, triggered_value: float | None, threshold_value: float | None
-) -> Alert | None:
+) -> "Alert | None":
     """Compat : dérive `stationId` depuis la cuve, conserve tous les appels
-    existants inchangés (seuils, fuite, livraison). Voir `_upsert_active_alert`
-    (D4) pour la version complète — types sans cuve, source polymorphe."""
+    existants inchangés (seuils, fuite, livraison). Voir
+    `app.alerts.service.upsert_active_alert` (D4) pour la version complète —
+    types sans cuve, source polymorphe. Type de retour en chaîne (jamais
+    importé) : ce module n'accède à Alerts que via `alerts_service`, jamais
+    via `app.alerts.models` (contrat import-linter)."""
     tank = (await db.execute(select(Tank).where(Tank.id == tank_id))).scalar_one()
-    return await _upsert_active_alert(
+    return await alerts_service.upsert_active_alert(
         db, station_id=tank.stationId, tank_id=tank_id, alert_type=alert_type,
         triggered_at=triggered_at, triggered_value=triggered_value, threshold_value=threshold_value,
     )
 
 
-async def _auto_resolve_alert(
-    db: AsyncSession, *, station_id: uuid.UUID, tank_id: uuid.UUID | None, product_id: uuid.UUID | None,
-    alert_type: str, resolved_at,
-) -> None:
-    """D2 : referme automatiquement une alerte dont la condition réelle a
-    disparu, constatée par le service qui l'a évaluée — jamais via un clic
-    humain pour les types listés dans `AUTO_VERIFIABLE_ALERT_TYPES`.
-    `resolvedByUserId` reste NULL : personne n'a fermé l'alerte, le système
-    a constaté la disparition de la condition."""
-    alert = await _find_open_alert(db, station_id=station_id, tank_id=tank_id, product_id=product_id, alert_type=alert_type)
-    if alert is None:
-        return
-    alert.status = "resolved"
-    alert.resolvedAt = resolved_at
-    alert.resolutionMethod = "auto_verified"
-    await db.flush()
+# _auto_resolve_alert — déplacée vers `app/alerts/service.py` (2026-09-15,
+# Phase 3), renommée `auto_resolve_alert`. Les appels ci-dessous utilisent
+# désormais `alerts_service.auto_resolve_alert`.
 
 
-async def run_alert_evaluation_for_tank(db: AsyncSession, tank_id: uuid.UUID) -> list[Alert]:
+async def run_alert_evaluation_for_tank(db: AsyncSession, tank_id: uuid.UUID) -> "list[Alert]":
     """Évalue l'état instantané d'une cuve (mêmes sources que l'endpoint 7 :
     `HolykellDeviceRegistry.lastValue`/`hkLastStatus`, jamais `TankMeasurement`)
     contre les 4 seuils déjà saisis sur `Tank` (endpoint 3) — algorithme de
@@ -2090,7 +1995,7 @@ async def run_alert_evaluation_for_tank(db: AsyncSession, tank_id: uuid.UUID) ->
     tank = tank_result.scalar_one()
 
     product_registry = await _get_active_registry_entry(db, tank_id, "product_level")
-    created: list[Alert] = []
+    created: "list[Alert]" = []
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     if product_registry is None or product_registry.lastValue is None:
@@ -2105,7 +2010,7 @@ async def run_alert_evaluation_for_tank(db: AsyncSession, tank_id: uuid.UUID) ->
 
     # La sonde répond de nouveau : toute alerte "sensor_offline" ouverte sur
     # cette cuve n'a plus de raison d'être.
-    await _auto_resolve_alert(db, station_id=tank.stationId, tank_id=tank_id, product_id=None, alert_type="sensor_offline", resolved_at=now)
+    await alerts_service.auto_resolve_alert(db, station_id=tank.stationId, tank_id=tank_id, product_id=None, alert_type="sensor_offline", resolved_at=now)
 
     height = float(product_registry.lastValue)
     water_registry = await _get_active_registry_entry(db, tank_id, "water_level")
@@ -2142,209 +2047,17 @@ async def run_alert_evaluation_for_tank(db: AsyncSession, tank_id: uuid.UUID) ->
                 created.append(alert)
         else:
             # Condition disparue depuis le dernier cycle (D2).
-            await _auto_resolve_alert(db, station_id=tank.stationId, tank_id=tank_id, product_id=None, alert_type=alert_type, resolved_at=now)
+            await alerts_service.auto_resolve_alert(db, station_id=tank.stationId, tank_id=tank_id, product_id=None, alert_type=alert_type, resolved_at=now)
 
     await db.commit()
     return created
 
 
-def _alert_to_response(alert: Alert) -> AlertResponse:
-    """`stationId` vient désormais directement de l'alerte (D4) — plus
-    besoin de la cuve pour construire la réponse, ce qui fonctionne aussi
-    pour les types sans cuve (ex. `price_missing`)."""
-    return AlertResponse(
-        id=alert.id,
-        stationId=alert.stationId,
-        truckId=alert.truckId,
-        tankId=alert.tankId,
-        productId=alert.productId,
-        type=alert.type,
-        severity=alert.severity,
-        status=alert.status,
-        sourceType=alert.sourceType,
-        sourceId=alert.sourceId,
-        triggeredAt=alert.triggeredAt,
-        triggeredValue=float(alert.triggeredValue) if alert.triggeredValue is not None else None,
-        thresholdValue=float(alert.thresholdValue) if alert.thresholdValue is not None else None,
-        acknowledgedAt=alert.acknowledgedAt,
-        acknowledgedByUserId=alert.acknowledgedByUserId,
-        resolvedAt=alert.resolvedAt,
-        resolvedByUserId=alert.resolvedByUserId,
-        resolutionMethod=alert.resolutionMethod,
-        resolutionNote=alert.resolutionNote,
-    )
-
-
-async def list_alerts(
-    db: AsyncSession,
-    organization_id: uuid.UUID,
-    actor_user_id: uuid.UUID,
-    pagination: PaginationParams,
-    station_id: uuid.UUID | None,
-    tank_id: uuid.UUID | None,
-    type_filter: str | None,
-    status_filter: str | None,
-    from_date,
-    to_date,
-    truck_id: uuid.UUID | None = None,
-) -> Page:
-    """Corrigé — filtrait auparavant uniquement par organisation, jamais par
-    la portée réelle de l'utilisateur (même constat que `list_stations`,
-    découvert en testant un scénario de démo réel avec des gérants/pompistes
-    scopés station, mission « vente-maintenant-reglementation ») : un
-    utilisateur scopé à une station ne doit voir que les alertes de celle-ci.
-
-    Filtre directement sur `Alert.stationId`/`Alert.tankId` (D4) — plus
-    besoin de passer par `Tank` pour la portée, ce qui inclut correctement
-    les types d'alerte sans cuve."""
-    from_date = _to_naive_utc(from_date)
-    to_date = _to_naive_utc(to_date)
-    if from_date is not None and to_date is not None and from_date > to_date:
-        raise AppError(code="invalid_date_range", message="from_date doit être antérieure ou égale à to_date.", status_code=422)
-
-    sees_all, visible_station_ids = await list_visible_resource_ids(db, actor_user_id, organization_id, ALERT_READ, "station")
-    if not sees_all and not visible_station_ids:
-        raise AppError(code="permission_denied", message=f"Permission manquante : {ALERT_READ}.", status_code=403)
-
-    # Étape 2 tracking — une alerte peut désormais être rattachée à un
-    # camion (`truckId`) plutôt qu'à une station (`stationId` nullable
-    # depuis cette migration) : un INNER JOIN strict sur Station
-    # exclurait silencieusement toute alerte de camion. Jointure externe
-    # sur les deux, filtre d'organisation vérifié via l'une ou l'autre.
-    stmt = (
-        select(Alert)
-        .outerjoin(Station, Station.id == Alert.stationId)
-        .outerjoin(Truck, Truck.id == Alert.truckId)
-        .where(or_(Station.organizationId == organization_id, Truck.organizationId == organization_id))
-    )
-    if not sees_all:
-        # Un accès scopé par station ne couvre jamais une alerte de
-        # camion (les camions ne sont pas rattachés à une station) —
-        # comportement inchangé pour ces utilisateurs.
-        stmt = stmt.where(Alert.stationId.in_(visible_station_ids))
-    if station_id is not None:
-        stmt = stmt.where(Alert.stationId == station_id)
-    if truck_id is not None:
-        stmt = stmt.where(Alert.truckId == truck_id)
-    if tank_id is not None:
-        stmt = stmt.where(Alert.tankId == tank_id)
-    if type_filter is not None:
-        stmt = stmt.where(Alert.type == type_filter)
-    if status_filter is not None:
-        stmt = stmt.where(Alert.status == status_filter)
-    if from_date is not None:
-        stmt = stmt.where(Alert.triggeredAt >= from_date)
-    if to_date is not None:
-        stmt = stmt.where(Alert.triggeredAt <= to_date)
-    stmt = stmt.order_by(Alert.triggeredAt.desc())
-
-    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
-    result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
-    rows = result.scalars().all()
-    data = [_alert_to_response(alert) for alert in rows]
-    return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
-
-
-async def _get_alert_and_tank(db: AsyncSession, organization_id: uuid.UUID, alert_id: uuid.UUID) -> tuple[Alert, Tank | None]:
-    """`Tank` en LEFT JOIN — uniquement pour l'affichage (nom de cuve dans
-    le résumé d'audit), `None` pour les types d'alerte sans cuve."""
-    result = await db.execute(
-        select(Alert, Tank)
-        # Étape 2 tracking — jointure externe sur Station, une alerte de
-        # camion (stationId NULL) ne doit jamais être exclue par un INNER
-        # JOIN strict (même correction que list_alerts ci-dessus).
-        .outerjoin(Station, Station.id == Alert.stationId)
-        .outerjoin(Truck, Truck.id == Alert.truckId)
-        .outerjoin(Tank, Tank.id == Alert.tankId)
-        .where(Alert.id == alert_id, or_(Station.organizationId == organization_id, Truck.organizationId == organization_id))
-    )
-    row = result.first()
-    if row is None:
-        raise AppError(code="alert_not_found", message="Alerte introuvable.", status_code=404)
-    return row
-
-
-async def get_alert(db: AsyncSession, organization_id: uuid.UUID, alert_id: uuid.UUID) -> AlertResponse:
-    alert, _tank = await _get_alert_and_tank(db, organization_id, alert_id)
-    return _alert_to_response(alert)
-
-
-async def acknowledge_alert(
-    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, alert_id: uuid.UUID
-) -> AlertResponse:
-    """D3 : déclaration d'intention humaine ("je m'en occupe") — ne referme
-    jamais l'alerte, ne vérifie rien de la condition réelle. Réservé aux
-    alertes encore `active` (acquitter une alerte déjà acquittée ou résolue
-    n'a pas de sens)."""
-    alert, tank = await _get_alert_and_tank(db, organization_id, alert_id)
-    if alert.status != "active":
-        raise AppError(
-            code="alert_not_active",
-            message="Seule une alerte active peut être acquittée.",
-            status_code=409,
-        )
-    alert.status = "acknowledged"
-    alert.acknowledgedAt = datetime.now(timezone.utc).replace(tzinfo=None)
-    alert.acknowledgedByUserId = actor_user_id
-    await record_audit_event(
-        db,
-        organization_id,
-        actor_user_id,
-        action="zyloLiquid.alert.acknowledge",
-        entity_type="Alert",
-        entity_id=alert.id,
-        summary=f"Acquittement de l'alerte {alert.type}" + (f" (cuve {tank.displayName})" if tank else ""),
-        scope_resource_type="station",
-        scope_resource_id=alert.stationId,
-    )
-    await db.commit()
-    await db.refresh(alert)
-    return _alert_to_response(alert)
-
-
-async def resolve_alert(
-    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, alert_id: uuid.UUID, resolution_note: str | None
-) -> AlertResponse:
-    """D2 : réservé aux types sans vérification automatique possible — pour
-    tout type listé dans `AUTO_VERIFIABLE_ALERT_TYPES`, la fermeture ne peut
-    venir que du service qui a constaté la disparition de la condition
-    réelle (`_auto_resolve_alert`), jamais d'un clic humain non vérifié.
-    `resolutionNote` devient obligatoire : une fermeture manuelle sans
-    vérification automatique exige une justification tracée."""
-    alert, tank = await _get_alert_and_tank(db, organization_id, alert_id)
-    if alert.status == "resolved":
-        raise AppError(code="alert_already_resolved", message="Cette alerte est déjà résolue.", status_code=409)
-    if alert.type in AUTO_VERIFIABLE_ALERT_TYPES:
-        raise AppError(
-            code="alert_requires_automatic_verification",
-            message="Ce type d'alerte se referme automatiquement dès que la condition réelle disparaît — utilisez l'acquittement pour signaler une prise en charge.",
-            status_code=422,
-        )
-    if not resolution_note:
-        raise AppError(
-            code="resolution_note_required",
-            message="Une justification est obligatoire pour résoudre manuellement ce type d'alerte.",
-            status_code=422,
-        )
-    alert.status = "resolved"
-    alert.resolvedAt = datetime.now(timezone.utc).replace(tzinfo=None)
-    alert.resolvedByUserId = actor_user_id
-    alert.resolutionMethod = "manual_justified"
-    alert.resolutionNote = resolution_note
-    await record_audit_event(
-        db,
-        organization_id,
-        actor_user_id,
-        action="zyloLiquid.alert.resolve",
-        entity_type="Alert",
-        entity_id=alert.id,
-        summary=f"Résolution de l'alerte {alert.type}" + (f" (cuve {tank.displayName})" if tank else ""),
-        scope_resource_type="station",
-        scope_resource_id=alert.stationId,
-    )
-    await db.commit()
-    await db.refresh(alert)
-    return _alert_to_response(alert)
+# _alert_to_response / list_alerts / _get_alert_and_tank / get_alert /
+# acknowledge_alert / resolve_alert — déplacées vers `app/alerts/service.py`
+# et `app/alerts/router.py` (2026-09-15, Phase 3 de la migration monolithe
+# modulaire). Les producteurs d'alertes restés ici (ci-dessous) appellent
+# désormais `alerts_service.upsert_active_alert`/`auto_resolve_alert`.
 
 
 # D5 (refonte alertes, incrémentation détection réelle) — 3 états système
@@ -2366,12 +2079,12 @@ async def evaluate_price_missing_alert(db: AsyncSession, station_id: uuid.UUID, 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     price = await _resolve_applicable_price(db, station_id, fuel_product_id, now)
     if price is None:
-        await _upsert_active_alert(
+        await alerts_service.upsert_active_alert(
             db, station_id=station_id, product_id=fuel_product_id, alert_type="price_missing",
             triggered_at=now, source_type="fuelProduct", source_id=fuel_product_id,
         )
     else:
-        await _auto_resolve_alert(
+        await alerts_service.auto_resolve_alert(
             db, station_id=station_id, tank_id=None, product_id=fuel_product_id,
             alert_type="price_missing", resolved_at=now,
         )
@@ -2395,11 +2108,11 @@ async def evaluate_sensor_mapping_missing_alert(db: AsyncSession, tank: Tank) ->
         )
     )).scalar_one_or_none()
     if mapping is None:
-        await _upsert_active_alert(
+        await alerts_service.upsert_active_alert(
             db, station_id=tank.stationId, tank_id=tank.id, alert_type="sensor_mapping_missing", triggered_at=now,
         )
     else:
-        await _auto_resolve_alert(
+        await alerts_service.auto_resolve_alert(
             db, station_id=tank.stationId, tank_id=tank.id, product_id=None,
             alert_type="sensor_mapping_missing", resolved_at=now,
         )
@@ -2416,11 +2129,11 @@ async def evaluate_calibration_missing_alert(db: AsyncSession, tank: Tank) -> No
     )
     has_points = (count_result.scalar_one() or 0) > 0
     if not has_points:
-        await _upsert_active_alert(
+        await alerts_service.upsert_active_alert(
             db, station_id=tank.stationId, tank_id=tank.id, alert_type="calibration_missing", triggered_at=now,
         )
     else:
-        await _auto_resolve_alert(
+        await alerts_service.auto_resolve_alert(
             db, station_id=tank.stationId, tank_id=tank.id, product_id=None,
             alert_type="calibration_missing", resolved_at=now,
         )
@@ -5206,10 +4919,10 @@ async def _evaluate_delivery_declaration_reconciliation_core(db: AsyncSession, d
         # `delivery_declaration_pending` non plus, sur toutes les cuves du
         # même produit concernées par le balayage qui l'avait créée.
         resolved_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        await _auto_resolve_alert(db, station_id=declaration.stationId, tank_id=best.tankId, product_id=None, alert_type="delivery_discrepancy", resolved_at=resolved_at)
-        await _auto_resolve_alert(db, station_id=declaration.stationId, tank_id=best.tankId, product_id=None, alert_type="delivery_undeclared", resolved_at=resolved_at)
+        await alerts_service.auto_resolve_alert(db, station_id=declaration.stationId, tank_id=best.tankId, product_id=None, alert_type="delivery_discrepancy", resolved_at=resolved_at)
+        await alerts_service.auto_resolve_alert(db, station_id=declaration.stationId, tank_id=best.tankId, product_id=None, alert_type="delivery_undeclared", resolved_at=resolved_at)
         for tank in await _stations_tanks_for_fuel_product(db, declaration.stationId, declaration.fuelProductId):
-            await _auto_resolve_alert(db, station_id=declaration.stationId, tank_id=tank.id, product_id=None, alert_type="delivery_declaration_pending", resolved_at=resolved_at)
+            await alerts_service.auto_resolve_alert(db, station_id=declaration.stationId, tank_id=tank.id, product_id=None, alert_type="delivery_declaration_pending", resolved_at=resolved_at)
 
     await db.commit()
     await db.refresh(record)
@@ -5362,15 +5075,12 @@ async def evaluate_quality_check_declaration_reconciliation(db: AsyncSession, or
     window_start = declaration.eventAt - timedelta(hours=window_hours)
     window_end = declaration.eventAt + timedelta(hours=window_hours)
 
-    alert_result = await db.execute(
-        select(Alert).where(
-            Alert.tankId == declaration.tankId,
-            Alert.type == "water",
-            Alert.triggeredAt >= window_start,
-            Alert.triggeredAt <= window_end,
-        )
+    # Jamais de requête directe sur `Alert` (capacité partagée) depuis ici —
+    # `find_alert_in_window` est le point d'entrée public d'Alerts pour ce
+    # besoin de lecture (présence/absence dans une fenêtre).
+    alert = await alerts_service.find_alert_in_window(
+        db, tank_id=declaration.tankId, alert_type="water", window_start=window_start, window_end=window_end
     )
-    alert = alert_result.scalars().first()
 
     if declaration.waterDetected and alert is not None:
         status, counterpart_type, counterpart_id = "matched", "Alert", str(alert.id)

@@ -5,13 +5,19 @@ bouge — voir `ARCHITECTURE.md` pour le plan complet.
 
 Dépendance délibérée et documentée vers `app.modules.zylo_liquid` (pas
 l'inverse) : `Truck`/`TRUCK_READ` restent dans zylo_liquid (le véhicule
-lui-même est un objet métier carburant, pas une donnée de localisation),
-et `_qualify_truck_stop` écrit directement une `Alert` sur l'arrêt non
-qualifié (scénario 6) — un appel direct au modèle `Alert` de zylo_liquid,
-jamais un événement, jusqu'à ce que la Phase 5 (événements de domaine en
-mémoire) découple ce point précis. `TruckPositionPing`/
-`GpsDeviceAssignment`/`TruckStopEvent` gardent eux aussi une FK stricte
-vers `zyloLiquidTruck.id` (voir `app/location/models.py`)."""
+lui-même est un objet métier carburant, pas une donnée de localisation).
+`TruckPositionPing`/`GpsDeviceAssignment`/`TruckStopEvent` gardent eux
+aussi une FK stricte vers `zyloLiquidTruck.id` (voir
+`app/location/models.py`).
+
+`_qualify_truck_stop` appelle `app.alerts.service.upsert_active_alert`
+sur l'arrêt non qualifié (scénario 6) — jusqu'à la Phase 3 (2026-09-15),
+ce fichier construisait directement `Alert` (import de
+`app.modules.zylo_liquid.models`) ; depuis l'extraction d'Alertes en
+capacité partagée, c'est un appel direct au point d'entrée public
+d'`app.alerts.service`, comme n'importe quel autre producteur d'alerte —
+toujours pas un événement de domaine, jusqu'à ce que la Phase 5
+(événements en mémoire) découple ce point précis."""
 
 import logging
 import os
@@ -25,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
+from app.alerts import service as alerts_service
 from app.core.errors import AppError
 from app.location.algorithms import (
     TRUCK_STOP_RADIUS_METERS_DEFAULT,
@@ -76,7 +83,7 @@ from app.location.schemas import (
     UpdateTrackingLocationRequest,
     UpdateTruckStopCommentRequest,
 )
-from app.modules.zylo_liquid.models import Alert, Truck
+from app.modules.zylo_liquid.models import Truck
 from app.modules.zylo_liquid.permissions import TRUCK_READ
 from app.rbac.service import user_has_permission
 from app.shared.pagination import PaginationParams
@@ -753,12 +760,16 @@ async def _qualify_truck_stop(db: AsyncSession, organization_id: uuid.UUID, stop
     # TrackingSettings, plus de deuxième délai d'alerte séparé).
     settings_result = await db.execute(select(TrackingSettings).where(TrackingSettings.organizationId == organization_id))
     settings_row = settings_result.scalar_one_or_none()
-    severity = "medium"
-    alert = Alert(
-        truckId=stop.truckId, stationId=None, type="truck_stop_unqualified", severity=severity, status="active",
-        sourceType="TruckStopEvent", sourceId=stop.id, triggeredAt=stop.startAt,
+    # Phase 3 (migration monolithe modulaire) : appel au point d'entrée
+    # public d'Alerts au lieu de construire `Alert` directement (voir la
+    # docstring de ce fichier et celle de `app.alerts.service`) — bénéfice
+    # supplémentaire, la déduplication déjà en place pour les autres
+    # producteurs d'alertes (pas de nouvel arrêt non qualifié en double
+    # tant qu'une alerte du même type reste active/acquittée sur ce camion).
+    await alerts_service.upsert_active_alert(
+        db, truck_id=stop.truckId, alert_type="truck_stop_unqualified",
+        triggered_at=stop.startAt, source_type="TruckStopEvent", source_id=stop.id,
     )
-    db.add(alert)
 
 
 async def create_truck_stop_comment(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, stop_id: uuid.UUID, data: CreateTruckStopCommentRequest) -> TruckStopCommentResponse:

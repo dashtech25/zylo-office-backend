@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.alerts.router import router as alerts_router
 from app.api.v1.endpoints import health
 from app.auth.router import router as auth_router
 from app.billing.router import router as billing_router
@@ -25,6 +26,7 @@ api_router.include_router(billing_router, prefix="/billing", tags=["billing"])
 api_router.include_router(zylo_liquid_router, prefix="/zylo-liquid", tags=["zylo-liquid"])
 api_router.include_router(files_router, prefix="/zylo-liquid", tags=["files"])
 api_router.include_router(location_router, prefix="/zylo-liquid", tags=["location"])
+api_router.include_router(alerts_router, prefix="/zylo-liquid", tags=["alerts"])
 api_router.include_router(currency_router, prefix="/currencies", tags=["currencies"])
 api_router.include_router(exchange_rate_router, prefix="/exchange-rates", tags=["exchange-rates"])
 api_router.include_router(geo_router, prefix="/cities", tags=["geo"])

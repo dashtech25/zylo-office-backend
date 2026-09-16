@@ -1,3 +1,4 @@
+from app.alerts.permissions import ALERT_ACKNOWLEDGE, ALERT_MANAGE, ALERT_READ
 from app.core.database import AsyncSessionLocal
 from app.files.permissions import DOCUMENT_CREATE, DOCUMENT_DELETE, DOCUMENT_MANAGE, DOCUMENT_READ, DOCUMENT_READ_SENSITIVE
 from app.location.permissions import (
@@ -9,9 +10,6 @@ from app.location.permissions import (
     TRACKING_SETTINGS_MANAGE,
 )
 from app.modules.zylo_liquid.permissions import (
-    ALERT_ACKNOWLEDGE,
-    ALERT_MANAGE,
-    ALERT_READ,
     CASH_READ,
     COMMERCIAL_ACCOUNT_MANAGE,
     COMMERCIAL_ACCOUNT_READ,

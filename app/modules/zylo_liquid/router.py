@@ -22,9 +22,6 @@ from app.modules.zylo_liquid.algorithms import (
 )
 from app.modules.zylo_liquid.models import FuelProduct, HolykellAccount, Station, Tank, TankSensorMapping
 from app.modules.zylo_liquid.permissions import (
-    ALERT_ACKNOWLEDGE,
-    ALERT_MANAGE,
-    ALERT_READ,
     CASH_READ,
     DELIVERY_READ,
     FUEL_PRODUCT_MANAGE,
@@ -73,7 +70,6 @@ from app.modules.zylo_liquid.schemas import (
     CreateTankSensorMappingRequest,
     CreateTruckRequest,
     CreateVehicleRequest,
-    AlertResponse,
     CreatePriceHistoryRequest,
     DeliveryDeclarationResponse,
     DeliveryDetectedResponse,
@@ -88,7 +84,6 @@ from app.modules.zylo_liquid.schemas import (
     PurchaseOrderResponse,
     QualityCheckDeclarationResponse,
     ReceivableResponse,
-    ResolveAlertRequest,
     SaleResponse,
     ShiftCashDeclarationResponse,
     StationFuelProductResponse,
@@ -185,12 +180,8 @@ async def _tank_station_scope(db: AsyncSession, organization_id: uuid.UUID, path
     return "station", tank.stationId
 
 
-async def _alert_station_scope(db: AsyncSession, organization_id: uuid.UUID, path_params: dict) -> tuple[str | None, uuid.UUID | None]:
-    raw_id = path_params.get("alert_id")
-    if raw_id is None:
-        return None, None
-    alert, _tank = await service._get_alert_and_tank(db, organization_id, uuid.UUID(str(raw_id)))
-    return "station", alert.stationId
+# _alert_station_scope — déplacée vers `app/alerts/router.py` (2026-09-15,
+# Phase 3), avec les routes /alerts* qu'elle scope.
 
 
 async def _delivery_station_scope(db: AsyncSession, organization_id: uuid.UUID, path_params: dict) -> tuple[str | None, uuid.UUID | None]:
@@ -855,90 +846,10 @@ async def get_leak_event(
     return await service.get_leak_event(db, organization_id, leak_event_id)
 
 
-@router.get(
-    "/alerts",
-    response_model=Page[AlertResponse],
-    summary="Lister les alertes",
-    description="Liste paginée des alertes (fuites suspectées, seuils de niveau, écarts de réconciliation, etc.), filtrable par station, cuve, camion, type et statut sur une plage de dates.",
-)
-async def list_alerts(
-    pagination: PaginationParams = Depends(),
-    stationId: uuid.UUID | None = None,
-    truckId: uuid.UUID | None = None,
-    tankId: uuid.UUID | None = None,
-    type: str | None = None,
-    status: str | None = None,
-    fromDate: datetime | None = None,
-    toDate: datetime | None = None,
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> Page:
-    """Pas de `require_permission(ALERT_READ)` global — même principe que
-    `list_stations`/`list_deliveries`/`list_leak_events`."""
-    return await service.list_alerts(db, organization_id, current_user.id, pagination, stationId, tankId, type, status, fromDate, toDate, truckId)
-
-
-@router.get(
-    "/alerts/{alert_id}",
-    response_model=AlertResponse,
-    dependencies=[Depends(require_permission_scoped_via(ALERT_READ, _alert_station_scope))],
-    summary="Détail d'une alerte",
-    description="Retourne une alerte par son identifiant, avec son type, son statut courant et, si applicable, qui l'a acquittée/résolue et quand.",
-)
-async def get_alert(
-    alert_id: uuid.UUID,
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    db: AsyncSession = Depends(get_db),
-) -> AlertResponse:
-    return await service.get_alert(db, organization_id, alert_id)
-
-
-@router.post(
-    "/alerts/{alert_id}/acknowledge",
-    response_model=AlertResponse,
-    dependencies=[Depends(require_permission_scoped_via(ALERT_ACKNOWLEDGE, _alert_station_scope))],
-    summary="Acquitter une alerte (« je m'en occupe »)",
-    description=(
-        "Marque l'alerte comme prise en charge par l'utilisateur courant, sans la clôturer : "
-        "l'acquittement signale juste qu'un traitement est en cours. Pour clôturer réellement "
-        "l'alerte, utiliser `PATCH /alerts/{alert_id}` (résolution manuelle, réservée aux types "
-        "d'alerte sans vérification automatique)."
-    ),
-)
-async def acknowledge_alert(
-    alert_id: uuid.UUID,
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> AlertResponse:
-    """D3 : « je m'en occupe » — ne referme jamais l'alerte (voir PATCH pour
-    la résolution manuelle, réservée aux types sans vérification auto)."""
-    return await service.acknowledge_alert(db, organization_id, current_user.id, alert_id)
-
-
-@router.patch(
-    "/alerts/{alert_id}",
-    response_model=AlertResponse,
-    dependencies=[Depends(require_permission_scoped_via(ALERT_MANAGE, _alert_station_scope))],
-    summary="Résoudre manuellement une alerte",
-    description=(
-        "Clôture une alerte en indiquant une note de résolution obligatoire. Réservé aux types "
-        "d'alerte qui n'ont pas de vérification automatique de fin de condition : pour un type "
-        "auto-vérifiable (ex. un seuil qui repasse sous la limite tout seul), le service refuse la "
-        "requête avec un 422 — la résolution doit passer par le contrôle automatique, pas manuellement."
-    ),
-)
-async def resolve_alert(
-    alert_id: uuid.UUID,
-    data: ResolveAlertRequest,
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> AlertResponse:
-    """D2 : réservé aux types sans vérification automatique possible — le
-    service refuse la requête (422) pour un type auto-vérifiable."""
-    return await service.resolve_alert(db, organization_id, current_user.id, alert_id, data.resolutionNote)
+# Routes /alerts* — déplacées vers `app/alerts/router.py` (2026-09-15,
+# Phase 3 de la migration monolithe modulaire), montées sous le même
+# préfixe `/zylo-liquid` (voir `app/api/v1/router.py`) : aucune URL ne
+# change côté frontend.
 
 
 @router.post(

@@ -10,8 +10,9 @@ from datetime import datetime
 
 from httpx import AsyncClient
 
+from app.alerts.models import Alert
 from app.core.database import AsyncSessionLocal
-from app.modules.zylo_liquid.models import Alert, DeliveryDetected, HolykellDeviceRegistry, Tank, TankMeasurement, TankSensorMapping
+from app.modules.zylo_liquid.models import DeliveryDetected, HolykellDeviceRegistry, Tank, TankMeasurement, TankSensorMapping
 
 
 def _headers(user: dict, organization: dict) -> dict:

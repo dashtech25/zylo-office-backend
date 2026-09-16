@@ -64,12 +64,10 @@ ignore_imports =
 # Location N'EST PAS une capacité aussi découplée que Files : elle garde
 # une dépendance délibérée et documentée vers zylo_liquid (voir la
 # docstring de app/location/service.py) pour `Truck`/`TRUCK_READ` (le
-# véhicule reste un objet métier carburant) et pour écrire une `Alert` sur
-# un arrêt non qualifié (jusqu'à la Phase 5, événements de domaine, qui
-# découplera ce point précis). Le contrat autorise donc Location ->
-# zylo_liquid.models/permissions mais jamais Location -> zylo_liquid.
-# service/router/schemas — Location ne doit jamais dépendre de la
-# logique métier ou des routes zylo_liquid, seulement de ses types.
+# véhicule reste un objet métier carburant). Le contrat autorise donc
+# Location -> zylo_liquid.models/permissions mais jamais Location ->
+# zylo_liquid.service/router/schemas — Location ne doit jamais dépendre de
+# la logique métier ou des routes zylo_liquid, seulement de ses types.
 [importlinter:contract:location-never-imports-zylo-liquid-logic]
 name = Location ne dépend jamais de la logique/routes de zylo_liquid, seulement de ses types
 type = forbidden
@@ -79,3 +77,53 @@ forbidden_modules =
     app.modules.zylo_liquid.service
     app.modules.zylo_liquid.router
     app.modules.zylo_liquid.schemas
+
+# Phase 3 (2026-09-15) — extraction d'Alertes. Même règle d'accès que
+# Files/Location : ni zylo_liquid ni location ne lisent app.alerts.models
+# directement (zylo_liquid pour ses ~10 fonctions productrices d'alertes,
+# location pour `_qualify_truck_stop`) — seulement app.alerts.service,
+# point d'entrée public (voir sa docstring).
+[importlinter:contract:zylo-liquid-location-alerts-through-service-only]
+name = zylo_liquid et location n'accèdent à Alertes que via son service public
+type = forbidden
+source_modules =
+    app.modules.zylo_liquid
+    app.location
+forbidden_modules =
+    app.alerts.models
+ignore_imports =
+    app.alerts.service -> app.alerts.models
+
+# Alertes, comme Location, garde une dépendance délibérée et documentée
+# vers zylo_liquid : app.alerts.service a besoin de Station/Truck/Tank
+# (app.modules.zylo_liquid.models) pour ses jointures de portée
+# (list_alerts/_get_alert_and_tank) — voir la docstring de
+# app/alerts/service.py. Le contrat autorise donc Alerts ->
+# zylo_liquid.models mais jamais Alerts -> zylo_liquid.service/router/
+# schemas — Alertes ne doit jamais dépendre de la logique métier ou des
+# routes zylo_liquid, seulement de ses types.
+[importlinter:contract:alerts-never-imports-zylo-liquid-logic]
+name = Alertes ne dépend jamais de la logique/routes de zylo_liquid, seulement de ses types
+type = forbidden
+source_modules =
+    app.alerts
+forbidden_modules =
+    app.modules.zylo_liquid.service
+    app.modules.zylo_liquid.router
+    app.modules.zylo_liquid.schemas
+
+# Contrairement à app/alerts/service.py, app/alerts/models.py n'a besoin
+# d'aucun import de zylo_liquid/location : les FK de `Alert` vers
+# station/camion/cuve/produit sont résolues par SQLAlchemy via le nom de
+# table au moment du mapper configure, pas via un import Python (même
+# mécanisme que app/location/models.py vers zyloLiquidTruck.id — voir sa
+# docstring). Un import dans models.py signalerait un vrai couplage, pas
+# la résolution FK normale.
+[importlinter:contract:alerts-models-no-zylo-liquid-location-import]
+name = app.alerts.models n'importe rien de zylo_liquid/location (FK résolues par nom de table)
+type = forbidden
+source_modules =
+    app.alerts.models
+forbidden_modules =
+    app.modules.zylo_liquid
+    app.location

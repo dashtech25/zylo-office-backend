@@ -3,12 +3,10 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.alerts.permissions import ALERT_ACKNOWLEDGE, ALERT_MANAGE, ALERT_READ
 from app.files.permissions import DOCUMENT_CREATE, DOCUMENT_DELETE, DOCUMENT_MANAGE, DOCUMENT_READ, DOCUMENT_READ_SENSITIVE
 from app.location.permissions import GPS_DEVICE_READ, TRACKING_LOCATION_READ
 from app.modules.zylo_liquid.permissions import (
-    ALERT_ACKNOWLEDGE,
-    ALERT_MANAGE,
-    ALERT_READ,
     CARRIER_READ,
     CASH_READ,
     COMMERCIAL_ACCOUNT_MANAGE,

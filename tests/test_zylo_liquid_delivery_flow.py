@@ -10,8 +10,9 @@ from datetime import datetime, timedelta
 
 from httpx import AsyncClient
 
+from app.alerts.models import Alert
 from app.core.database import AsyncSessionLocal
-from app.modules.zylo_liquid.models import Alert, DeliveryDetected, TankMeasurement
+from app.modules.zylo_liquid.models import DeliveryDetected, TankMeasurement
 from app.modules.zylo_liquid.service import run_delivery_detection_for_tank
 from tests.conftest import register_holykell_sensor
 

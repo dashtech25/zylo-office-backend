@@ -3,6 +3,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.files.permissions import DOCUMENT_CREATE, DOCUMENT_DELETE, DOCUMENT_MANAGE, DOCUMENT_READ, DOCUMENT_READ_SENSITIVE
+from app.location.permissions import GPS_DEVICE_READ, TRACKING_LOCATION_READ
 from app.modules.zylo_liquid.permissions import (
     ALERT_ACKNOWLEDGE,
     ALERT_MANAGE,
@@ -12,11 +14,6 @@ from app.modules.zylo_liquid.permissions import (
     COMMERCIAL_ACCOUNT_MANAGE,
     COMMERCIAL_ACCOUNT_READ,
     DECLARATION_LOCK,
-    DOCUMENT_CREATE,
-    DOCUMENT_DELETE,
-    DOCUMENT_MANAGE,
-    DOCUMENT_READ,
-    DOCUMENT_READ_SENSITIVE,
     EQUIPMENT_MANAGE,
     EQUIPMENT_READ,
     INTERVENTION_ASSIGN,
@@ -76,8 +73,6 @@ from app.modules.zylo_liquid.permissions import (
     TANK_SENSOR_MAPPING_MANAGE,
     TANK_SENSOR_MAPPING_READ,
     TRUCK_READ,
-    GPS_DEVICE_READ,
-    TRACKING_LOCATION_READ,
     SECURITY_EQUIPMENT_READ,
     SECURITY_EQUIPMENT_MANAGE,
     STATION_SUPPLIER_READ,

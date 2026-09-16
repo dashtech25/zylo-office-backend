@@ -1,0 +1,81 @@
+[importlinter]
+root_package = app
+
+# Phase 0 (2026-09-15) — premier contrat, valide ce qui est déjà vrai
+# aujourd'hui : zylo_liquid ne doit jamais atteindre l'intérieur
+# d'identity/rbac, seulement leurs points d'entrée publics (service.py,
+# schemas.py, models.py — ces modules exposent déjà tout via des imports
+# de haut niveau, pas de sous-package "interne" caché chez eux). Sert de
+# test que l'outil est bien câblé, avant d'ajouter les contrats plus
+# stricts des phases suivantes (files/location/alerts/holykell : aucun
+# import direct entre eux, aucun retour vers zylo_liquid).
+
+[importlinter:contract:identity-rbac-not-reachable-from-internals]
+name = zylo_liquid ne dépend jamais des détails internes d'identity/rbac
+type = forbidden
+source_modules =
+    app.modules.zylo_liquid
+forbidden_modules =
+    app.identity.security
+    app.rbac.security
+
+# Phase 1 (2026-09-15) — extraction de Files. zylo_liquid ne doit passer
+# que par app.files.service (point d'entrée public, voir sa docstring) :
+# jamais un accès direct à app.files.models, qui casserait l'isolation
+# dès qu'on voudra un jour changer le schéma de Document sans toucher à
+# zylo_liquid.
+[importlinter:contract:zylo-liquid-files-through-service-only]
+name = zylo_liquid n'accède à Files que via son service public
+type = forbidden
+source_modules =
+    app.modules.zylo_liquid
+forbidden_modules =
+    app.files.models
+# app.files.service -> app.files.models est l'encapsulation normale du
+# module Files lui-même (voir la docstring de service.py) — seule la
+# chaîne zylo_liquid -> app.files.models EN DIRECT doit être interdite,
+# pas ce chemin transitif attendu qui passerait sinon pour une violation.
+ignore_imports =
+    app.files.service -> app.files.models
+
+# Files est une capacité partagée : elle ne doit jamais dépendre du
+# domaine qui la consomme, sinon la dépendance devient circulaire dès
+# qu'un deuxième domaine (Tank, CRM) voudra l'utiliser à son tour.
+[importlinter:contract:files-never-imports-zylo-liquid]
+name = Files ne dépend jamais de zylo_liquid
+type = forbidden
+source_modules =
+    app.files
+forbidden_modules =
+    app.modules.zylo_liquid
+
+# Phase 2 (2026-09-15) — extraction de Location. Même règle d'accès que
+# Files : zylo_liquid ne lit jamais app.location.models directement.
+[importlinter:contract:zylo-liquid-location-through-service-only]
+name = zylo_liquid n'accède à Location que via son service public
+type = forbidden
+source_modules =
+    app.modules.zylo_liquid
+forbidden_modules =
+    app.location.models
+ignore_imports =
+    app.location.service -> app.location.models
+
+# Location N'EST PAS une capacité aussi découplée que Files : elle garde
+# une dépendance délibérée et documentée vers zylo_liquid (voir la
+# docstring de app/location/service.py) pour `Truck`/`TRUCK_READ` (le
+# véhicule reste un objet métier carburant) et pour écrire une `Alert` sur
+# un arrêt non qualifié (jusqu'à la Phase 5, événements de domaine, qui
+# découplera ce point précis). Le contrat autorise donc Location ->
+# zylo_liquid.models/permissions mais jamais Location -> zylo_liquid.
+# service/router/schemas — Location ne doit jamais dépendre de la
+# logique métier ou des routes zylo_liquid, seulement de ses types.
+[importlinter:contract:location-never-imports-zylo-liquid-logic]
+name = Location ne dépend jamais de la logique/routes de zylo_liquid, seulement de ses types
+type = forbidden
+source_modules =
+    app.location
+forbidden_modules =
+    app.modules.zylo_liquid.service
+    app.modules.zylo_liquid.router
+    app.modules.zylo_liquid.schemas

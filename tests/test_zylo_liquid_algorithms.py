@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from app.location.algorithms import is_position_plausible
 from app.modules.zylo_liquid.algorithms import (
     compute_leak_rate_lph,
     compute_net_corrected_volume,
@@ -14,7 +15,6 @@ from app.modules.zylo_liquid.algorithms import (
     evaluate_threshold_alarms,
     interpolate_height_to_volume,
     is_leak_detected,
-    is_position_plausible,
 )
 
 CALIBRATION_TABLE = [(0, 0), (1000, 18000), (1050, 19200), (1100, 20350), (2000, 40000)]

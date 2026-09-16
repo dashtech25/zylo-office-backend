@@ -145,3 +145,37 @@ source_modules =
     app.integrations.holykell
 forbidden_modules =
     app.modules.zylo_liquid
+
+# Phase 6 (2026-09-16) — dernier verrou du plan de migration : les 4
+# capacités partagées ne s'importent jamais entre elles, ni directement ni
+# indirectement (`type = independence`, le type de contrat prévu pour
+# exactement ce besoin — aucun des contrats précédents ne le couvrait,
+# chacun ne protégeant qu'un sens zylo_liquid<->capacité). Aujourd'hui
+# aucune n'a de raison d'en connaître une autre (Location a cessé de
+# connaître Alerts à la Phase 5, en passant par un événement de domaine
+# plutôt qu'un import direct — la preuve que ce contrat n'est pas
+# seulement théorique). Le jour où un vrai besoin de communication directe
+# entre deux capacités apparaît, la question à se poser d'abord est
+# toujours la même que pour zylo_liquid : appel direct ou événement (voir
+# §4) — jamais un import qui contourne ce contrat sans y réfléchir.
+[importlinter:contract:capabilities-never-import-each-other]
+name = Files/Location/Alertes/Holykell ne s'importent jamais entre eux
+type = independence
+modules =
+    app.files
+    app.location
+    app.alerts
+    app.integrations.holykell
+# Faux positif transitif : chaque routeur de capacité dépend de
+# app.modules_registry.service (require_module_active, vérifie que
+# zylo_liquid est actif — rien à voir avec une capacité qui en importe
+# une autre) ; ce service Core importe à son tour, en local et
+# paresseusement (à l'intérieur d'une fonction, uniquement au moment de
+# l'activation du module), app.modules.zylo_liquid.roles_seed, qui lui
+# importe les permissions de Files/Location — un chemin qui passe par du
+# code zylo_liquid, jamais une capacité qui en atteint une autre
+# directement. Sans cet ignore, ce contrat casserait dès qu'une
+# deuxième capacité (n'importe laquelle) existe, ce qui n'a rien à voir
+# avec ce qu'il vérifie réellement.
+ignore_imports =
+    app.modules_registry.service -> app.modules.zylo_liquid.roles_seed

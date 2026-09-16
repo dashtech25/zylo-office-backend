@@ -4,6 +4,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.alerts.service import handle_truck_stop_unqualified
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
@@ -17,6 +18,7 @@ from app.modules.zylo_liquid.telemetry_sync import structural_sweep_loop, sync_l
 from app.modules_registry.seed import seed_known_modules
 from app.modules_registry.service import backfill_active_module_permissions_for_owners
 from app.rbac.seed import seed_known_permissions as seed_rbac_permissions
+from app.shared.events import subscribe
 
 setup_logging()
 
@@ -54,6 +56,19 @@ app.add_middleware(
 register_exception_handlers(app)
 
 app.include_router(api_router, prefix="/api/v1")
+
+# Phase 5 (migration monolithe modulaire, événements de domaine en mémoire)
+# — inscription des abonnements au niveau module, pas dans `on_startup` :
+# la suite de tests appelle l'app via `httpx.ASGITransport`, qui ne
+# déclenche jamais les événements FastAPI "startup" (voir le commentaire
+# équivalent dans `tests/conftest.py` pour le seed des permissions) ; un
+# abonnement enregistré seulement au démarrage serait donc silencieusement
+# absent en test. `app/main.py` est le point de composition central du
+# projet : le seul endroit autorisé à faire se connaître deux modules qui,
+# sinon, n'ont plus besoin de s'importer l'un l'autre (voir
+# `app.shared.events` et `app.location.service.run_truck_stop_detection`,
+# premier cas d'usage réel).
+subscribe("TruckStopUnqualified", handle_truck_stop_unqualified)
 
 
 @app.on_event("startup")

@@ -10,14 +10,27 @@ lui-même est un objet métier carburant, pas une donnée de localisation).
 aussi une FK stricte vers `zyloLiquidTruck.id` (voir
 `app/location/models.py`).
 
-`_qualify_truck_stop` appelle `app.alerts.service.upsert_active_alert`
-sur l'arrêt non qualifié (scénario 6) — jusqu'à la Phase 3 (2026-09-15),
-ce fichier construisait directement `Alert` (import de
-`app.modules.zylo_liquid.models`) ; depuis l'extraction d'Alertes en
-capacité partagée, c'est un appel direct au point d'entrée public
-d'`app.alerts.service`, comme n'importe quel autre producteur d'alerte —
-toujours pas un événement de domaine, jusqu'à ce que la Phase 5
-(événements en mémoire) découple ce point précis."""
+`_qualify_truck_stop` publie l'événement de domaine `TruckStopUnqualified`
+(`app.shared.events.publish`, Phase 5) sur l'arrêt non qualifié (scénario
+6), au lieu d'appeler directement `app.alerts.service.upsert_active_alert`
+comme le faisait la Phase 3 (2026-09-15) — et avant elle, jusqu'à la
+Phase 3, ce fichier construisait même `Alert` directement (import de
+`app.modules.zylo_liquid.models`). C'est le premier cas d'usage réel du
+registre d'événements : Location n'a plus besoin de connaître
+`app.alerts.service` du tout pour ce cas précis (aucun import
+`from app.alerts import service` restant dans ce fichier), la
+dépendance devient un simple nom d'événement partagé — voir
+`app.alerts.service.handle_truck_stop_unqualified`, le handler abonné
+(inscription dans `app/main.py`).
+
+`run_truck_stop_detection` ne publie l'événement qu'APRÈS son propre
+`await db.commit()` (jamais dans la boucle de qualification, qui reste
+avant le commit) — `_qualify_truck_stop` se contente de RETOURNER le
+payload de l'événement à publier (ou `None`), jamais de le publier
+lui-même, pour que le principe « publier après le commit de la
+transaction qui a produit l'événement » (voir `app.shared.events`) soit
+respecté même si un futur appelant de `_qualify_truck_stop` committe à un
+autre moment que la fonction actuelle."""
 
 import logging
 import os
@@ -31,7 +44,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-from app.alerts import service as alerts_service
 from app.core.errors import AppError
 from app.location.algorithms import (
     TRUCK_STOP_RADIUS_METERS_DEFAULT,
@@ -86,6 +98,7 @@ from app.location.schemas import (
 from app.modules.zylo_liquid.models import Truck
 from app.modules.zylo_liquid.permissions import TRUCK_READ
 from app.rbac.service import user_has_permission
+from app.shared.events import publish
 from app.shared.pagination import PaginationParams
 from app.shared.schemas import Page, PageMeta
 
@@ -323,17 +336,27 @@ async def run_truck_stop_detection(db: AsyncSession, truck_id: uuid.UUID) -> lis
     if created:
         await db.flush()
         truck = await db.get(Truck, truck_id)
+        pending_events: list[dict] = []
         for instance in created:
-            # Qualification automatique (lieu connu / réconciliation / alerte
-            # d'arrêt non qualifié) — scénarios 5/6, best-effort comme le
-            # reste de la détection dérivée.
+            # Qualification automatique (lieu connu / réconciliation /
+            # événement d'arrêt non qualifié) — scénarios 5/6, best-effort
+            # comme le reste de la détection dérivée : une erreur ici ne
+            # doit jamais faire échouer la détection d'arrêt elle-même,
+            # mais reste journalisée (jamais avalée en silence).
             try:
-                await _qualify_truck_stop(db, truck.organizationId, instance)
+                event_payload = await _qualify_truck_stop(db, truck.organizationId, instance)
+                if event_payload is not None:
+                    pending_events.append(event_payload)
             except Exception:
-                pass
+                logger.exception("échec de la qualification automatique de l'arrêt %s (best-effort)", instance.id)
         await db.commit()
         for instance in created:
             await db.refresh(instance)
+        # Publié seulement ici, après le commit ci-dessus — jamais dans la
+        # boucle de qualification (voir la docstring de ce fichier et
+        # celle de `app.shared.events`).
+        for event_payload in pending_events:
+            await publish("TruckStopUnqualified", **event_payload)
     return created
 
 
@@ -733,10 +756,13 @@ async def update_tracking_settings(db: AsyncSession, organization_id: uuid.UUID,
     return TrackingSettingsResponse.model_validate(settings_row)
 
 
-async def _qualify_truck_stop(db: AsyncSession, organization_id: uuid.UUID, stop: TruckStopEvent) -> None:
-    """Reconnaissance automatique de lieu + alerte d'arrêt non qualifié
-    (scénarios 5/6) — appelé juste après la persistance d'un nouvel arrêt
-    confirmé, jamais rétroactivement sur les arrêts déjà qualifiés."""
+async def _qualify_truck_stop(db: AsyncSession, organization_id: uuid.UUID, stop: TruckStopEvent) -> dict | None:
+    """Reconnaissance automatique de lieu + qualification d'un arrêt non
+    qualifié (scénarios 5/6) — appelé juste après la persistance d'un
+    nouvel arrêt confirmé, jamais rétroactivement sur les arrêts déjà
+    qualifiés. Retourne le payload de l'événement `TruckStopUnqualified` à
+    publier par l'appelant (après son propre commit), ou `None` si l'arrêt
+    a été reconnu/mis en réconciliation (aucun événement dans ces deux cas)."""
     locations_result = await db.execute(
         select(TruckTrackingLocation.id, TruckTrackingLocation.latitude, TruckTrackingLocation.longitude, TruckTrackingLocation.radiusMeters)
         .where(TruckTrackingLocation.organizationId == organization_id, TruckTrackingLocation.status == "active")
@@ -747,29 +773,27 @@ async def _qualify_truck_stop(db: AsyncSession, organization_id: uuid.UUID, stop
     if match["status"] == "matched":
         stop.locationId = match["locationId"]
         stop.reconciliationStatus = "none"
-        return
+        return None
 
     if match["status"] == "ambiguous":
         stop.reconciliationStatus = "pending"
         db.add(TruckStopReconciliation(stopEventId=stop.id, candidateLocationIds=[str(c) for c in match["candidateIds"]]))
-        return
+        return None
 
-    # unmatched : arrêt hors de tout lieu connu -> alerte immédiate
+    # unmatched : arrêt hors de tout lieu connu -> événement de domaine
     # (scénario 6), seuil déjà appliqué en amont par la détection d'arrêt
     # elle-même (confirmation = seuil unique, configurable via
-    # TrackingSettings, plus de deuxième délai d'alerte séparé).
-    settings_result = await db.execute(select(TrackingSettings).where(TrackingSettings.organizationId == organization_id))
-    settings_row = settings_result.scalar_one_or_none()
-    # Phase 3 (migration monolithe modulaire) : appel au point d'entrée
-    # public d'Alerts au lieu de construire `Alert` directement (voir la
-    # docstring de ce fichier et celle de `app.alerts.service`) — bénéfice
-    # supplémentaire, la déduplication déjà en place pour les autres
-    # producteurs d'alertes (pas de nouvel arrêt non qualifié en double
-    # tant qu'une alerte du même type reste active/acquittée sur ce camion).
-    await alerts_service.upsert_active_alert(
-        db, truck_id=stop.truckId, alert_type="truck_stop_unqualified",
-        triggered_at=stop.startAt, source_type="TruckStopEvent", source_id=stop.id,
-    )
+    # TrackingSettings, plus de deuxième délai d'alerte séparé). Phase 5 :
+    # ne publie plus directement — retourne le payload, publié par
+    # l'appelant après son commit (voir la docstring de ce fichier et
+    # celle de `app.shared.events`).
+    return {
+        "truck_id": stop.truckId,
+        "alert_type": "truck_stop_unqualified",
+        "triggered_at": stop.startAt,
+        "source_type": "TruckStopEvent",
+        "source_id": stop.id,
+    }
 
 
 async def create_truck_stop_comment(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, stop_id: uuid.UUID, data: CreateTruckStopCommentRequest) -> TruckStopCommentResponse:

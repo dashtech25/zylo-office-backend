@@ -65,6 +65,7 @@ from app.alerts.models import Alert
 from app.alerts.permissions import ALERT_READ
 from app.alerts.schemas import AlertResponse
 from app.audit.service import record_audit_event
+from app.core.database import AsyncSessionLocal
 from app.core.errors import AppError
 from app.modules.zylo_liquid.models import Station, Tank, Truck
 from app.rbac.service import list_visible_resource_ids
@@ -440,3 +441,27 @@ async def resolve_alert(
     await db.commit()
     await db.refresh(alert)
     return _alert_to_response(alert)
+
+
+async def handle_truck_stop_unqualified(
+    *,
+    truck_id: uuid.UUID,
+    alert_type: str,
+    triggered_at,
+    source_type: str | None = None,
+    source_id: uuid.UUID | None = None,
+) -> None:
+    """Handler de l'événement de domaine `TruckStopUnqualified` (Phase 5,
+    voir `app.shared.events` et la docstring de
+    `app.location.service.run_truck_stop_detection`, premier cas d'usage
+    réel du registre d'événements en mémoire). Ouvre sa propre session —
+    jamais celle de l'appelant, qui a déjà committé (ou va committer,
+    selon l'ordre choisi par le producteur) au moment où cet événement est
+    publié ; ce handler ne doit dépendre d'aucun état de la transaction qui
+    a déclenché l'événement, seulement du `payload` reçu."""
+    async with AsyncSessionLocal() as db:
+        await upsert_active_alert(
+            db, truck_id=truck_id, alert_type=alert_type, triggered_at=triggered_at,
+            source_type=source_type, source_id=source_id,
+        )
+        await db.commit()

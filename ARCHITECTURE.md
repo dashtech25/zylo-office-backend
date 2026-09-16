@@ -161,13 +161,24 @@ indépendamment (jamais un gros commit unique) :
 | 1 | Extraire `app/files/` (`Document`/`DocumentLink`, déjà découplés par `linkedEntityType`/`linkedEntityId` texte libre, pas de FK stricte) | fait — `8020c61` |
 | 2 | Extraire `app/location/` (GPS : `GpsDevice`, `TruckPositionPing`, détection d'arrêt...) — FK stricte conservée vers `zyloLiquidTruck.id`, URLs `/api/v1/zylo-liquid/...` gardées stables côté frontend | fait — `8020c61` |
 | 3 | Extraire `app/alerts/` (`Alert`, FK strictes conservées vers station/truck/tank/product — pas de redesign de schéma dans cette phase) | fait — `74e772c` |
-| 4 | Extraire `app/integrations/holykell/` (client HTTP + DTO), supprimer `scripts/sync_holykell_live.py` (legacy, déjà remplacé par la boucle en process) | — |
+| 4 | Extraire `app/integrations/holykell/` (client HTTP + DTO) | fait — `a78ca84` (suppression de `scripts/sync_holykell_live.py` non faite, voir note) |
 | 5 | `app/shared/events.py` (`subscribe`/`publish`), premier cas d'usage réel : `TruckStopUnqualified` (location → alerts) | — |
 | 6 | Étendre les contrats `import-linter` à tous les nouveaux modules, CI bloquante sur violation | — |
 
 Note : Phases 1 et 2 ont été livrées dans un même commit (`8020c61`,
 2026-09-15) — travail enchaîné sans commit intermédiaire entre les deux.
 Phase 3 et suivantes reprennent la règle « un commit par phase ».
+
+Note Phase 4 (2026-09-16) : le plan prévoyait aussi la suppression de
+`scripts/sync_holykell_live.py`, présenté comme "déjà remplacé par la
+boucle en process". Vérification faite avant suppression (comme demandé) :
+c'est vrai pour sa boucle locale (`poll_once` délègue déjà à
+`sync_one_account`, désormais lui-même appuyé sur `holykell.client`), mais
+le script a un second rôle distinct non couvert ailleurs — `provision()`
+bootstrappe des entités de démo à partir d'une base Postgres externe réelle
+(`STATION_SIM_DSN`, le simulateur station_sim), ce que `dev_seed.py` (données
+synthétiques) ne fait pas. Script conservé, suppression reportée à une phase
+ultérieure si/quand un remplacement de `provision()` existe.
 
 Mettre à jour la colonne Statut quand une phase est livrée (référencer le
 commit). Ne pas commencer une phase avant que la précédente soit vérifiée
@@ -200,7 +211,7 @@ un import qui viole un contrat fait échouer le build, indépendamment de la
 relecture humaine. C'est ce qui transforme les règles de ce document d'une
 convention (facile à oublier sous pression) en contrainte vérifiée.
 
-8 contrats en place (Phases 0-3, voir `.importlinter`) :
+9 contrats en place (Phases 0-4, voir `.importlinter`) :
 - `identity-rbac-not-reachable-from-internals` — `zylo_liquid` ne peut
   jamais importer `app.identity.security`/`app.rbac.security` (détails
   internes), seulement leurs points d'entrée publics.
@@ -231,12 +242,20 @@ convention (facile à oublier sous pression) en contrainte vérifiée.
   table au moment du mapper configure (même mécanisme que
   `app/location/models.py` vers `zyloLiquidTruck.id`), jamais par un
   import Python.
+- `holykell-never-imports-zylo-liquid` — `app.integrations.holykell` ne
+  dépend jamais de `zylo_liquid` : l'adaptateur ne doit jamais connaître le
+  domaine qu'il sert. Pas de contrat symétrique "zylo_liquid n'accède à
+  Holykell que via son service public" comme pour Files/Location/Alerts :
+  Holykell n'expose qu'un seul fichier public
+  (`app.integrations.holykell.client` : login, appels HTTP, DTO
+  `HolykellSensorReading`), pas de `models.py` séparé à protéger — il n'y a
+  encore rien d'autre à cacher derrière.
 
-Contrats prévus à mesure que Phases 4-6 avancent (à ajouter dans
+Contrats prévus à mesure que la Phase 6 avance (à ajouter dans
 `.importlinter` au moment de chaque extraction, pas après coup) :
-- `app.integrations.holykell` ne s'importe jamais directement avec
-  `app.alerts`/`app.location`/`app.files`, ni ne remonte vers
-  `app.modules.zylo_liquid`.
+- Étendre les contrats existants si un jour `app.integrations.holykell`
+  gagne un sous-module interne (ex. un futur second fournisseur de
+  télémétrie) qui devrait rester caché derrière `client.py`.
 
 Ce qu'`import-linter` ne vérifie pas (à garder en tête, ce ne sont pas des
 trous dans l'outil mais des limites connues) : il ne vérifie ni la

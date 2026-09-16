@@ -1157,14 +1157,24 @@ async def _get_active_registry_entry(db: AsyncSession, tank_id: uuid.UUID, measu
     return result.scalar_one_or_none()
 
 
-async def _resolve_applicable_price(db: AsyncSession, station_id: uuid.UUID, fuel_product_id: uuid.UUID, at) -> PriceHistory | None:
+async def _resolve_applicable_price(
+    db: AsyncSession, station_id: uuid.UUID, fuel_product_id: uuid.UUID, at
+) -> tuple[PriceHistory | None, str | None]:
     """Prix applicable à un instant donné (Point 2 §7.6, niveau_1_...md
     §16) : la ligne `PriceHistory` propre à la station dont `effectiveFrom`
     est la plus récente antérieure ou égale à l'instant demandé — jamais un
     prix postérieur, jamais le prix courant en cache. À défaut, repli sur le
     prix par défaut du réseau (`stationId IS NULL`, audit Configuration
     carburant P2 §E) — jamais l'inverse (un prix propre à la station prime
-    toujours sur le défaut réseau, même plus ancien)."""
+    toujours sur le défaut réseau, même plus ancien).
+
+    Retourne `(price, reason)` : `reason` n'est renseigné que si `price` est
+    `None`, pour distinguer "aucun prix réseau du tout pour ce produit"
+    (`no_applicable_price`) de "un prix réseau par défaut existe mais dans
+    une devise différente de celle résolue pour la station"
+    (`price_currency_mismatch`) — un cas de configuration incohérente
+    silencieusement confondu avec une absence totale de prix avant ce
+    correctif (P0-7, audit module Stations 2026-09-16)."""
     result = await db.execute(
         select(PriceHistory)
         .where(PriceHistory.stationId == station_id, PriceHistory.fuelProductId == fuel_product_id, PriceHistory.effectiveFrom <= at)
@@ -1173,7 +1183,7 @@ async def _resolve_applicable_price(db: AsyncSession, station_id: uuid.UUID, fue
     )
     price = result.scalar_one_or_none()
     if price is not None:
-        return price
+        return price, None
 
     default_conditions = [
         PriceHistory.stationId.is_(None),
@@ -1188,6 +1198,7 @@ async def _resolve_applicable_price(db: AsyncSession, station_id: uuid.UUID, fue
     # pas résolvable (chaîne géo incomplète) — jamais casser un affichage
     # déjà fonctionnel pour cette raison.
     station = await db.get(Station, station_id)
+    station_currency = None
     if station is not None:
         try:
             station_currency = await _resolve_station_default_currency(db, station)
@@ -1198,7 +1209,20 @@ async def _resolve_applicable_price(db: AsyncSession, station_id: uuid.UUID, fue
     default_result = await db.execute(
         select(PriceHistory).where(*default_conditions).order_by(PriceHistory.effectiveFrom.desc()).limit(1)
     )
-    return default_result.scalar_one_or_none()
+    default_price = default_result.scalar_one_or_none()
+    if default_price is not None:
+        return default_price, None
+
+    if station_currency is not None:
+        any_currency_result = await db.execute(
+            select(PriceHistory.id)
+            .where(PriceHistory.stationId.is_(None), PriceHistory.fuelProductId == fuel_product_id, PriceHistory.effectiveFrom <= at)
+            .limit(1)
+        )
+        if any_currency_result.scalar_one_or_none() is not None:
+            return None, "price_currency_mismatch"
+
+    return None, "no_applicable_price"
 
 
 async def _resolve_tank_monetary_value(
@@ -1211,9 +1235,9 @@ async def _resolve_tank_monetary_value(
     prix courant du produit indépendamment du calcul de valeur du stock —
     remplace `FuelProduct.currentPriceFcfa`, jamais mis à jour (retiré du
     modèle, audit Configuration carburant §B/§P1)."""
-    price = await _resolve_applicable_price(db, tank.stationId, tank.fuelProductId, at)
+    price, price_reason = await _resolve_applicable_price(db, tank.stationId, tank.fuelProductId, at)
     if price is None:
-        return None, None, "no_applicable_price", None
+        return None, None, price_reason, None
     currency = await db.get(Currency, price.currencyId)
     currency_code = currency.code if currency else None
     unit_price = float(price.priceAmount)
@@ -1231,6 +1255,7 @@ def _build_tank_current_state(
     fuel_product: FuelProduct | None,
     price: PriceHistory | None,
     currency_code: str | None,
+    price_reason: str | None = None,
 ) -> TankCurrentStateResponse:
     """Calcul pur (aucun accès DB) de l'état d'une cuve à partir de données
     déjà chargées — factorisé hors de `get_tanks_current_state_batch` pour
@@ -1298,7 +1323,7 @@ def _build_tank_current_state(
         volume_15c = correct_volume_to_reference_temperature(volume_net, temperature_c, float(fuel_product.thermalExpansionCoefficient))
 
     if price is None:
-        monetary_value, monetary_reason, unit_price = None, "no_applicable_price", None
+        monetary_value, monetary_reason, unit_price = None, (price_reason or "no_applicable_price"), None
     else:
         unit_price = float(price.priceAmount)
         if volume_net is None:
@@ -1373,7 +1398,7 @@ async def get_tanks_current_state_batch(db: AsyncSession, tanks: list[Tank]) -> 
     pairs = {(t.stationId, t.fuelProductId) for t in tanks}
     price_by_pair = await _resolve_applicable_prices_batch(db, pairs, stations_by_id, now)
 
-    currency_ids = {p.currencyId for p in price_by_pair.values() if p is not None}
+    currency_ids = {price.currencyId for price, _ in price_by_pair.values() if price is not None}
     currency_by_id: dict[uuid.UUID, Currency] = {}
     if currency_ids:
         currency_result = await db.execute(select(Currency).where(Currency.id.in_(currency_ids)))
@@ -1381,7 +1406,7 @@ async def get_tanks_current_state_batch(db: AsyncSession, tanks: list[Tank]) -> 
 
     states: dict[uuid.UUID, TankCurrentStateResponse] = {}
     for tank in tanks:
-        price = price_by_pair.get((tank.stationId, tank.fuelProductId))
+        price, price_reason = price_by_pair.get((tank.stationId, tank.fuelProductId), (None, "no_applicable_price"))
         currency = currency_by_id.get(price.currencyId) if price is not None else None
         states[tank.id] = _build_tank_current_state(
             tank,
@@ -1392,6 +1417,7 @@ async def get_tanks_current_state_batch(db: AsyncSession, tanks: list[Tank]) -> 
             fuel_product_by_id.get(tank.fuelProductId),
             price,
             currency.code if currency is not None else None,
+            price_reason,
         )
     return states
 
@@ -2118,7 +2144,7 @@ async def evaluate_price_missing_alert(db: AsyncSession, station_id: uuid.UUID, 
     champ de réponse dégradée silencieux (constat Étape 1 : c'était le cas
     avant cette incrémentation, `monetaryValueNotCalculableReason`)."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    price = await _resolve_applicable_price(db, station_id, fuel_product_id, now)
+    price, _ = await _resolve_applicable_price(db, station_id, fuel_product_id, now)
     if price is None:
         await alerts_service.upsert_active_alert(
             db, station_id=station_id, product_id=fuel_product_id, alert_type="price_missing",
@@ -2443,13 +2469,15 @@ async def _resolve_station_currencies_batch(db: AsyncSession, stations: list[Sta
 
 async def _resolve_applicable_prices_batch(
     db: AsyncSession, pairs: set[tuple[uuid.UUID, uuid.UUID]], stations_by_id: dict[uuid.UUID, Station], at
-) -> dict[tuple[uuid.UUID, uuid.UUID], PriceHistory | None]:
+) -> dict[tuple[uuid.UUID, uuid.UUID], tuple[PriceHistory | None, str | None]]:
     """Version batchée de `_resolve_applicable_price` — même sémantique
     exacte (prix propre à la station en priorité, repli sur le prix réseau
     par défaut filtré par la devise de la station quand elle est
-    résolvable), mais un aller-retour DB par étape pour l'ensemble des
-    paires (station, produit) demandées plutôt qu'un aller-retour par
-    paire (audit performance 2026-09-11)."""
+    résolvable, puis distinction `price_currency_mismatch` vs
+    `no_applicable_price` — voir `_resolve_applicable_price`), mais un
+    aller-retour DB par étape pour l'ensemble des paires (station, produit)
+    demandées plutôt qu'un aller-retour par paire (audit performance
+    2026-09-11)."""
     if not pairs:
         return {}
 
@@ -2476,17 +2504,21 @@ async def _resolve_applicable_prices_batch(
     )
     default_prices = list(default_price_result.scalars().all())
 
-    resolved: dict[tuple[uuid.UUID, uuid.UUID], PriceHistory | None] = {}
+    resolved: dict[tuple[uuid.UUID, uuid.UUID], tuple[PriceHistory | None, str | None]] = {}
     for station_id, product_id in pairs:
         key = (station_id, product_id)
         price = station_price_by_key.get(key)
+        reason: str | None = None
         if price is None:
-            candidates = [p for p in default_prices if p.fuelProductId == product_id]
+            any_currency_candidates = [p for p in default_prices if p.fuelProductId == product_id]
+            candidates = any_currency_candidates
             station_currency = currency_by_station.get(station_id)
             if station_currency is not None:
                 candidates = [p for p in candidates if p.currencyId == station_currency.id]
             price = candidates[0] if candidates else None
-        resolved[key] = price
+            if price is None:
+                reason = "price_currency_mismatch" if (station_currency is not None and any_currency_candidates) else "no_applicable_price"
+        resolved[key] = (price, reason)
 
     return resolved
 
@@ -2889,7 +2921,7 @@ async def _price_sub_segments_for_sale_window(
                 price_at = max(candidates, key=lambda p: p.effectiveFrom) if candidates else None
             sub_currency = price_context.currency_code_by_id.get(price_at.currencyId) if price_at is not None else None
         else:
-            price_at = await _resolve_applicable_price(db, tank.stationId, tank.fuelProductId, t)
+            price_at, _ = await _resolve_applicable_price(db, tank.stationId, tank.fuelProductId, t)
             sub_currency = None
             if price_at is not None:
                 currency = await db.get(Currency, price_at.currencyId)

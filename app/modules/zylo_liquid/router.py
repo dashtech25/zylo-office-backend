@@ -676,7 +676,7 @@ async def list_tank_calibration_points(
 @router.get(
     "/tanks/{tank_id}/current-state",
     response_model=TankCurrentStateResponse,
-    dependencies=[Depends(require_permission(TANK_READ))],
+    dependencies=[Depends(require_permission_scoped_via(TANK_READ, _tank_station_scope))],
     summary="État courant d'une cuve",
     description=(
         "Dernier niveau connu de la cuve (hauteur, volume calculé via la table de jaugeage, "
@@ -694,7 +694,7 @@ async def get_tank_current_state(
 @router.get(
     "/stations/{station_id}/current-state",
     response_model=StationCurrentStateResponse,
-    dependencies=[Depends(require_permission(STATION_READ))],
+    dependencies=[Depends(require_permission_scoped(STATION_READ, "station", "station_id"))],
     summary="État courant d'une station",
     description="Vue agrégée de l'état courant de toutes les cuves d'une station (niveaux, alertes actives), pratique pour un tableau de bord station sans multiplier les appels par cuve.",
 )
@@ -709,7 +709,7 @@ async def get_station_current_state(
 @router.get(
     "/tanks/{tank_id}/measurements",
     response_model=Page[TankMeasurementResponse],
-    dependencies=[Depends(require_permission(TANK_READ))],
+    dependencies=[Depends(require_permission_scoped_via(TANK_READ, _tank_station_scope))],
     summary="Historique des mesures d'une cuve",
     description="Série temporelle paginée des relevés du capteur pour la cuve, filtrable par plage de dates. Contrairement à `/current-state`, expose l'historique complet, pas seulement le dernier point.",
 )

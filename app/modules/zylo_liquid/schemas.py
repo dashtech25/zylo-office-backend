@@ -723,43 +723,83 @@ class NetworkCashSummaryResponse(BaseModel):
 # ================================================================
 
 
+class CreateDeliveryDeclarationLineRequest(BaseModel):
+    tankId: uuid.UUID
+    volumeLiters: float = Field(gt=0)
+    # None = pas de commande liée (scénario E, livraison sans commande
+    # préalable) — sinon doit être une ligne de commande du même produit
+    # que la cuve visée (contrôlé côté service).
+    purchaseOrderLineId: uuid.UUID | None = None
+
+
 class CreateDeliveryDeclarationRequest(BaseModel):
     stationId: uuid.UUID
-    fuelProductId: uuid.UUID
     eventAt: datetime
-    declaredVolumeLiters: float = Field(gt=0)
+    lines: list[CreateDeliveryDeclarationLineRequest] = Field(min_length=1)
     # `supplierName` reste accepté (libellé libre, lignes hors référentiel) ;
     # quand `supplierId` est fourni et `supplierName` absent, le service le
     # fige au nom du fournisseur — snapshot documentaire, voir le modèle.
     supplierName: str | None = None
     supplierId: uuid.UUID | None = None
     truckId: uuid.UUID | None = None
-    purchaseOrderId: uuid.UUID | None = None
     deliveryNoteReference: str | None = None
     changeReason: str | None = None
     correctsDeclarationId: uuid.UUID | None = None
+
+
+class DeliveryDeclarationLineResponse(BaseModel):
+    id: uuid.UUID
+    declarationId: uuid.UUID
+    tankId: uuid.UUID
+    purchaseOrderLineId: uuid.UUID | None
+    volumeLiters: float
+    correctsLineId: uuid.UUID | None
+    reconciledWithId: uuid.UUID | None
+    reconciledWithType: str | None
+
+    model_config = {"from_attributes": True}
 
 
 class DeliveryDeclarationResponse(BaseModel):
     id: uuid.UUID
     stationId: uuid.UUID
     authorUserId: uuid.UUID
-    fuelProductId: uuid.UUID
     eventAt: datetime
     declaredAt: datetime
-    declaredVolumeLiters: float
     supplierName: str | None
     supplierId: uuid.UUID | None
     truckId: uuid.UUID | None
-    purchaseOrderId: uuid.UUID | None
     deliveryNoteReference: str | None
     lifecycleStatus: str
     changeReason: str | None
     correctsDeclarationId: uuid.UUID | None
-    reconciledWithId: uuid.UUID | None
-    reconciledWithType: str | None
+    lines: list[DeliveryDeclarationLineResponse] = []
 
     model_config = {"from_attributes": True}
+
+
+class CorrectDeliveryDeclarationLinesRequest(BaseModel):
+    """Correction ciblée (scénario I, option validée) : une nouvelle
+    déclaration ne portant que la/les ligne(s) à corriger — les autres
+    lignes de la déclaration d'origine restent valables. `declarationId`
+    identifie la déclaration d'origine (pour reprendre son en-tête :
+    fournisseur/camion/référence, sauf override explicite ici)."""
+
+    declarationId: uuid.UUID
+    eventAt: datetime | None = None
+    supplierName: str | None = None
+    supplierId: uuid.UUID | None = None
+    truckId: uuid.UUID | None = None
+    deliveryNoteReference: str | None = None
+    changeReason: str | None = None
+    lines: list["CorrectDeliveryDeclarationLineRequest"] = Field(min_length=1)
+
+
+class CorrectDeliveryDeclarationLineRequest(BaseModel):
+    correctsLineId: uuid.UUID
+    tankId: uuid.UUID
+    volumeLiters: float = Field(gt=0)
+    purchaseOrderLineId: uuid.UUID | None = None
 
 
 class CreateShiftCashDeclarationRequest(BaseModel):
@@ -946,15 +986,18 @@ class IncidentDeclarationResponse(BaseModel):
 # déclaré, ce qui doit toujours passer par une nouvelle déclaration
 # corrective (`correctsDeclarationId`), jamais une réécriture d'identité.
 class UpdateDeliveryDeclarationRequest(BaseModel):
+    """En-tête uniquement — les lignes (cuve/volume/commande) ne se modifient
+    jamais en place (refonte 2026-09-17) : une correction de ligne passe
+    toujours par `CorrectDeliveryDeclarationLinesRequest`, jamais par ce
+    endpoint générique."""
+
     eventAt: datetime | None = None
-    declaredVolumeLiters: float | None = Field(default=None, gt=0)
     # Raccordements approvisionnement (facultatifs comme supplierName, jamais
     # des champs d'identité : null explicite = décrocher la ligne du
     # référentiel, champs absents = inchangé — sémantique exclude_unset).
     supplierName: str | None = None
     supplierId: uuid.UUID | None = None
     truckId: uuid.UUID | None = None
-    purchaseOrderId: uuid.UUID | None = None
     deliveryNoteReference: str | None = None
     changeReason: str | None = None
 
@@ -1338,26 +1381,39 @@ class TruckOrderAssignmentResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CreatePurchaseOrderLineRequest(BaseModel):
+    fuelProductId: uuid.UUID
+    orderedVolumeLiters: float = Field(gt=0)
+
+
 class CreatePurchaseOrderRequest(BaseModel):
     stationId: uuid.UUID
-    tankId: uuid.UUID
     supplierId: uuid.UUID
     orderReference: str = Field(min_length=1, max_length=100)
-    orderedVolumeLiters: float = Field(gt=0)
+    lines: list[CreatePurchaseOrderLineRequest] = Field(min_length=1)
     expectedAt: datetime | None = None
+
+
+class PurchaseOrderLineResponse(BaseModel):
+    id: uuid.UUID
+    purchaseOrderId: uuid.UUID
+    fuelProductId: uuid.UUID
+    orderedVolumeLiters: float
+    status: str
+
+    model_config = {"from_attributes": True}
 
 
 class PurchaseOrderResponse(BaseModel):
     id: uuid.UUID
     stationId: uuid.UUID
-    tankId: uuid.UUID
     supplierId: uuid.UUID
     authorUserId: uuid.UUID
     orderReference: str
-    orderedVolumeLiters: float
     orderedAt: datetime
     expectedAt: datetime | None
     status: str
+    lines: list[PurchaseOrderLineResponse] = []
 
     model_config = {"from_attributes": True}
 

@@ -4,8 +4,10 @@ architecture pensée pour en accueillir d'autres plus tard sans les
 anticiper ici. Aucune donnée inventée : le `PurchaseOrder` ne porte pas de
 prix (pas de rapprochement tarifaire avec `PriceHistory` à la commande),
 le document généré ne mentionne donc ni prix unitaire ni TVA/TTC — seules
-les informations réellement connues (produit, cuve, volume, dates,
-fournisseur, société) y figurent."""
+les informations réellement connues (produits commandés, volumes, dates,
+fournisseur, société) y figurent. Plus de « cuve de destination » depuis la
+refonte 2026-09-17 (la cuve se choisit à la livraison, jamais à la
+commande) — un bon de commande liste ses lignes produit×volume."""
 
 import io
 from datetime import datetime
@@ -19,7 +21,9 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from app.modules.zylo_liquid.models import FuelProduct, PurchaseOrder, Station, Supplier, Tank
+from app.modules.zylo_liquid.models import FuelProduct, PurchaseOrder, PurchaseOrderLine, Station, Supplier
+
+_LINE_STATUS_LABEL = {"open": "Ouverte", "partially_received": "Partiellement reçue", "received": "Reçue"}
 
 
 def _fmt_date(value: datetime | None) -> str:
@@ -55,7 +59,7 @@ def _supplier_lines(supplier: Supplier) -> list[str]:
 
 
 def generate_purchase_order_pdf(
-    purchase_order: PurchaseOrder, tank: Tank, fuel_product: FuelProduct, supplier: Supplier, station: Station,
+    purchase_order: PurchaseOrder, lines: list[tuple[PurchaseOrderLine, FuelProduct]], supplier: Supplier, station: Station,
 ) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=18 * mm, bottomMargin=18 * mm, leftMargin=18 * mm, rightMargin=18 * mm)
@@ -83,13 +87,10 @@ def generate_purchase_order_pdf(
     elements.append(parties_table)
     elements.append(Spacer(1, 8 * mm))
 
-    order_table = Table(
-        [
-            ["Désignation", "Cuve de destination", "Volume commandé", "Livraison attendue"],
-            [fuel_product.name, tank.displayName, _fmt_volume(purchase_order.orderedVolumeLiters), _fmt_date(purchase_order.expectedAt)],
-        ],
-        colWidths=[50 * mm, 45 * mm, 40 * mm, 35 * mm],
-    )
+    order_rows = [["Désignation", "Volume commandé", "Livraison attendue", "Statut"]]
+    for line, fuel_product in lines:
+        order_rows.append([fuel_product.name, _fmt_volume(line.orderedVolumeLiters), _fmt_date(purchase_order.expectedAt), _LINE_STATUS_LABEL.get(line.status, line.status)])
+    order_table = Table(order_rows, colWidths=[55 * mm, 40 * mm, 40 * mm, 35 * mm])
     order_table.setStyle(
         TableStyle(
             [
@@ -106,7 +107,7 @@ def generate_purchase_order_pdf(
     )
     elements.append(order_table)
     elements.append(Spacer(1, 10 * mm))
-    elements.append(Paragraph(f"Statut de la commande : {'Ouverte' if purchase_order.status == 'open' else 'Reçue'}", body_style))
+    elements.append(Paragraph(f"Statut global de la commande : {_LINE_STATUS_LABEL.get(purchase_order.status, purchase_order.status)}", body_style))
     elements.append(Spacer(1, 16 * mm))
     elements.append(Paragraph("Bon pour accord — signature :", label_style))
     elements.append(Spacer(1, 18 * mm))
@@ -120,7 +121,7 @@ def generate_purchase_order_pdf(
 
 
 def generate_purchase_order_docx(
-    purchase_order: PurchaseOrder, tank: Tank, fuel_product: FuelProduct, supplier: Supplier, station: Station,
+    purchase_order: PurchaseOrder, lines: list[tuple[PurchaseOrderLine, FuelProduct]], supplier: Supplier, station: Station,
 ) -> bytes:
     doc = DocxDocument()
 
@@ -140,18 +141,19 @@ def generate_purchase_order_docx(
 
     doc.add_paragraph()
 
-    order_table = doc.add_table(rows=2, cols=4)
+    order_table = doc.add_table(rows=1 + len(lines), cols=4)
     order_table.style = "Table Grid"
-    headers = ["Désignation", "Cuve de destination", "Volume commandé", "Livraison attendue"]
+    headers = ["Désignation", "Volume commandé", "Livraison attendue", "Statut"]
     for i, header in enumerate(headers):
         cell_run = order_table.cell(0, i).paragraphs[0].add_run(header)
         cell_run.bold = True
-    values = [fuel_product.name, tank.displayName, _fmt_volume(purchase_order.orderedVolumeLiters), _fmt_date(purchase_order.expectedAt)]
-    for i, value in enumerate(values):
-        order_table.cell(1, i).text = value
+    for row_index, (line, fuel_product) in enumerate(lines, start=1):
+        values = [fuel_product.name, _fmt_volume(line.orderedVolumeLiters), _fmt_date(purchase_order.expectedAt), _LINE_STATUS_LABEL.get(line.status, line.status)]
+        for i, value in enumerate(values):
+            order_table.cell(row_index, i).text = value
 
     doc.add_paragraph()
-    doc.add_paragraph(f"Statut de la commande : {'Ouverte' if purchase_order.status == 'open' else 'Reçue'}")
+    doc.add_paragraph(f"Statut global de la commande : {_LINE_STATUS_LABEL.get(purchase_order.status, purchase_order.status)}")
     doc.add_paragraph()
     doc.add_paragraph()
     signature = doc.add_paragraph("Bon pour accord — signature :")

@@ -18,7 +18,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.identity.models import User
 from app.modules.zylo_tanker import service
-from app.modules.zylo_tanker.schemas import CreateVesselRequest, VesselResponse
+from app.modules.zylo_tanker.schemas import CreateVesselRequest, SetVesselDestinationRequest, VesselResponse
 from app.modules_registry.service import require_module_active
 from app.rbac.service import get_current_organization_id
 from app.shared.pagination import PaginationParams
@@ -67,3 +67,24 @@ async def get_vessel(
     db: AsyncSession = Depends(get_db),
 ) -> VesselResponse:
     return await service.get_vessel(db, organization_id, current_user.id, vessel_id)
+
+
+@router.put("/vessels/{vessel_id}/destination", response_model=VesselResponse, summary="Fixer (ou remplacer) la destination d'un navire")
+async def set_vessel_destination(
+    vessel_id: uuid.UUID,
+    data: SetVesselDestinationRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> VesselResponse:
+    return await service.set_vessel_destination(db, organization_id, current_user.id, vessel_id, data.latitude, data.longitude, data.label)
+
+
+@router.delete("/vessels/{vessel_id}/destination", response_model=VesselResponse, summary="Effacer la destination d'un navire")
+async def clear_vessel_destination(
+    vessel_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> VesselResponse:
+    return await service.clear_vessel_destination(db, organization_id, current_user.id, vessel_id)

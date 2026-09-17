@@ -68,7 +68,8 @@ class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint(
             "type IN ('level_high','level_high_pre_alarm','level_low','water','leak','sensor_offline',"
             "'delivery_discrepancy','delivery_undeclared','delivery_declaration_pending',"
-            "'price_missing','sensor_mapping_missing','calibration_missing','truck_stop_unqualified')",
+            "'price_missing','sensor_mapping_missing','calibration_missing','truck_stop_unqualified',"
+            "'station_offline')",
             name="ck_zlAlert_type",
         ),
         CheckConstraint("status IN ('active','acknowledged','resolved')", name="ck_zlAlert_status"),

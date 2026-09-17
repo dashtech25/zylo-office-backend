@@ -17,7 +17,8 @@ from app.files.schemas import DocumentResponse
 from app.core.security import hash_password
 from app.identity.models import OrganizationUser, User
 from app.identity.service import build_user, check_email_available
-from app.rbac.service import assign_role
+from app.rbac.models import UserRole
+from app.rbac.service import assign_role, unassign_role
 from app.shared.simple_cache import TTLCache
 from app.shared.storage import get_storage_backend
 
@@ -233,6 +234,8 @@ from app.modules.zylo_liquid.schemas import (
     UpdateStationStaffRequest,
     StationStaffResponse,
     CreateStationStaffResponse,
+    ChangeStationStaffRoleRequest,
+    ResetStationStaffPasswordResponse,
     UpdateStationFuelProductThresholdsRequest,
     StationFuelProductOverviewResponse,
     CreateStationServiceRequest,
@@ -877,14 +880,52 @@ async def get_tank(db: AsyncSession, organization_id: uuid.UUID, tank_id: uuid.U
     return tank
 
 
+_TANK_PRODUCT_UPDATE_FIELDS = {"fuelProductId", "newFuelProductName", "newFuelProductCode"}
+
+
 async def update_tank(
     db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, tank_id: uuid.UUID, data: UpdateTankRequest
 ) -> Tank:
     tank = await get_tank(db, organization_id, tank_id)
-    updates = data.model_dump(exclude_unset=True)
+    updates = data.model_dump(exclude_unset=True, exclude=_TANK_PRODUCT_UPDATE_FIELDS)
     before = {field: getattr(tank, field) for field in updates}
     for field, value in updates.items():
         setattr(tank, field, value)
+
+    # Changement de produit carburant (P0-1, audit module Stations
+    # 2026-09-16) — traité à part du reste car il exige de résoudre/créer un
+    # FuelProduct, exactement comme `create_tank` : soit un produit
+    # existant, soit un nouveau créé à la volée, jamais aucun des deux ni les
+    # deux à la fois. `productSince` n'est mis à jour que si le produit
+    # résolu diffère réellement de l'actuel, pour ne jamais réinitialiser
+    # cette date lors d'une simple modification de seuils.
+    has_existing_product = data.fuelProductId is not None
+    has_new_product = data.newFuelProductName is not None or data.newFuelProductCode is not None
+    if has_existing_product or has_new_product:
+        if has_existing_product and has_new_product:
+            raise AppError(
+                code="fuel_product_selection_invalid",
+                message="Fournir soit fuelProductId, soit newFuelProductName + newFuelProductCode — jamais les deux.",
+                status_code=422,
+            )
+        if has_existing_product:
+            fuel_product = await get_fuel_product(db, organization_id, data.fuelProductId)
+        else:
+            if not data.newFuelProductName or not data.newFuelProductCode:
+                raise AppError(
+                    code="fuel_product_selection_invalid",
+                    message="newFuelProductName et newFuelProductCode sont tous deux requis pour créer un produit à la volée.",
+                    status_code=422,
+                )
+            fuel_product = await create_fuel_product(
+                db, organization_id, CreateFuelProductRequest(name=data.newFuelProductName, code=data.newFuelProductCode)
+            )
+        if fuel_product.id != tank.fuelProductId:
+            before["fuelProductId"] = tank.fuelProductId
+            updates["fuelProductId"] = fuel_product.id
+            tank.fuelProductId = fuel_product.id
+            tank.productSince = date.today()
+
     await record_audit_event(
         db,
         organization_id,
@@ -1116,14 +1157,24 @@ async def _get_active_registry_entry(db: AsyncSession, tank_id: uuid.UUID, measu
     return result.scalar_one_or_none()
 
 
-async def _resolve_applicable_price(db: AsyncSession, station_id: uuid.UUID, fuel_product_id: uuid.UUID, at) -> PriceHistory | None:
+async def _resolve_applicable_price(
+    db: AsyncSession, station_id: uuid.UUID, fuel_product_id: uuid.UUID, at
+) -> tuple[PriceHistory | None, str | None]:
     """Prix applicable à un instant donné (Point 2 §7.6, niveau_1_...md
     §16) : la ligne `PriceHistory` propre à la station dont `effectiveFrom`
     est la plus récente antérieure ou égale à l'instant demandé — jamais un
     prix postérieur, jamais le prix courant en cache. À défaut, repli sur le
     prix par défaut du réseau (`stationId IS NULL`, audit Configuration
     carburant P2 §E) — jamais l'inverse (un prix propre à la station prime
-    toujours sur le défaut réseau, même plus ancien)."""
+    toujours sur le défaut réseau, même plus ancien).
+
+    Retourne `(price, reason)` : `reason` n'est renseigné que si `price` est
+    `None`, pour distinguer "aucun prix réseau du tout pour ce produit"
+    (`no_applicable_price`) de "un prix réseau par défaut existe mais dans
+    une devise différente de celle résolue pour la station"
+    (`price_currency_mismatch`) — un cas de configuration incohérente
+    silencieusement confondu avec une absence totale de prix avant ce
+    correctif (P0-7, audit module Stations 2026-09-16)."""
     result = await db.execute(
         select(PriceHistory)
         .where(PriceHistory.stationId == station_id, PriceHistory.fuelProductId == fuel_product_id, PriceHistory.effectiveFrom <= at)
@@ -1132,7 +1183,7 @@ async def _resolve_applicable_price(db: AsyncSession, station_id: uuid.UUID, fue
     )
     price = result.scalar_one_or_none()
     if price is not None:
-        return price
+        return price, None
 
     default_conditions = [
         PriceHistory.stationId.is_(None),
@@ -1147,6 +1198,7 @@ async def _resolve_applicable_price(db: AsyncSession, station_id: uuid.UUID, fue
     # pas résolvable (chaîne géo incomplète) — jamais casser un affichage
     # déjà fonctionnel pour cette raison.
     station = await db.get(Station, station_id)
+    station_currency = None
     if station is not None:
         try:
             station_currency = await _resolve_station_default_currency(db, station)
@@ -1157,7 +1209,20 @@ async def _resolve_applicable_price(db: AsyncSession, station_id: uuid.UUID, fue
     default_result = await db.execute(
         select(PriceHistory).where(*default_conditions).order_by(PriceHistory.effectiveFrom.desc()).limit(1)
     )
-    return default_result.scalar_one_or_none()
+    default_price = default_result.scalar_one_or_none()
+    if default_price is not None:
+        return default_price, None
+
+    if station_currency is not None:
+        any_currency_result = await db.execute(
+            select(PriceHistory.id)
+            .where(PriceHistory.stationId.is_(None), PriceHistory.fuelProductId == fuel_product_id, PriceHistory.effectiveFrom <= at)
+            .limit(1)
+        )
+        if any_currency_result.scalar_one_or_none() is not None:
+            return None, "price_currency_mismatch"
+
+    return None, "no_applicable_price"
 
 
 async def _resolve_tank_monetary_value(
@@ -1170,9 +1235,9 @@ async def _resolve_tank_monetary_value(
     prix courant du produit indépendamment du calcul de valeur du stock —
     remplace `FuelProduct.currentPriceFcfa`, jamais mis à jour (retiré du
     modèle, audit Configuration carburant §B/§P1)."""
-    price = await _resolve_applicable_price(db, tank.stationId, tank.fuelProductId, at)
+    price, price_reason = await _resolve_applicable_price(db, tank.stationId, tank.fuelProductId, at)
     if price is None:
-        return None, None, "no_applicable_price", None
+        return None, None, price_reason, None
     currency = await db.get(Currency, price.currencyId)
     currency_code = currency.code if currency else None
     unit_price = float(price.priceAmount)
@@ -1190,6 +1255,7 @@ def _build_tank_current_state(
     fuel_product: FuelProduct | None,
     price: PriceHistory | None,
     currency_code: str | None,
+    price_reason: str | None = None,
 ) -> TankCurrentStateResponse:
     """Calcul pur (aucun accès DB) de l'état d'une cuve à partir de données
     déjà chargées — factorisé hors de `get_tanks_current_state_batch` pour
@@ -1257,7 +1323,7 @@ def _build_tank_current_state(
         volume_15c = correct_volume_to_reference_temperature(volume_net, temperature_c, float(fuel_product.thermalExpansionCoefficient))
 
     if price is None:
-        monetary_value, monetary_reason, unit_price = None, "no_applicable_price", None
+        monetary_value, monetary_reason, unit_price = None, (price_reason or "no_applicable_price"), None
     else:
         unit_price = float(price.priceAmount)
         if volume_net is None:
@@ -1332,7 +1398,7 @@ async def get_tanks_current_state_batch(db: AsyncSession, tanks: list[Tank]) -> 
     pairs = {(t.stationId, t.fuelProductId) for t in tanks}
     price_by_pair = await _resolve_applicable_prices_batch(db, pairs, stations_by_id, now)
 
-    currency_ids = {p.currencyId for p in price_by_pair.values() if p is not None}
+    currency_ids = {price.currencyId for price, _ in price_by_pair.values() if price is not None}
     currency_by_id: dict[uuid.UUID, Currency] = {}
     if currency_ids:
         currency_result = await db.execute(select(Currency).where(Currency.id.in_(currency_ids)))
@@ -1340,7 +1406,7 @@ async def get_tanks_current_state_batch(db: AsyncSession, tanks: list[Tank]) -> 
 
     states: dict[uuid.UUID, TankCurrentStateResponse] = {}
     for tank in tanks:
-        price = price_by_pair.get((tank.stationId, tank.fuelProductId))
+        price, price_reason = price_by_pair.get((tank.stationId, tank.fuelProductId), (None, "no_applicable_price"))
         currency = currency_by_id.get(price.currencyId) if price is not None else None
         states[tank.id] = _build_tank_current_state(
             tank,
@@ -1351,6 +1417,7 @@ async def get_tanks_current_state_batch(db: AsyncSession, tanks: list[Tank]) -> 
             fuel_product_by_id.get(tank.fuelProductId),
             price,
             currency.code if currency is not None else None,
+            price_reason,
         )
     return states
 
@@ -2077,7 +2144,7 @@ async def evaluate_price_missing_alert(db: AsyncSession, station_id: uuid.UUID, 
     champ de réponse dégradée silencieux (constat Étape 1 : c'était le cas
     avant cette incrémentation, `monetaryValueNotCalculableReason`)."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    price = await _resolve_applicable_price(db, station_id, fuel_product_id, now)
+    price, _ = await _resolve_applicable_price(db, station_id, fuel_product_id, now)
     if price is None:
         await alerts_service.upsert_active_alert(
             db, station_id=station_id, product_id=fuel_product_id, alert_type="price_missing",
@@ -2139,6 +2206,35 @@ async def evaluate_calibration_missing_alert(db: AsyncSession, tank: Tank) -> No
         )
 
 
+async def evaluate_station_offline_alert(db: AsyncSession, station: Station, tanks: list[Tank]) -> None:
+    """Une station dont AUCUNE cuve configurée (mapping capteur actif
+    `product_level` ayant déjà reçu au moins une mesure) ne transmet plus de
+    données est en silence complet — jamais remontée comme alerte dédiée
+    jusqu'ici, alors qu'une action rapide (contacter la station) serait
+    utile (P1-9, audit module Stations 2026-09-16). Critère volontairement
+    plus strict que le badge « en ligne » de la liste des stations
+    (`computeStationOnlineStatus` côté frontend, P0-5 : TOUTES les cuves
+    configurées en ligne) — une seule cuve en défaut ne doit pas déclencher
+    une alerte « contacter la station », réservée au silence total."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    configured_count = 0
+    online_count = 0
+    for tank in tanks:
+        registry = await _get_active_registry_entry(db, tank.id, "product_level")
+        if registry is None or registry.lastValue is None:
+            continue
+        configured_count += 1
+        if registry.hkLastStatus == 1:
+            online_count += 1
+
+    if configured_count > 0 and online_count == 0:
+        await alerts_service.upsert_active_alert(db, station_id=station.id, alert_type="station_offline", triggered_at=now)
+    else:
+        await alerts_service.auto_resolve_alert(
+            db, station_id=station.id, tank_id=None, product_id=None, alert_type="station_offline", resolved_at=now,
+        )
+
+
 async def evaluate_structural_alerts_for_organization(db: AsyncSession, organization_id: uuid.UUID) -> None:
     """Un balayage périodique (pas piloté par la télémétrie, contrairement à
     `run_alert_evaluation_for_tank`) — toutes les stations de l'organisation,
@@ -2157,6 +2253,7 @@ async def evaluate_structural_alerts_for_organization(db: AsyncSession, organiza
         for tank in tanks:
             await evaluate_sensor_mapping_missing_alert(db, tank)
             await evaluate_calibration_missing_alert(db, tank)
+        await evaluate_station_offline_alert(db, station, tanks)
     await db.commit()
 
 
@@ -2402,13 +2499,15 @@ async def _resolve_station_currencies_batch(db: AsyncSession, stations: list[Sta
 
 async def _resolve_applicable_prices_batch(
     db: AsyncSession, pairs: set[tuple[uuid.UUID, uuid.UUID]], stations_by_id: dict[uuid.UUID, Station], at
-) -> dict[tuple[uuid.UUID, uuid.UUID], PriceHistory | None]:
+) -> dict[tuple[uuid.UUID, uuid.UUID], tuple[PriceHistory | None, str | None]]:
     """Version batchée de `_resolve_applicable_price` — même sémantique
     exacte (prix propre à la station en priorité, repli sur le prix réseau
     par défaut filtré par la devise de la station quand elle est
-    résolvable), mais un aller-retour DB par étape pour l'ensemble des
-    paires (station, produit) demandées plutôt qu'un aller-retour par
-    paire (audit performance 2026-09-11)."""
+    résolvable, puis distinction `price_currency_mismatch` vs
+    `no_applicable_price` — voir `_resolve_applicable_price`), mais un
+    aller-retour DB par étape pour l'ensemble des paires (station, produit)
+    demandées plutôt qu'un aller-retour par paire (audit performance
+    2026-09-11)."""
     if not pairs:
         return {}
 
@@ -2435,17 +2534,21 @@ async def _resolve_applicable_prices_batch(
     )
     default_prices = list(default_price_result.scalars().all())
 
-    resolved: dict[tuple[uuid.UUID, uuid.UUID], PriceHistory | None] = {}
+    resolved: dict[tuple[uuid.UUID, uuid.UUID], tuple[PriceHistory | None, str | None]] = {}
     for station_id, product_id in pairs:
         key = (station_id, product_id)
         price = station_price_by_key.get(key)
+        reason: str | None = None
         if price is None:
-            candidates = [p for p in default_prices if p.fuelProductId == product_id]
+            any_currency_candidates = [p for p in default_prices if p.fuelProductId == product_id]
+            candidates = any_currency_candidates
             station_currency = currency_by_station.get(station_id)
             if station_currency is not None:
                 candidates = [p for p in candidates if p.currencyId == station_currency.id]
             price = candidates[0] if candidates else None
-        resolved[key] = price
+            if price is None:
+                reason = "price_currency_mismatch" if (station_currency is not None and any_currency_candidates) else "no_applicable_price"
+        resolved[key] = (price, reason)
 
     return resolved
 
@@ -2632,7 +2735,7 @@ async def _get_price_history_and_station(db: AsyncSession, organization_id: uuid
 
 
 async def update_price_history(
-    db: AsyncSession, organization_id: uuid.UUID, price_id: uuid.UUID, data: UpdatePriceHistoryRequest
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, price_id: uuid.UUID, data: UpdatePriceHistoryRequest
 ) -> PriceHistoryResponse:
     """Correction ciblée uniquement — jamais la période, la station ou le
     produit (Point 2 §7.4) : `UpdatePriceHistoryRequest` ne les expose pas,
@@ -2644,8 +2747,26 @@ async def update_price_history(
         currency_result = await db.execute(select(Currency).where(Currency.id == updates["currencyId"]))
         if currency_result.scalar_one_or_none() is None:
             raise AppError(code="currency_not_found", message="Devise introuvable.", status_code=404)
+    before = {field: str(getattr(price, field)) for field in updates}
     for field, value in updates.items():
         setattr(price, field, value)
+    fuel_product = await get_fuel_product(db, organization_id, price.fuelProductId)
+    # Contrairement à la création (create_price_history), aucun événement
+    # d'audit n'était jamais enregistré ici — une correction de prix
+    # n'avait donc aucun horodatage traçable du tout (P0-6, audit module
+    # Stations 2026-09-16).
+    await record_audit_event(
+        db,
+        organization_id,
+        actor_user_id,
+        action="zyloLiquid.price.correct",
+        entity_type="PriceHistory",
+        entity_id=price.id,
+        summary=f"Correction du prix {fuel_product.name}",
+        changes={field: {"before": before[field], "after": str(value)} for field, value in updates.items()},
+        scope_resource_type="station" if price.stationId is not None else None,
+        scope_resource_id=price.stationId,
+    )
     await db.commit()
     await db.refresh(price)
     return PriceHistoryResponse.model_validate(price)
@@ -2830,7 +2951,7 @@ async def _price_sub_segments_for_sale_window(
                 price_at = max(candidates, key=lambda p: p.effectiveFrom) if candidates else None
             sub_currency = price_context.currency_code_by_id.get(price_at.currencyId) if price_at is not None else None
         else:
-            price_at = await _resolve_applicable_price(db, tank.stationId, tank.fuelProductId, t)
+            price_at, _ = await _resolve_applicable_price(db, tank.stationId, tank.fuelProductId, t)
             sub_currency = None
             if price_at is not None:
                 currency = await db.get(Currency, price_at.currencyId)
@@ -5726,6 +5847,73 @@ async def deactivate_station_staff_access(db: AsyncSession, organization_id: uui
     await db.refresh(profile)
     await db.refresh(user)
     return _station_staff_response(profile, user)
+
+
+async def change_station_staff_role(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, user_id: uuid.UUID, data: ChangeStationStaffRoleRequest
+) -> StationStaffResponse:
+    """Remplace l'attribution de rôle de ce membre du personnel, scopée à sa
+    station d'affectation (mission « fiche Personnel — gestion des droits »,
+    2026-09-16). Contourne volontairement les endpoints RBAC génériques
+    (`POST /rbac/.../user-roles`), qui exigent `ROLE_MANAGE` organisation
+    entière et sont donc inutilisables par un gérant de station — même
+    pattern que `create_station_staff_member` : `assign_role` est appelé
+    directement en tant que fonction de service, après vérification de
+    `STATION_STAFF_MANAGE` scopée à la station. La protection anti-escalade
+    de privilèges d'`assign_role` (`_assert_no_privilege_escalation`)
+    s'applique sans changement : un gérant ne peut jamais attribuer un rôle
+    plus puissant que le sien sur cette même station."""
+    profile, user = await _get_station_staff_or_404(db, organization_id, user_id)
+    if profile.assignedStationId is None:
+        raise AppError(code="station_staff_not_assigned", message="Ce membre du personnel n'est rattaché à aucune station.", status_code=422)
+    station = await get_station(db, organization_id, profile.assignedStationId)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_MANAGE)
+
+    result = await db.execute(
+        select(UserRole).where(
+            UserRole.organizationId == organization_id,
+            UserRole.userId == user_id,
+            UserRole.resourceType == "station",
+            UserRole.resourceId == profile.assignedStationId,
+        )
+    )
+    for existing_assignment in result.scalars().all():
+        await unassign_role(db, organization_id, actor_user_id, existing_assignment.id)
+
+    await assign_role(db, organization_id, actor_user_id, user_id, data.roleId, resource_type="station", resource_id=profile.assignedStationId)
+    await db.refresh(profile)
+    await db.refresh(user)
+    return _station_staff_response(profile, user)
+
+
+async def reset_station_staff_password(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, user_id: uuid.UUID
+) -> str:
+    """Réinitialisation d'un mot de passe PAR UN TIERS (fiche Personnel) —
+    distinct de `change_password` (libre-service, exige l'ancien mot de
+    passe). Même mécanisme que la création d'un membre du personnel
+    (`create_station_staff_member`) : mot de passe temporaire généré côté
+    serveur, jamais choisi par la personne, retourné en clair une seule fois
+    dans cette réponse, jamais stocké ni rejouable ensuite — force un
+    changement via `POST /auth/change-password` à la prochaine connexion."""
+    profile, user = await _get_station_staff_or_404(db, organization_id, user_id)
+    if profile.assignedStationId is not None:
+        station = await get_station(db, organization_id, profile.assignedStationId)
+        await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_MANAGE)
+    else:
+        await _check_org_scope(db, organization_id, actor_user_id, STATION_STAFF_MANAGE)
+
+    temporary_password = secrets.token_urlsafe(9)
+    user.hashedPassword = hash_password(temporary_password)
+    user.mustChangePassword = True
+    await record_audit_event(
+        db, organization_id, actor_user_id,
+        action="zyloLiquid.stationStaff.passwordReset", entity_type="User", entity_id=user.id,
+        summary=f"Réinitialisation du mot de passe de {user.fullName}",
+        scope_resource_type="station", scope_resource_id=profile.assignedStationId,
+    )
+    await db.commit()
+    return temporary_password
 
 
 async def list_station_staff_profiles(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_id: uuid.UUID) -> list[StationStaffResponse]:

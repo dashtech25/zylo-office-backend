@@ -14,3 +14,14 @@ class CityResponse(BaseModel):
     currencyCode: str
 
     model_config = {"from_attributes": True}
+
+
+class CountryResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    isoCode2: str
+    currencyId: uuid.UUID | None
+    currencyCode: str
+    defaultTimezone: str
+
+    model_config = {"from_attributes": True}

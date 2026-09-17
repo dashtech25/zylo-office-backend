@@ -4,14 +4,14 @@ endpoint jusqu'ici. Ajouté pour le sélecteur de ville de Zylo Liquid
 (création de station, filtre de la liste des stations) : donnée réelle,
 CAS 2 de la mission d'intégration (existe en base, pas encore exposée)."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.rbac.service import require_permission
 from app.shared.geo import City, Country, Region
-from app.shared.geo_schemas import CityResponse
+from app.shared.geo_schemas import CityResponse, CountryResponse
 from app.shared.pagination import PaginationParams
 from app.shared.permissions import GEO_READ
 from app.shared.schemas import Page, PageMeta
@@ -26,6 +26,7 @@ geo_router = APIRouter()
 # toute dérive si la donnée change un jour par un autre canal (migration,
 # accès direct DB).
 _city_list_cache = TTLCache(default_ttl_seconds=60.0)
+_country_list_cache = TTLCache(default_ttl_seconds=60.0)
 
 
 @geo_router.get("", response_model=Page[CityResponse], dependencies=[Depends(require_permission(GEO_READ))])
@@ -69,4 +70,43 @@ async def list_cities(
         meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset),
     )
     _city_list_cache.set(cache_key, page)
+    return page
+
+
+# Routeur séparé (préfixe "/countries" côté api/v1/router.py, à ne pas
+# confondre avec `geo_router` ci-dessus, préfixé "/cities") — même
+# référentiel Core, exposé pour le sélecteur de pays du formulaire de
+# création de station (P1-1, audit module Stations 2026-09-16: le champ
+# Pays manquait alors que la Ville en dépend directement).
+country_router = APIRouter()
+
+
+@country_router.get("", response_model=Page[CountryResponse], dependencies=[Depends(require_permission(GEO_READ))])
+async def list_countries(
+    q: str | None = None,
+    # Référentiel Core mondial (~250 pays, jamais paginé par région
+    # organisationnelle) : plafond dédié plus haut que `PaginationParams`
+    # (limité à 100, pensé pour des listes métier) pour que le sélecteur de
+    # pays du formulaire de station puisse charger la liste complète en un
+    # seul appel plutôt que de repagineter côté frontend.
+    limit: int = Query(300, ge=1, le=300),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    cache_key = f"q:{q or ''}:limit:{limit}:offset:{offset}"
+    cached = _country_list_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    stmt = select(Country).where(Country.active.is_(True)).order_by(Country.name)
+    if q:
+        stmt = stmt.where(Country.name.ilike(f"%{q}%"))
+
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
+    result = await db.execute(stmt.limit(limit).offset(offset))
+    countries = result.scalars().all()
+    page = Page(
+        data=[CountryResponse.model_validate(c) for c in countries],
+        meta=PageMeta(total=total or 0, limit=limit, offset=offset),
+    )
+    _country_list_cache.set(cache_key, page)
     return page

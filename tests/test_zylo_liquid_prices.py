@@ -183,7 +183,7 @@ async def test_correct_price_cannot_change_period_station_or_product(client: Asy
     body = patch_res.json()
     assert body["priceAmount"] == 750
     assert body["stationId"] == station_id  # inchangé
-    assert body["effectiveFrom"] == "2026-01-01T00:00:00"  # inchangé
+    assert body["effectiveFrom"] == "2026-01-01T00:00:00+00:00"  # inchangé (P0-6 : suffixe UTC désormais explicite)
 
 
 async def test_correct_price_not_found(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):

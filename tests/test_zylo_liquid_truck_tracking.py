@@ -244,7 +244,9 @@ async def test_truck_positions_and_stops_accept_timezone_aware_query_params(clie
     # une date de position antérieure à une date calendaire fixe finit
     # toujours par se retrouver après "maintenant" au fil du temps.
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    recorded_at = now - timedelta(hours=1)
+    # Jamais avant l'ouverture de l'affectation boitier<->camion (voir
+    # _open_gps_device_assignment) sinon la position tombe hors fenetre.
+    recorded_at = now
     await client.post(
         "/api/v1/zylo-liquid/gps/ingest",
         json={"deviceIdentifier": device["deviceIdentifier"], "recordedAt": recorded_at.isoformat(), "latitude": 4.06, "longitude": 9.71},

@@ -117,6 +117,12 @@ class TruckPositionPing(UUIDPrimaryKeyMixin, Base):
     channel: Mapped[str | None] = mapped_column(String(20), nullable=True)
     accuracyMeters: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
     speedKmh: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
+    # Cap/route en degrés (0-360, 0 = nord), fourni par le GPS/AIS du
+    # boîtier lui-même — jamais recalculé à partir de deux positions
+    # successives ici (2026-09-17, ETA/statut navire) : une valeur absente
+    # reste null, jamais une valeur déduite qui se ferait passer pour une
+    # mesure réelle (même règle que `speedKmh`).
+    headingDeg: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
     rawPayload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 

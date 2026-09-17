@@ -142,6 +142,7 @@ from app.modules.zylo_liquid.models import (
     ManualGaugingDeclaration,
     Payment,
     PriceHistory,
+    SellableProductPrice,
     ProductSaleLine,
     ProductSaleTransaction,
     PurchaseOrder,
@@ -277,12 +278,16 @@ from app.modules.zylo_liquid.schemas import (
     UpdateTankRequest,
     UpdateTruckRequest,
     AssignInterventionRequest,
+    BulkImportRowError,
+    BulkImportSellableProductsRequest,
+    BulkImportSellableProductsResponse,
     CloseInterventionRequest,
     CreateEquipmentRequest,
     CreateInterventionRequest,
     CreateProductSaleTransactionRequest,
     CreateRegulatoryDeclarationRequest,
     CreateRegulatoryDocumentRequest,
+    CreateSellableProductPriceRequest,
     CreateSellableProductRequest,
     CreateTechnicianRequest,
     EquipmentResponse,
@@ -291,10 +296,12 @@ from app.modules.zylo_liquid.schemas import (
     ProductSaleTransactionResponse,
     RegulatoryDeclarationResponse,
     RegulatoryDocumentResponse,
+    SellableProductPriceResponse,
     SellableProductResponse,
     TechnicianResponse,
     UpdateEquipmentRequest,
     UpdateRegulatoryDocumentRequest,
+    UpdateSellableProductPriceRequest,
     UpdateSellableProductRequest,
 )
 from app.shared.currency import Currency
@@ -5339,6 +5346,7 @@ async def create_sellable_product(db: AsyncSession, organization_id: uuid.UUID, 
         currencyId=data.currencyId,
         stockQuantity=data.stockQuantity,
         lowStockThreshold=data.lowStockThreshold,
+        imageStorageReference=data.imageStorageReference,
     )
     db.add(product)
     try:
@@ -5347,7 +5355,7 @@ async def create_sellable_product(db: AsyncSession, organization_id: uuid.UUID, 
         await db.rollback()
         raise AppError(code="barcode_already_used", message="Ce code-barres est déjà utilisé par un autre produit de cette organisation.", status_code=409)
     await db.refresh(product)
-    return SellableProductResponse.model_validate(product)
+    return await _to_sellable_product_response(db, product, station_id=None)
 
 
 async def update_sellable_product(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, product_id: uuid.UUID, data: UpdateSellableProductRequest) -> SellableProductResponse:
@@ -5363,7 +5371,7 @@ async def update_sellable_product(db: AsyncSession, organization_id: uuid.UUID, 
         setattr(product, field, value)
     await db.commit()
     await db.refresh(product)
-    return SellableProductResponse.model_validate(product)
+    return await _to_sellable_product_response(db, product, station_id=product.stationId)
 
 
 async def list_sellable_products(
@@ -5380,7 +5388,260 @@ async def list_sellable_products(
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
     result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
     rows = result.scalars().all()
-    return Page(data=[SellableProductResponse.model_validate(r) for r in rows], meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
+    data = [await _to_sellable_product_response(db, r, station_id=station_id) for r in rows]
+    return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
+
+
+async def _to_sellable_product_response(db: AsyncSession, product: SellableProduct, station_id: uuid.UUID | None) -> SellableProductResponse:
+    image_url = get_storage_backend().get_download_url(product.imageStorageReference) if product.imageStorageReference else None
+    response = SellableProductResponse.model_validate(product).model_copy(update={"imageUrl": image_url})
+    resolve_for_station = station_id if station_id is not None else product.stationId
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    price, reason = await _resolve_applicable_product_price(db, product.id, resolve_for_station, now)
+    if price is not None:
+        response.resolvedUnitPriceAmount = price.priceAmount
+        response.resolvedCurrencyId = price.currencyId
+    else:
+        # Repli explicite sur le prix par défaut du produit — jamais un
+        # None silencieux tant qu'un prix quelconque existe déjà.
+        response.resolvedUnitPriceAmount = product.unitPriceAmount
+        response.resolvedCurrencyId = product.currencyId
+        response.priceNotCalculableReason = reason
+    return response
+
+
+async def _resolve_applicable_product_price(
+    db: AsyncSession, sellable_product_id: uuid.UUID, station_id: uuid.UUID | None, at
+) -> tuple[SellableProductPrice | None, str | None]:
+    """Mirroir de `_resolve_applicable_price` (carburant) pour les produits
+    boutique : priorité à la ligne propre à la station, repli sur le défaut
+    réseau. `reason` n'est renseigné que si aucune ligne de prix explicite
+    n'existe (l'appelant utilise alors `SellableProduct.unitPriceAmount`
+    comme dernier repli, jamais un None pur)."""
+    if station_id is not None:
+        result = await db.execute(
+            select(SellableProductPrice)
+            .where(
+                SellableProductPrice.stationId == station_id,
+                SellableProductPrice.sellableProductId == sellable_product_id,
+                SellableProductPrice.effectiveFrom <= at,
+            )
+            .order_by(SellableProductPrice.effectiveFrom.desc())
+            .limit(1)
+        )
+        price = result.scalar_one_or_none()
+        if price is not None:
+            return price, None
+
+    default_result = await db.execute(
+        select(SellableProductPrice)
+        .where(
+            SellableProductPrice.stationId.is_(None),
+            SellableProductPrice.sellableProductId == sellable_product_id,
+            SellableProductPrice.effectiveFrom <= at,
+        )
+        .order_by(SellableProductPrice.effectiveFrom.desc())
+        .limit(1)
+    )
+    default_price = default_result.scalar_one_or_none()
+    if default_price is not None:
+        return default_price, None
+    return None, "no_price_history_entry"
+
+
+async def _get_sellable_product_or_404(db: AsyncSession, organization_id: uuid.UUID, product_id: uuid.UUID) -> SellableProduct:
+    product = await db.get(SellableProduct, product_id)
+    if product is None or product.organizationId != organization_id:
+        raise AppError(code="sellable_product_not_found", message="Produit introuvable.", status_code=404)
+    return product
+
+
+async def create_sellable_product_price(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, product_id: uuid.UUID, data: CreateSellableProductPriceRequest
+) -> SellableProductPriceResponse:
+    product = await _get_sellable_product_or_404(db, organization_id, product_id)
+    station = await get_station(db, organization_id, data.stationId) if data.stationId is not None else None
+    if station is not None:
+        await _check_declaration_scope(db, organization_id, actor_user_id, station, SELLABLE_PRODUCT_MANAGE)
+    else:
+        await _check_org_scope(db, organization_id, actor_user_id, SELLABLE_PRODUCT_MANAGE)
+
+    effective_from = _to_naive_utc(data.effectiveFrom)
+
+    if data.currencyId is not None:
+        currency_result = await db.execute(select(Currency).where(Currency.id == data.currencyId))
+        if currency_result.scalar_one_or_none() is None:
+            raise AppError(code="currency_not_found", message="Devise introuvable.", status_code=404)
+        currency_id = data.currencyId
+    elif station is not None:
+        currency = await _resolve_station_default_currency(db, station)
+        currency_id = currency.id
+    else:
+        raise AppError(
+            code="currency_required_for_network_default",
+            message="currencyId est obligatoire pour un prix par défaut réseau (aucune station dont déduire une devise).",
+            status_code=422,
+        )
+
+    existing_conditions = [
+        SellableProductPrice.stationId.is_(None) if data.stationId is None else SellableProductPrice.stationId == data.stationId,
+        SellableProductPrice.sellableProductId == product_id,
+        SellableProductPrice.effectiveFrom == effective_from,
+    ]
+    if data.stationId is None:
+        existing_conditions.append(SellableProductPrice.currencyId == currency_id)
+    existing = await db.execute(select(SellableProductPrice).where(*existing_conditions))
+    if existing.scalar_one_or_none() is not None:
+        raise AppError(
+            code="price_conflict_same_period",
+            message="Une ligne de prix existe déjà pour cette station, ce produit et cette date de début.",
+            status_code=409,
+        )
+
+    price = SellableProductPrice(
+        stationId=data.stationId,
+        sellableProductId=product_id,
+        currencyId=currency_id,
+        priceAmount=data.priceAmount,
+        costAmount=data.costAmount,
+        effectiveFrom=effective_from,
+        changeReason=data.changeReason,
+        createdBy=actor_user_id,
+    )
+    db.add(price)
+    await db.flush()
+
+    scope_label = station.name if station is not None else "réseau (défaut)"
+    await record_audit_event(
+        db, organization_id, actor_user_id,
+        action="zyloLiquid.sellableProductPrice.create",
+        entity_type="SellableProductPrice", entity_id=price.id,
+        summary=f"Prix {product.name} défini ({scope_label}) : {data.priceAmount}",
+        changes={"priceAmount": {"after": str(data.priceAmount)}, "effectiveFrom": str(effective_from)},
+        scope_resource_type="station" if station is not None else None,
+        scope_resource_id=station.id if station is not None else None,
+    )
+    await db.commit()
+    await db.refresh(price)
+    is_future = price.effectiveFrom > datetime.now(timezone.utc).replace(tzinfo=None)
+    return SellableProductPriceResponse.model_validate(price).model_copy(update={"isFuture": is_future})
+
+
+async def list_sellable_product_prices(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, product_id: uuid.UUID
+) -> list[SellableProductPriceResponse]:
+    product = await _get_sellable_product_or_404(db, organization_id, product_id)
+    if product.stationId is not None:
+        station = await db.get(Station, product.stationId)
+        await _check_declaration_scope(db, organization_id, actor_user_id, station, SELLABLE_PRODUCT_READ)
+    else:
+        await _check_org_scope(db, organization_id, actor_user_id, SELLABLE_PRODUCT_READ)
+    result = await db.execute(
+        select(SellableProductPrice).where(SellableProductPrice.sellableProductId == product_id).order_by(SellableProductPrice.effectiveFrom.desc())
+    )
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    return [
+        SellableProductPriceResponse.model_validate(p).model_copy(update={"isFuture": p.effectiveFrom > now})
+        for p in result.scalars().all()
+    ]
+
+
+async def update_sellable_product_price(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, price_id: uuid.UUID, data: UpdateSellableProductPriceRequest
+) -> SellableProductPriceResponse:
+    """Correction ciblée uniquement — jamais la période, la station ou le
+    produit (même garantie que update_price_history)."""
+    price = await db.get(SellableProductPrice, price_id)
+    if price is None:
+        raise AppError(code="sellable_product_price_not_found", message="Ligne de prix introuvable.", status_code=404)
+    product = await _get_sellable_product_or_404(db, organization_id, price.sellableProductId)
+    if price.stationId is not None:
+        station = await db.get(Station, price.stationId)
+        await _check_declaration_scope(db, organization_id, actor_user_id, station, SELLABLE_PRODUCT_MANAGE)
+    else:
+        await _check_org_scope(db, organization_id, actor_user_id, SELLABLE_PRODUCT_MANAGE)
+
+    updates = data.model_dump(exclude_unset=True)
+    if "currencyId" in updates and updates["currencyId"] is not None:
+        currency_result = await db.execute(select(Currency).where(Currency.id == updates["currencyId"]))
+        if currency_result.scalar_one_or_none() is None:
+            raise AppError(code="currency_not_found", message="Devise introuvable.", status_code=404)
+    before = {field: str(getattr(price, field)) for field in updates}
+    for field, value in updates.items():
+        setattr(price, field, value)
+    await record_audit_event(
+        db, organization_id, actor_user_id,
+        action="zyloLiquid.sellableProductPrice.correct",
+        entity_type="SellableProductPrice", entity_id=price.id,
+        summary=f"Correction du prix {product.name}",
+        changes={field: {"before": before[field], "after": str(value)} for field, value in updates.items()},
+        scope_resource_type="station" if price.stationId is not None else None,
+        scope_resource_id=price.stationId,
+    )
+    await db.commit()
+    await db.refresh(price)
+    return SellableProductPriceResponse.model_validate(price)
+
+
+async def bulk_import_sellable_products(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: BulkImportSellableProductsRequest
+) -> BulkImportSellableProductsResponse:
+    """Dernière ligne de défense d'un import (le fichier a déjà été analysé
+    et ses en-têtes/types vérifiés côté client via /import/xlsx générique) —
+    chaque ligne est vérifiée et insérée indépendamment (savepoint) pour
+    qu'une ligne invalide n'annule jamais les lignes valides du même fichier,
+    tout en rapportant une erreur précise par ligne (jamais un rejet global
+    opaque)."""
+    created_count = 0
+    errors: list[BulkImportRowError] = []
+    station_cache: dict[uuid.UUID, Station | None] = {}
+    currency_ids = {row.currencyId for row in data.rows}
+    known_currencies = set(
+        (await db.execute(select(Currency.id).where(Currency.id.in_(currency_ids)))).scalars().all()
+    )
+
+    for row in data.rows:
+        if row.currencyId not in known_currencies:
+            errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="Devise introuvable."))
+            continue
+        if row.stationId is not None:
+            if row.stationId not in station_cache:
+                candidate = await db.get(Station, row.stationId)
+                station_cache[row.stationId] = candidate if candidate is not None and candidate.organizationId == organization_id else None
+            station = station_cache[row.stationId]
+            if station is None:
+                errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="Station introuvable dans cette organisation."))
+                continue
+            allowed = await user_has_permission(db, actor_user_id, organization_id, SELLABLE_PRODUCT_MANAGE, "station", station.id)
+        else:
+            allowed = await user_has_permission(db, actor_user_id, organization_id, SELLABLE_PRODUCT_MANAGE, None, None)
+        if not allowed:
+            errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="Permission manquante pour créer un produit sur cette portée."))
+            continue
+
+        try:
+            async with db.begin_nested():
+                db.add(
+                    SellableProduct(
+                        organizationId=organization_id,
+                        stationId=row.stationId,
+                        name=row.name,
+                        sku=row.sku,
+                        barcodeValue=row.barcodeValue,
+                        category=row.category,
+                        unitPriceAmount=row.unitPriceAmount,
+                        currencyId=row.currencyId,
+                        stockQuantity=row.stockQuantity,
+                        lowStockThreshold=row.lowStockThreshold,
+                    )
+                )
+        except IntegrityError:
+            errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="Code-barres déjà utilisé par un autre produit de cette organisation."))
+            continue
+        created_count += 1
+
+    await db.commit()
+    return BulkImportSellableProductsResponse(createdCount=created_count, errors=errors)
 
 
 # ----------------------------------------------------------------

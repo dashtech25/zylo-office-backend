@@ -1243,6 +1243,54 @@ class SellableProduct(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     active: Mapped[bool] = mapped_column(nullable=False, default=True)
     stockQuantity: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False, default=0)
     lowStockThreshold: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
+    # Référence de stockage (même mécanisme que User.photoStorageReference) —
+    # jamais d'URL directe stockée, toujours résolue à la volée via
+    # get_storage_backend().get_download_url(...) pour bénéficier de la
+    # signature/expiration déjà en place pour les autres médias de l'app.
+    imageStorageReference: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class SellableProductPrice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Historique des prix des produits boutique — même principe de
+    résolution à 2 niveaux (station précise / défaut réseau) que
+    `PriceHistory` pour le carburant (Point 2 §7.3-7.6), demandé
+    explicitement pour rendre la tarification boutique réaliste par station
+    plutôt qu'un prix unique figé sur `SellableProduct.unitPriceAmount`.
+    `SellableProduct.unitPriceAmount` reste un prix de repli/affichage par
+    défaut quand aucune ligne n'existe encore ici (catalogue fraîchement
+    créé, avant toute tarification explicite par station)."""
+
+    __tablename__ = "zyloLiquidSellableProductPrice"
+    __table_args__ = (
+        UniqueConstraint(
+            "stationId", "sellableProductId", "effectiveFrom", name="uq_zlSellableProductPrice_station_product_effectiveFrom"
+        ),
+        # Même garde-fou que uq_zlPriceHistory_networkDefault_product_effectiveFrom
+        # (PostgreSQL ne considère jamais deux NULL comme égaux) : sans cet
+        # index partiel, plusieurs prix réseau par défaut pourraient coexister
+        # pour la même devise/date pour un même produit.
+        Index(
+            "uq_zlSellableProductPrice_networkDefault_product_effectiveFrom",
+            "sellableProductId", "currencyId", "effectiveFrom",
+            unique=True,
+            postgresql_where='"stationId" IS NULL',
+        ),
+        CheckConstraint('"priceAmount" > 0', name="ck_zlSellableProductPrice_priceAmount_positive"),
+        {"comment": "Historique des prix des produits boutique — changement réel = insertion, correction = UPDATE ciblé."},
+    )
+
+    stationId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    sellableProductId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidSellableProduct.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    currencyId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("currency.id", ondelete="RESTRICT"), nullable=False)
+    priceAmount: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+    costAmount: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
+    effectiveFrom: Mapped[datetime] = mapped_column(nullable=False, index=True)
+    changeReason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    createdBy: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)
 
 
 # ================================================================

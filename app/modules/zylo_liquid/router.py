@@ -132,11 +132,14 @@ from app.modules.zylo_liquid.schemas import (
     UpdateTruckRequest,
     AssignInterventionRequest,
     CloseInterventionRequest,
+    BulkImportSellableProductsRequest,
+    BulkImportSellableProductsResponse,
     CreateEquipmentRequest,
     CreateInterventionRequest,
     CreateProductSaleTransactionRequest,
     CreateRegulatoryDeclarationRequest,
     CreateRegulatoryDocumentRequest,
+    CreateSellableProductPriceRequest,
     CreateSellableProductRequest,
     CreateTechnicianRequest,
     EquipmentResponse,
@@ -144,10 +147,12 @@ from app.modules.zylo_liquid.schemas import (
     ProductSaleTransactionResponse,
     RegulatoryDeclarationResponse,
     RegulatoryDocumentResponse,
+    SellableProductPriceResponse,
     SellableProductResponse,
     TechnicianResponse,
     UpdateEquipmentRequest,
     UpdateRegulatoryDocumentRequest,
+    UpdateSellableProductPriceRequest,
     UpdateSellableProductRequest,
     CreateSecurityEquipmentRequest,
     UpdateSecurityEquipmentRequest,
@@ -1660,6 +1665,48 @@ async def list_sellable_products(
     db: AsyncSession = Depends(get_db),
 ) -> Page:
     return await service.list_sellable_products(db, organization_id, current_user.id, pagination, stationId, search)
+
+
+@router.post("/sellable-products/{product_id}/prices", response_model=SellableProductPriceResponse, status_code=201)
+async def create_sellable_product_price(
+    product_id: uuid.UUID,
+    data: CreateSellableProductPriceRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> SellableProductPriceResponse:
+    return await service.create_sellable_product_price(db, organization_id, current_user.id, product_id, data)
+
+
+@router.patch("/sellable-product-prices/{price_id}", response_model=SellableProductPriceResponse)
+async def update_sellable_product_price(
+    price_id: uuid.UUID,
+    data: UpdateSellableProductPriceRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> SellableProductPriceResponse:
+    return await service.update_sellable_product_price(db, organization_id, current_user.id, price_id, data)
+
+
+@router.get("/sellable-products/{product_id}/prices", response_model=list[SellableProductPriceResponse])
+async def list_sellable_product_prices(
+    product_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[SellableProductPriceResponse]:
+    return await service.list_sellable_product_prices(db, organization_id, current_user.id, product_id)
+
+
+@router.post("/sellable-products/bulk-import", response_model=BulkImportSellableProductsResponse)
+async def bulk_import_sellable_products(
+    data: BulkImportSellableProductsRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> BulkImportSellableProductsResponse:
+    return await service.bulk_import_sellable_products(db, organization_id, current_user.id, data)
 
 
 # ================================================================

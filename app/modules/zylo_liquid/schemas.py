@@ -1638,6 +1638,7 @@ class CreateSellableProductRequest(BaseModel):
     currencyId: uuid.UUID
     stockQuantity: float = Field(default=0, ge=0)
     lowStockThreshold: float | None = Field(default=None, ge=0)
+    imageStorageReference: str | None = None
 
 
 class UpdateSellableProductRequest(BaseModel):
@@ -1649,6 +1650,7 @@ class UpdateSellableProductRequest(BaseModel):
     active: bool | None = None
     stockQuantity: float | None = Field(default=None, ge=0)
     lowStockThreshold: float | None = Field(default=None, ge=0)
+    imageStorageReference: str | None = None
 
 
 class SellableProductResponse(BaseModel):
@@ -1664,8 +1666,89 @@ class SellableProductResponse(BaseModel):
     active: bool
     stockQuantity: float
     lowStockThreshold: float | None
+    imageUrl: str | None = None
+    # Prix résolu pour la station demandée (résolution à 2 niveaux, voir
+    # SellableProductPrice) — distinct de `unitPriceAmount` qui reste le
+    # prix de repli/affichage par défaut du produit. Renseigné seulement
+    # quand la requête porte une station (list/get avec stationId) ;
+    # `priceNotCalculableReason` explique une absence plutôt que de laisser
+    # deviner (même convention que le reste du module — jamais un 0 silencieux).
+    resolvedUnitPriceAmount: float | None = None
+    resolvedCurrencyId: uuid.UUID | None = None
+    priceNotCalculableReason: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class CreateSellableProductPriceRequest(BaseModel):
+    # None = prix par défaut réseau pour ce produit (même sémantique que
+    # CreatePriceHistoryRequest.stationId) — currencyId devient alors
+    # obligatoire.
+    stationId: uuid.UUID | None = None
+    priceAmount: float = Field(gt=0)
+    costAmount: float | None = Field(default=None, ge=0)
+    currencyId: uuid.UUID | None = None
+    effectiveFrom: datetime
+    changeReason: str | None = None
+
+
+class UpdateSellableProductPriceRequest(BaseModel):
+    priceAmount: float | None = Field(default=None, gt=0)
+    costAmount: float | None = Field(default=None, ge=0)
+    currencyId: uuid.UUID | None = None
+    changeReason: str | None = None
+
+
+class SellableProductPriceResponse(BaseModel):
+    id: uuid.UUID
+    stationId: uuid.UUID | None
+    sellableProductId: uuid.UUID
+    currencyId: uuid.UUID
+    priceAmount: float
+    costAmount: float | None
+    effectiveFrom: datetime
+    changeReason: str | None
+    createdBy: uuid.UUID
+    isFuture: bool = False
+
+    model_config = {"from_attributes": True}
+
+    @field_serializer("effectiveFrom")
+    def _serialize_effective_from(self, value: datetime) -> str:
+        return value.replace(tzinfo=timezone.utc).isoformat() if value.tzinfo is None else value.isoformat()
+
+
+class BulkImportSellableProductRow(BaseModel):
+    """Une ligne déjà validée côté client (en-têtes/format déjà vérifiés
+    avant l'appel — voir /import/xlsx générique pour l'extraction brute) —
+    ce endpoint reste la dernière ligne de défense (règles métier : devise
+    existante, station de l'organisation, doublon de code-barres), jamais un
+    simple passe-plat non vérifié."""
+
+    rowNumber: int
+    stationId: uuid.UUID | None = None
+    name: str = Field(min_length=1, max_length=200)
+    sku: str | None = Field(default=None, max_length=60)
+    barcodeValue: str | None = Field(default=None, max_length=64)
+    category: str | None = Field(default=None, max_length=60)
+    unitPriceAmount: float = Field(gt=0)
+    currencyId: uuid.UUID
+    stockQuantity: float = Field(default=0, ge=0)
+    lowStockThreshold: float | None = Field(default=None, ge=0)
+
+
+class BulkImportSellableProductsRequest(BaseModel):
+    rows: list[BulkImportSellableProductRow] = Field(min_length=1, max_length=500)
+
+
+class BulkImportRowError(BaseModel):
+    rowNumber: int
+    message: str
+
+
+class BulkImportSellableProductsResponse(BaseModel):
+    createdCount: int
+    errors: list[BulkImportRowError]
 
 
 # ================================================================

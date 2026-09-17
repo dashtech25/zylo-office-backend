@@ -128,6 +128,7 @@ from app.modules.zylo_liquid.models import (
     CommercialAccount,
     DeclarationMixin,
     DeliveryDeclaration,
+    DeliveryDeclarationLine,
     DeliveryDetected,
     Driver,
     Equipment,
@@ -146,6 +147,7 @@ from app.modules.zylo_liquid.models import (
     ProductSaleLine,
     ProductSaleTransaction,
     PurchaseOrder,
+    PurchaseOrderLine,
     QualityCheckDeclaration,
     Receivable,
     ReconciliationRecord,
@@ -179,6 +181,7 @@ from app.modules.zylo_liquid.schemas import (
     CreateAuthorizationRequest,
     CreateCarrierRequest,
     CreateCommercialAccountRequest,
+    CorrectDeliveryDeclarationLinesRequest,
     CreateDeliveryDeclarationRequest,
     CreateDriverRequest,
     ReconciliationRecordResponse,
@@ -203,6 +206,7 @@ from app.modules.zylo_liquid.schemas import (
     CreateTruckRequest,
     CreateVehicleRequest,
     CurrencyCashBlock,
+    DeliveryDeclarationLineResponse,
     DeliveryDeclarationResponse,
     DeliveryDetectedResponse,
     DeliveryInProgressResponse,
@@ -219,6 +223,7 @@ from app.modules.zylo_liquid.schemas import (
     PaymentResponse,
     PriceHistoryResponse,
     ProductCashLine,
+    PurchaseOrderLineResponse,
     PurchaseOrderResponse,
     QualityCheckDeclarationResponse,
     ReceivableResponse,
@@ -3890,35 +3895,15 @@ async def _update_declaration_in_place(
     return instance
 
 
-async def _validate_delivery_links(
-    db: AsyncSession,
-    organization_id: uuid.UUID,
-    station: Station,
-    fuel_product_id: uuid.UUID,
-    supplier_id: uuid.UUID | None,
-    truck_id: uuid.UUID | None,
-    purchase_order_id: uuid.UUID | None,
-    supplier_name: str | None,
-    tolerate_received_order: bool = False,
+async def _validate_delivery_header_links(
+    db: AsyncSession, organization_id: uuid.UUID, supplier_id: uuid.UUID | None, truck_id: uuid.UUID | None, supplier_name: str | None,
 ) -> str | None:
-    """Contrôles de cohérence des raccordements approvisionnement facultatifs
-    d'une déclaration de livraison (fusion #/livraisons) — mêmes règles à la
-    création et à la modification (les valeurs passées ici sont les valeurs
-    FINALES, jamais seulement celles du payload) :
-      - fournisseur/camion/commande existent dans la portée de l'organisation ;
-      - une commande rattachée concerne la même station et le même produit
-        (le produit est celui de la cuve visée par la commande, jamais stocké
-        sur la commande — pas de double vérité) et n'est pas déjà 'received'
-        — sauf `tolerate_received_order` : une déclaration CORRECTIVE
-        reproduit la livraison d'origine (même commande), y compris quand la
-        commande a été réceptionnée entre-temps — elle ne crée aucun volume
-        nouveau, elle remplace la ligne corrigée ;
-      - fournisseur cohérent avec celui de la commande quand les deux sont
-        fournis.
-    Retourne le `supplierName` à stocker : le libellé fourni s'il existe,
-    sinon le nom du fournisseur du référentiel — instantané documentaire
-    (même rôle que `Payment.exchangeRateApplied`), jamais une seconde source
-    de vérité pour le rapprochement (Phase 6)."""
+    """Contrôles de cohérence des raccordements d'EN-TÊTE (fournisseur,
+    camion) — communs à toute la visite, indépendants des lignes. Retourne
+    le `supplierName` à stocker : le libellé fourni s'il existe, sinon le
+    nom du fournisseur du référentiel — instantané documentaire (même rôle
+    que `Payment.exchangeRateApplied`), jamais une seconde source de vérité
+    pour le rapprochement (Phase 6)."""
     if supplier_id is not None:
         supplier = await _get_supplier_or_404(db, organization_id, supplier_id)
         if supplier_name is None:
@@ -3927,120 +3912,225 @@ async def _validate_delivery_links(
         truck = await db.get(Truck, truck_id)
         if truck is None or truck.organizationId != organization_id:
             raise AppError(code="truck_not_found", message="Camion introuvable.", status_code=404)
-    if purchase_order_id is not None:
-        purchase_order = await _get_purchase_order_or_404(db, organization_id, purchase_order_id)
+    return supplier_name
+
+
+async def _validate_delivery_declaration_line(
+    db: AsyncSession, organization_id: uuid.UUID, station: Station, tank_id: uuid.UUID,
+    purchase_order_line_id: uuid.UUID | None, supplier_id: uuid.UUID | None, tolerate_received_order: bool = False,
+) -> None:
+    """Contrôles de cohérence d'UNE ligne de livraison (refonte 2026-09-17,
+    scénario par scénario avec le commanditaire) :
+      - la cuve appartient à la station de la déclaration ;
+      - si une ligne de commande est indiquée (scénario E : optionnel, une
+        livraison peut ne référencer aucune commande), elle concerne le même
+        produit que la cuve visée (jamais stocké séparément — pas de double
+        vérité) et n'est pas déjà 'received' — sauf `tolerate_received_order` :
+        une correction CIBLÉE (scénario I) reproduit la livraison d'origine
+        sur la même ligne de commande, même réceptionnée entre-temps, elle
+        ne crée aucun volume nouveau, elle remplace la ligne corrigée ;
+      - fournisseur cohérent avec celui de la commande quand les deux sont
+        fournis."""
+    tank = await get_tank(db, organization_id, tank_id)
+    if tank.stationId != station.id:
+        raise AppError(code="tank_station_mismatch", message="Cette cuve n'appartient pas à la station de la livraison.", status_code=422)
+    if purchase_order_line_id is not None:
+        order_line = await db.get(PurchaseOrderLine, purchase_order_line_id)
+        if order_line is None:
+            raise AppError(code="purchase_order_line_not_found", message="Ligne de commande introuvable.", status_code=404)
+        purchase_order = await _get_purchase_order_or_404(db, organization_id, order_line.purchaseOrderId)
         if purchase_order.stationId != station.id:
             raise AppError(code="purchase_order_station_mismatch", message="Cette commande d'approvisionnement ne concerne pas la station de la réception.", status_code=422)
-        if purchase_order.status != "open" and not tolerate_received_order:
-            raise AppError(code="purchase_order_received", message="Cette commande est déjà entièrement réceptionnée.", status_code=409)
-        tank = await db.get(Tank, purchase_order.tankId)
-        if tank.fuelProductId != fuel_product_id:
-            raise AppError(code="purchase_order_product_mismatch", message="Le produit de la commande ne correspond pas à celui de la réception.", status_code=422)
+        if order_line.status == "received" and not tolerate_received_order:
+            raise AppError(code="purchase_order_line_received", message="Cette ligne de commande est déjà entièrement réceptionnée.", status_code=409)
+        if order_line.fuelProductId != tank.fuelProductId:
+            raise AppError(code="purchase_order_product_mismatch", message="Le produit de la ligne de commande ne correspond pas à celui de la cuve livrée.", status_code=422)
         if supplier_id is not None and supplier_id != purchase_order.supplierId:
             raise AppError(code="purchase_order_supplier_mismatch", message="Le fournisseur indiqué ne correspond pas à celui de la commande.", status_code=422)
-    return supplier_name
 
 
 async def create_delivery_declaration(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateDeliveryDeclarationRequest) -> DeliveryDeclarationResponse:
     station = await get_station(db, organization_id, data.stationId)
     await _check_declaration_scope(db, organization_id, actor_user_id, station, DELIVERY_DECLARATION_CREATE)
-    await get_fuel_product(db, organization_id, data.fuelProductId)
-    tolerate_received_order = False
-    if data.correctsDeclarationId is not None and data.purchaseOrderId is not None:
-        corrected = await db.get(DeliveryDeclaration, data.correctsDeclarationId)
-        tolerate_received_order = corrected is not None and corrected.purchaseOrderId == data.purchaseOrderId
-    supplier_name = await _validate_delivery_links(
-        db, organization_id, station, data.fuelProductId,
-        data.supplierId, data.truckId, data.purchaseOrderId, data.supplierName,
-        tolerate_received_order,
-    )
+    supplier_name = await _validate_delivery_header_links(db, organization_id, data.supplierId, data.truckId, data.supplierName)
+    for line in data.lines:
+        await _validate_delivery_declaration_line(db, organization_id, station, line.tankId, line.purchaseOrderLineId, data.supplierId)
+
     instance = DeliveryDeclaration(
         stationId=station.id,
         authorUserId=actor_user_id,
         eventAt=_to_naive_utc(data.eventAt),
         declaredAt=datetime.now(timezone.utc).replace(tzinfo=None),
-        fuelProductId=data.fuelProductId,
-        declaredVolumeLiters=data.declaredVolumeLiters,
         supplierName=supplier_name,
         supplierId=data.supplierId,
         truckId=data.truckId,
-        purchaseOrderId=data.purchaseOrderId,
         deliveryNoteReference=data.deliveryNoteReference,
         changeReason=data.changeReason,
         correctsDeclarationId=data.correctsDeclarationId,
     )
     db.add(instance)
+    await db.flush()
+    lines: list[DeliveryDeclarationLine] = []
+    for line in data.lines:
+        declaration_line = DeliveryDeclarationLine(
+            declarationId=instance.id, tankId=line.tankId, purchaseOrderLineId=line.purchaseOrderLineId, volumeLiters=line.volumeLiters,
+        )
+        db.add(declaration_line)
+        lines.append(declaration_line)
     await db.commit()
     await db.refresh(instance)
 
     # Déclenchement automatique du rapprochement (mission « flux de
     # livraison station », point 3 : « dès qu'une livraison est déclarée »)
     # — best-effort, ne doit jamais faire échouer la déclaration elle-même
-    # si le rapprochement rencontre un problème imprévu.
+    # si le rapprochement rencontre un problème imprévu. Une ligne à la fois
+    # (refonte 2026-09-17) : chaque cuve se rapproche de sa propre détection.
+    for line in lines:
+        try:
+            await db.refresh(line)
+            await _evaluate_delivery_declaration_line_reconciliation_core(db, instance, line)
+        except Exception:
+            await db.rollback()
     try:
-        await _evaluate_delivery_declaration_reconciliation_core(db, instance)
         await _sweep_stale_pending_delivery_declarations(db, station.id)
-        await db.refresh(instance)
     except Exception:
         await db.rollback()
-        await db.refresh(instance)
 
-    return DeliveryDeclarationResponse.model_validate(instance)
+    return await _to_delivery_declaration_response(db, instance)
+
+
+async def _load_delivery_declaration_lines(db: AsyncSession, declaration_id: uuid.UUID) -> list[DeliveryDeclarationLine]:
+    result = await db.execute(select(DeliveryDeclarationLine).where(DeliveryDeclarationLine.declarationId == declaration_id).order_by(DeliveryDeclarationLine.createdAt.asc()))
+    return list(result.scalars().all())
+
+
+async def _to_delivery_declaration_response(db: AsyncSession, declaration: DeliveryDeclaration) -> DeliveryDeclarationResponse:
+    lines = await _load_delivery_declaration_lines(db, declaration.id)
+    response = DeliveryDeclarationResponse.model_validate(declaration)
+    response.lines = [DeliveryDeclarationLineResponse.model_validate(l) for l in lines]
+    return response
 
 
 async def update_delivery_declaration(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, declaration_id: uuid.UUID, data: UpdateDeliveryDeclarationRequest) -> DeliveryDeclarationResponse:
+    """En-tête uniquement (refonte 2026-09-17) — les lignes ne se modifient
+    jamais en place, voir `UpdateDeliveryDeclarationRequest`."""
     updates = data.model_dump(exclude_unset=True)
     if "eventAt" in updates and updates["eventAt"] is not None:
         updates["eventAt"] = _to_naive_utc(updates["eventAt"])
 
     # Gardes identiques à `_update_declaration_in_place` (auteur, état
     # 'declared') dupliquées ici à dessein : la validation des raccordements
-    # approvisionnement doit s'exécuter AVANT l'application des mises à jour
-    # et sur les valeurs finales — le générique ne peut pas la porter. Les
-    # raccordements (supplierId/truckId/purchaseOrderId) sont en outre les
-    # seuls champs où un null EXPLICITE décroche la ligne du référentiel :
-    # pour eux, contrairement aux autres champs, la valeur None est bien
-    # appliquée (les autres conservent le comportement hérité : None ignoré).
+    # fournisseur/camion doit s'exécuter AVANT l'application des mises à
+    # jour et sur les valeurs finales — le générique ne peut pas la porter.
+    # `supplierId`/`truckId` sont en outre les seuls champs où un null
+    # EXPLICITE décroche la ligne du référentiel : pour eux, contrairement
+    # aux autres champs, la valeur None est bien appliquée (les autres
+    # conservent le comportement hérité : None ignoré).
     instance = await _get_declaration_or_404(db, DeliveryDeclaration, organization_id, declaration_id)
     if instance.authorUserId != actor_user_id:
         raise AppError(code="permission_denied", message="Seul l'auteur peut modifier sa propre déclaration.", status_code=403)
     if instance.lifecycleStatus != "declared":
         raise AppError(code="declaration_locked", message="Cette déclaration est verrouillée — une correction doit être une nouvelle déclaration.", status_code=409)
-    station = await db.get(Station, instance.stationId)
     if "supplierId" in updates and updates["supplierId"] is not None and "supplierName" not in updates:
         # Changement de fournisseur référentiel sans libellé explicite :
         # re-synchroniser l'instantané documentaire sur le nouveau nom.
         updates["supplierName"] = None
-    updates["supplierName"] = await _validate_delivery_links(
-        db, organization_id, station, instance.fuelProductId,
-        updates.get("supplierId", instance.supplierId),
-        updates.get("truckId", instance.truckId),
-        updates.get("purchaseOrderId", instance.purchaseOrderId),
-        updates.get("supplierName", instance.supplierName),
+    updates["supplierName"] = await _validate_delivery_header_links(
+        db, organization_id, updates.get("supplierId", instance.supplierId), updates.get("truckId", instance.truckId), updates.get("supplierName", instance.supplierName),
     )
     for field, value in updates.items():
-        if field in ("supplierId", "truckId", "purchaseOrderId"):
+        if field in ("supplierId", "truckId"):
             setattr(instance, field, value)
         elif value is not None:
             setattr(instance, field, value)
     await db.commit()
     await db.refresh(instance)
-    return DeliveryDeclarationResponse.model_validate(instance)
+    return await _to_delivery_declaration_response(db, instance)
 
 
 async def list_delivery_declarations(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, pagination: PaginationParams, station_id: uuid.UUID | None) -> Page:
     rows, total = await _list_declarations(db, DeliveryDeclaration, organization_id, actor_user_id, DELIVERY_DECLARATION_READ, pagination, station_id)
-    return Page(data=[DeliveryDeclarationResponse.model_validate(r) for r in rows], meta=PageMeta(total=total, limit=pagination.limit, offset=pagination.offset))
+    data = [await _to_delivery_declaration_response(db, r) for r in rows]
+    return Page(data=data, meta=PageMeta(total=total, limit=pagination.limit, offset=pagination.offset))
 
 
 async def lock_delivery_declaration(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, declaration_id: uuid.UUID) -> DeliveryDeclarationResponse:
     instance = await _lock_declaration(db, DeliveryDeclaration, organization_id, actor_user_id, declaration_id)
     # Le verrouillage est l'acte définitif d'une réception : c'est le seul
-    # moment où une commande rattachée peut passer à 'received' (jamais à la
-    # création — une déclaration 'declared' reste révisable).
-    if instance.purchaseOrderId is not None:
-        await _receive_purchase_order_if_complete(db, instance.purchaseOrderId)
-    return DeliveryDeclarationResponse.model_validate(instance)
+    # moment où une ligne de commande rattachée peut passer à 'received'
+    # (jamais à la création — une déclaration 'declared' reste révisable).
+    # Une ligne de déclaration à la fois (refonte 2026-09-17) : chacune peut
+    # référencer une ligne de commande différente (scénario C, multi-produits).
+    lines = await _load_delivery_declaration_lines(db, instance.id)
+    for line in lines:
+        if line.purchaseOrderLineId is not None:
+            await _receive_purchase_order_line_if_complete(db, line.purchaseOrderLineId)
+    return await _to_delivery_declaration_response(db, instance)
+
+
+async def correct_delivery_declaration_lines(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CorrectDeliveryDeclarationLinesRequest) -> DeliveryDeclarationResponse:
+    """Correction CIBLÉE d'une ou plusieurs lignes (scénario I, option
+    validée avec le commanditaire) : crée une nouvelle déclaration ne
+    portant QUE la/les ligne(s) corrigées — jamais `correctsDeclarationId`
+    (qui remplacerait toute la déclaration d'origine, l'autre option
+    explicitement écartée) : les lignes non concernées de l'originale
+    restent valables telles quelles, seules celles référencées par
+    `correctsLineId` sont supplantées (exclues des sommes de réception,
+    voir `_receive_purchase_order_line_if_complete`)."""
+    original = await _get_declaration_or_404(db, DeliveryDeclaration, organization_id, data.declarationId)
+    station = await db.get(Station, original.stationId)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, DELIVERY_DECLARATION_CREATE)
+
+    final_supplier_id = data.supplierId if data.supplierId is not None else original.supplierId
+    final_truck_id = data.truckId if data.truckId is not None else original.truckId
+    supplier_name = await _validate_delivery_header_links(db, organization_id, final_supplier_id, final_truck_id, data.supplierName)
+
+    original_lines_by_id = {l.id: l for l in await _load_delivery_declaration_lines(db, original.id)}
+    for line_data in data.lines:
+        corrected_line = original_lines_by_id.get(line_data.correctsLineId)
+        if corrected_line is None:
+            raise AppError(code="delivery_declaration_line_not_found", message="Ligne à corriger introuvable sur cette déclaration.", status_code=404)
+        # Une correction reproduit la livraison d'origine sur la même ligne
+        # de commande, même réceptionnée entre-temps — elle ne crée aucun
+        # volume nouveau, elle remplace la ligne corrigée.
+        tolerate_received_order = line_data.purchaseOrderLineId is not None and line_data.purchaseOrderLineId == corrected_line.purchaseOrderLineId
+        await _validate_delivery_declaration_line(db, organization_id, station, line_data.tankId, line_data.purchaseOrderLineId, final_supplier_id, tolerate_received_order)
+
+    instance = DeliveryDeclaration(
+        stationId=original.stationId,
+        authorUserId=actor_user_id,
+        eventAt=_to_naive_utc(data.eventAt) if data.eventAt is not None else original.eventAt,
+        declaredAt=datetime.now(timezone.utc).replace(tzinfo=None),
+        supplierName=supplier_name if supplier_name is not None else original.supplierName,
+        supplierId=final_supplier_id,
+        truckId=final_truck_id,
+        deliveryNoteReference=data.deliveryNoteReference if data.deliveryNoteReference is not None else original.deliveryNoteReference,
+        changeReason=data.changeReason,
+        correctsDeclarationId=None,
+    )
+    db.add(instance)
+    await db.flush()
+    new_lines: list[DeliveryDeclarationLine] = []
+    for line_data in data.lines:
+        new_line = DeliveryDeclarationLine(
+            declarationId=instance.id, tankId=line_data.tankId, purchaseOrderLineId=line_data.purchaseOrderLineId,
+            volumeLiters=line_data.volumeLiters, correctsLineId=line_data.correctsLineId,
+        )
+        db.add(new_line)
+        new_lines.append(new_line)
+    await db.commit()
+
+    for line in new_lines:
+        try:
+            await db.refresh(line)
+            await _evaluate_delivery_declaration_line_reconciliation_core(db, instance, line)
+        except Exception:
+            await db.rollback()
+    # La correction elle-même reste 'declared' (comme toute nouvelle
+    # déclaration) — le recalcul du statut de commande n'a lieu qu'au
+    # verrouillage (voir `lock_delivery_declaration`), pas ici.
+
+    return await _to_delivery_declaration_response(db, instance)
 
 
 async def create_shift_cash_declaration(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateShiftCashDeclarationRequest) -> ShiftCashDeclarationResponse:
@@ -4508,36 +4598,52 @@ async def list_orders_for_truck(db: AsyncSession, organization_id: uuid.UUID, ac
     return [TruckOrderAssignmentResponse.model_validate(r) for r in result.scalars().all()]
 
 
+async def _load_purchase_order_lines(db: AsyncSession, purchase_order_id: uuid.UUID) -> list[PurchaseOrderLine]:
+    result = await db.execute(select(PurchaseOrderLine).where(PurchaseOrderLine.purchaseOrderId == purchase_order_id).order_by(PurchaseOrderLine.createdAt.asc()))
+    return list(result.scalars().all())
+
+
+async def _to_purchase_order_response(db: AsyncSession, purchase_order: PurchaseOrder) -> PurchaseOrderResponse:
+    lines = await _load_purchase_order_lines(db, purchase_order.id)
+    response = PurchaseOrderResponse.model_validate(purchase_order)
+    response.lines = [PurchaseOrderLineResponse.model_validate(l) for l in lines]
+    return response
+
+
 async def create_purchase_order(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreatePurchaseOrderRequest) -> PurchaseOrderResponse:
+    """Commande multi-produits (refonte 2026-09-17) — plus de cuve à ce
+    niveau (choisie à la livraison, voir `create_delivery_declaration`) :
+    une ligne par produit commandé, chacune avec son propre volume."""
     station = await get_station(db, organization_id, data.stationId)
     await _check_declaration_scope(db, organization_id, actor_user_id, station, PURCHASE_ORDER_MANAGE)
-    tank = await get_tank(db, organization_id, data.tankId)
-    if tank.stationId != station.id:
-        raise AppError(code="tank_station_mismatch", message="Cette cuve n'appartient pas à la station indiquée.", status_code=422)
     supplier = await _get_supplier_or_404(db, organization_id, data.supplierId)
     if not supplier.active:
         raise AppError(code="supplier_inactive", message="Ce fournisseur est inactif — réactivez-le avant de lui passer commande.", status_code=422)
+    for line in data.lines:
+        await get_fuel_product(db, organization_id, line.fuelProductId)
+
     instance = PurchaseOrder(
         stationId=station.id,
-        tankId=tank.id,
         supplierId=supplier.id,
         authorUserId=actor_user_id,
         orderReference=data.orderReference,
-        orderedVolumeLiters=data.orderedVolumeLiters,
         orderedAt=datetime.now(timezone.utc).replace(tzinfo=None),
         expectedAt=_to_naive_utc(data.expectedAt),
     )
     db.add(instance)
+    await db.flush()
+    for line in data.lines:
+        db.add(PurchaseOrderLine(purchaseOrderId=instance.id, fuelProductId=line.fuelProductId, orderedVolumeLiters=line.orderedVolumeLiters))
     await db.commit()
     await db.refresh(instance)
-    return PurchaseOrderResponse.model_validate(instance)
+    return await _to_purchase_order_response(db, instance)
 
 
 async def get_purchase_order(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, purchase_order_id: uuid.UUID) -> PurchaseOrderResponse:
     purchase_order = await _get_purchase_order_or_404(db, organization_id, purchase_order_id)
     station = await db.get(Station, purchase_order.stationId)
     await _check_declaration_scope(db, organization_id, actor_user_id, station, PURCHASE_ORDER_READ)
-    return PurchaseOrderResponse.model_validate(purchase_order)
+    return await _to_purchase_order_response(db, purchase_order)
 
 
 async def generate_purchase_order_document(
@@ -4554,16 +4660,16 @@ async def generate_purchase_order_document(
     purchase_order = await _get_purchase_order_or_404(db, organization_id, purchase_order_id)
     station = await db.get(Station, purchase_order.stationId)
     await _check_declaration_scope(db, organization_id, actor_user_id, station, PURCHASE_ORDER_MANAGE)
-    tank = await get_tank(db, organization_id, purchase_order.tankId)
-    fuel_product = await get_fuel_product(db, organization_id, tank.fuelProductId)
+    order_lines = await _load_purchase_order_lines(db, purchase_order.id)
+    lines = [(line, await get_fuel_product(db, organization_id, line.fuelProductId)) for line in order_lines]
     supplier = await _get_supplier_or_404(db, organization_id, purchase_order.supplierId)
 
     if data.format == "pdf":
-        file_bytes = generate_purchase_order_pdf(purchase_order, tank, fuel_product, supplier, station)
+        file_bytes = generate_purchase_order_pdf(purchase_order, lines, supplier, station)
         file_name = f"bon-commande-{purchase_order.orderReference}.pdf"
         mime_type = "application/pdf"
     else:
-        file_bytes = generate_purchase_order_docx(purchase_order, tank, fuel_product, supplier, station)
+        file_bytes = generate_purchase_order_docx(purchase_order, lines, supplier, station)
         file_name = f"bon-commande-{purchase_order.orderReference}.docx"
         mime_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -4602,31 +4708,55 @@ async def list_purchase_orders(db: AsyncSession, organization_id: uuid.UUID, act
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
     result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
     rows = result.scalars().all()
-    return Page(data=[PurchaseOrderResponse.model_validate(r) for r in rows], meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
+    data = [await _to_purchase_order_response(db, r) for r in rows]
+    return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
 
 
-async def _receive_purchase_order_if_complete(db: AsyncSession, purchase_order_id: uuid.UUID) -> None:
-    """Transition 'open' → 'received' d'une commande, évaluée à chaque
-    verrouillage d'une déclaration de livraison rattachée (jamais à la
-    création : une déclaration 'declared' reste révisable tant qu'elle
-    n'est pas verrouillée — voir `lock_delivery_declaration`). Le cumul ne
-    compte que les déclarations ACTIVES : non supplantées (aucune autre
-    déclaration ne les corrige via `correctsDeclarationId`) — une
-    déclaration corrective remplace sa cible, elle ne s'ajoute pas à elle."""
-    purchase_order = await db.get(PurchaseOrder, purchase_order_id)
-    if purchase_order is None or purchase_order.status != "open":
+async def _receive_purchase_order_line_if_complete(db: AsyncSession, purchase_order_line_id: uuid.UUID) -> None:
+    """Recalcule le statut d'UNE ligne de commande (un produit), puis
+    ré-agrège le statut de la commande entière depuis toutes ses lignes
+    (refonte 2026-09-17 — remplace `_receive_purchase_order_if_complete`,
+    qui raisonnait sur la commande entière avant la refonte multi-produits).
+    Évalué à chaque verrouillage d'une ligne de déclaration de livraison
+    rattachée (jamais à la création : une déclaration 'declared' reste
+    révisable — voir `lock_delivery_declaration`). Le cumul ne compte que
+    les lignes de déclaration ACTIVES : non supplantées par une correction
+    ciblée (`DeliveryDeclarationLine.correctsLineId`) et dont la déclaration
+    parente n'est pas elle-même supplantée (`correctsDeclarationId`)."""
+    line = await db.get(PurchaseOrderLine, purchase_order_line_id)
+    if line is None:
         return
-    superseded_ids = select(DeliveryDeclaration.correctsDeclarationId).where(DeliveryDeclaration.correctsDeclarationId.is_not(None))
+    superseded_line_ids = select(DeliveryDeclarationLine.correctsLineId).where(DeliveryDeclarationLine.correctsLineId.is_not(None))
+    superseded_declaration_ids = select(DeliveryDeclaration.correctsDeclarationId).where(DeliveryDeclaration.correctsDeclarationId.is_not(None))
     received_total = await db.scalar(
-        select(func.coalesce(func.sum(DeliveryDeclaration.declaredVolumeLiters), 0)).where(
-            DeliveryDeclaration.purchaseOrderId == purchase_order_id,
+        select(func.coalesce(func.sum(DeliveryDeclarationLine.volumeLiters), 0))
+        .join(DeliveryDeclaration, DeliveryDeclaration.id == DeliveryDeclarationLine.declarationId)
+        .where(
+            DeliveryDeclarationLine.purchaseOrderLineId == purchase_order_line_id,
             DeliveryDeclaration.lifecycleStatus.in_(("declared", "locked")),
-            DeliveryDeclaration.id.not_in(superseded_ids),
+            DeliveryDeclarationLine.id.not_in(superseded_line_ids),
+            DeliveryDeclaration.id.not_in(superseded_declaration_ids),
         )
     )
-    if received_total is not None and received_total >= purchase_order.orderedVolumeLiters:
-        purchase_order.status = "received"
-        await db.commit()
+    received_total = float(received_total or 0)
+    if received_total <= 0:
+        line.status = "open"
+    elif received_total >= float(line.orderedVolumeLiters):
+        line.status = "received"
+    else:
+        line.status = "partially_received"
+    await db.flush()
+
+    order = await db.get(PurchaseOrder, line.purchaseOrderId)
+    all_lines = await _load_purchase_order_lines(db, order.id)
+    statuses = {l.status for l in all_lines}
+    if statuses == {"received"}:
+        order.status = "received"
+    elif statuses == {"open"}:
+        order.status = "open"
+    else:
+        order.status = "partially_received"
+    await db.commit()
 
 
 # ================================================================
@@ -4978,19 +5108,24 @@ async def _record_reconciliation(
     return record
 
 
-async def _evaluate_delivery_declaration_reconciliation_core(db: AsyncSession, declaration: DeliveryDeclaration) -> ReconciliationRecord:
-    """Cœur du rapprochement livraison déclarée <-> `DeliveryDetected`,
+async def _evaluate_delivery_declaration_line_reconciliation_core(db: AsyncSession, declaration: DeliveryDeclaration, line: DeliveryDeclarationLine) -> ReconciliationRecord:
+    """Cœur du rapprochement d'UNE ligne de livraison <-> `DeliveryDetected`,
     sans vérification de permission — appelé à la fois par l'endpoint
     manuel (`evaluate_delivery_declaration_reconciliation`, ci-dessous) et
     par les déclenchements automatiques (mission « flux de livraison
     station ») : à la création d'une déclaration, et en retour depuis une
     détection nouvellement créée (`run_delivery_detection_for_tank`).
-    Fenêtre temporelle + tolérance de volume `max(fixe, pourcentage du
-    volume déclaré)` (Phase 7 addendum §1) — logique de recherche du
-    meilleur candidat inchangée. Crée en plus l'alerte `delivery_discrepancy`
-    quand l'écart dépasse la tolérance (mission « flux de livraison
-    station » — jamais créée avant, la Phase 6/7 ne faisait que calculer le
-    statut sans alerter)."""
+
+    Refonte 2026-09-17 : le rapprochement se fait désormais par LIGNE, sur
+    la cuve exacte qu'elle désigne (`DeliveryDeclarationLine.tankId`), et
+    non plus par station+produit+fenêtre de temps — l'ancien mécanisme
+    choisissait arbitrairement la détection la plus proche en temps quand
+    plusieurs cuves du même produit recevaient simultanément (scénario B),
+    laissant les autres cuves faussement « non rapprochées ». Fenêtre
+    temporelle + tolérance de volume `max(fixe, pourcentage du volume
+    déclaré)` (Phase 7 addendum §1) — logique de recherche du meilleur
+    candidat inchangée, restreinte à cette seule cuve. Crée en plus l'alerte
+    `delivery_discrepancy` quand l'écart dépasse la tolérance."""
     settings = await _get_reconciliation_settings(db, declaration.stationId)
     window_hours = _tolerance(settings, "deliveryWindowHours", RECONCILIATION_DELIVERY_WINDOW_HOURS_DEFAULT)
     fixed_tolerance = _tolerance(settings, "deliveryVolumeToleranceFixedLiters", RECONCILIATION_DELIVERY_VOLUME_TOLERANCE_FIXED_LITERS_DEFAULT)
@@ -4999,11 +5134,8 @@ async def _evaluate_delivery_declaration_reconciliation_core(db: AsyncSession, d
     window_start = declaration.eventAt - timedelta(hours=window_hours)
     window_end = declaration.eventAt + timedelta(hours=window_hours)
     candidates_result = await db.execute(
-        select(DeliveryDetected)
-        .join(Tank, Tank.id == DeliveryDetected.tankId)
-        .where(
-            Tank.stationId == declaration.stationId,
-            Tank.fuelProductId == declaration.fuelProductId,
+        select(DeliveryDetected).where(
+            DeliveryDetected.tankId == line.tankId,
             DeliveryDetected.startTime >= window_start,
             DeliveryDetected.startTime <= window_end,
         )
@@ -5025,109 +5157,113 @@ async def _evaluate_delivery_declaration_reconciliation_core(db: AsyncSession, d
         if best.volumeLiters is None:
             status = "insufficient_data"
         else:
-            tolerance_applied = max(fixed_tolerance, float(declaration.declaredVolumeLiters) * percent_tolerance / 100)
-            discrepancy_value = abs(float(declaration.declaredVolumeLiters) - float(best.volumeLiters))
+            tolerance_applied = max(fixed_tolerance, float(line.volumeLiters) * percent_tolerance / 100)
+            discrepancy_value = abs(float(line.volumeLiters) - float(best.volumeLiters))
             status = "matched" if discrepancy_value <= tolerance_applied else "discrepancy"
 
     record = await _record_reconciliation(
-        db, "DeliveryDeclaration", declaration.id, counterpart_type, counterpart_id,
+        db, "DeliveryDeclarationLine", line.id, counterpart_type, counterpart_id,
         "quantitative", status, discrepancy_value, "liters" if discrepancy_value is not None else None, tolerance_applied,
     )
-    declaration.reconciledWithId = record.id
-    declaration.reconciledWithType = "ReconciliationRecord"
+    line.reconciledWithId = record.id
+    line.reconciledWithType = "ReconciliationRecord"
 
     if status == "discrepancy" and best is not None:
         await _create_alert_if_not_already_active(
-            db, best.tankId, "delivery_discrepancy", declaration.eventAt, discrepancy_value, tolerance_applied
+            db, line.tankId, "delivery_discrepancy", declaration.eventAt, discrepancy_value, tolerance_applied
         )
     elif status == "matched" and best is not None:
         # D2 : un appariement réussi EST la vérité qui referme les alertes
         # de ce cycle de livraison — jamais un clic humain. `delivery_undeclared`
         # n'a plus lieu d'être (la détection a maintenant une déclaration) ;
-        # `delivery_declaration_pending` non plus, sur toutes les cuves du
-        # même produit concernées par le balayage qui l'avait créée.
+        # `delivery_declaration_pending` non plus, sur CETTE cuve précise
+        # (refonte 2026-09-17 : plus besoin de balayer toutes les cuves du
+        # même produit, la ligne désigne la cuve exacte).
         resolved_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        await alerts_service.auto_resolve_alert(db, station_id=declaration.stationId, tank_id=best.tankId, product_id=None, alert_type="delivery_discrepancy", resolved_at=resolved_at)
-        await alerts_service.auto_resolve_alert(db, station_id=declaration.stationId, tank_id=best.tankId, product_id=None, alert_type="delivery_undeclared", resolved_at=resolved_at)
-        for tank in await _stations_tanks_for_fuel_product(db, declaration.stationId, declaration.fuelProductId):
-            await alerts_service.auto_resolve_alert(db, station_id=declaration.stationId, tank_id=tank.id, product_id=None, alert_type="delivery_declaration_pending", resolved_at=resolved_at)
+        await alerts_service.auto_resolve_alert(db, station_id=declaration.stationId, tank_id=line.tankId, product_id=None, alert_type="delivery_discrepancy", resolved_at=resolved_at)
+        await alerts_service.auto_resolve_alert(db, station_id=declaration.stationId, tank_id=line.tankId, product_id=None, alert_type="delivery_undeclared", resolved_at=resolved_at)
+        await alerts_service.auto_resolve_alert(db, station_id=declaration.stationId, tank_id=line.tankId, product_id=None, alert_type="delivery_declaration_pending", resolved_at=resolved_at)
 
     await db.commit()
     await db.refresh(record)
     return record
 
 
-async def evaluate_delivery_declaration_reconciliation(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, declaration_id: uuid.UUID) -> ReconciliationRecordResponse:
+async def evaluate_delivery_declaration_reconciliation(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, declaration_id: uuid.UUID) -> list[ReconciliationRecordResponse]:
     """Rapprochement opérationnel (Phase 5 §4), déclenchable manuellement
     (« action rapide » du commanditaire — bouton de ré-évaluation sur une
-    déclaration/alerte) en plus des déclenchements automatiques."""
+    déclaration/alerte) en plus des déclenchements automatiques. Une
+    déclaration peut porter plusieurs lignes (refonte 2026-09-17) — chacune
+    se rapproche indépendamment, la liste complète des résultats est
+    retournée."""
     declaration = await _get_declaration_or_404(db, DeliveryDeclaration, organization_id, declaration_id)
     station = await db.get(Station, declaration.stationId)
     await _check_declaration_scope(db, organization_id, actor_user_id, station, RECONCILIATION_READ)
-    record = await _evaluate_delivery_declaration_reconciliation_core(db, declaration)
-    return ReconciliationRecordResponse.model_validate(record)
-
-
-async def _stations_tanks_for_fuel_product(db: AsyncSession, station_id: uuid.UUID, fuel_product_id: uuid.UUID) -> list[Tank]:
-    result = await db.execute(select(Tank).where(Tank.stationId == station_id, Tank.fuelProductId == fuel_product_id, Tank.active == True))  # noqa: E712
-    return list(result.scalars().all())
+    lines = await _load_delivery_declaration_lines(db, declaration.id)
+    records = [await _evaluate_delivery_declaration_line_reconciliation_core(db, declaration, line) for line in lines]
+    return [ReconciliationRecordResponse.model_validate(r) for r in records]
 
 
 async def _sweep_stale_pending_delivery_declarations(db: AsyncSession, station_id: uuid.UUID) -> None:
     """Signale (alerte `delivery_declaration_pending`, plus légère qu'un
-    écart avéré) toute déclaration de livraison de cette station toujours
-    `pending` (aucune détection trouvée) après la fenêtre de tolérance
-    étendue — appelé en best-effort depuis les deux points de déclenchement
-    automatique (mission « flux de livraison station »), jamais depuis un
-    scheduler dédié (aucun n'existe dans ce backend, cf. audit)."""
+    écart avéré) toute LIGNE de livraison de cette station toujours
+    `pending` (aucune détection trouvée sur sa cuve) après la fenêtre de
+    tolérance étendue — appelé en best-effort depuis les deux points de
+    déclenchement automatique (mission « flux de livraison station »),
+    jamais depuis un scheduler dédié (aucun n'existe dans ce backend, cf.
+    audit). Refonte 2026-09-17 : par ligne (cuve précise), plus par
+    déclaration entière — une déclaration multi-cuves peut avoir une ligne
+    rapprochée et une autre encore en attente."""
     stale_before = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=RECONCILIATION_DELIVERY_STALE_PENDING_HOURS_DEFAULT)
-    declarations_result = await db.execute(
-        select(DeliveryDeclaration)
-        .join(ReconciliationRecord, ReconciliationRecord.id == DeliveryDeclaration.reconciledWithId)
+    rows_result = await db.execute(
+        select(DeliveryDeclarationLine, DeliveryDeclaration.eventAt)
+        .join(DeliveryDeclaration, DeliveryDeclaration.id == DeliveryDeclarationLine.declarationId)
+        .join(ReconciliationRecord, ReconciliationRecord.id == DeliveryDeclarationLine.reconciledWithId)
         .where(
             DeliveryDeclaration.stationId == station_id,
             ReconciliationRecord.status == "pending",
             DeliveryDeclaration.eventAt < stale_before,
         )
     )
-    for declaration in declarations_result.scalars().all():
-        tanks = await _stations_tanks_for_fuel_product(db, station_id, declaration.fuelProductId)
-        for tank in tanks:
-            await _create_alert_if_not_already_active(
-                db, tank.id, "delivery_declaration_pending", declaration.eventAt, None, None
-            )
+    for line, event_at in rows_result.all():
+        await _create_alert_if_not_already_active(db, line.tankId, "delivery_declaration_pending", event_at, None, None)
     await db.commit()
 
 
 async def _reverse_match_delivery_detected(db: AsyncSession, detected: DeliveryDetected, tank: Tank) -> None:
     """Retour de rapprochement depuis une détection nouvellement créée
     (mission « flux de livraison station », sens inverse de la fonction
-    ci-dessus) : cherche une déclaration non encore appariée dans la même
-    fenêtre ; si trouvée, relance le rapprochement de cette déclaration
-    (qui trouvera maintenant cette détection) ; sinon, la livraison
-    physique n'a aucune trace administrative — alerte `delivery_undeclared`,
-    le cas explicitement désigné comme le plus important à signaler."""
+    ci-dessus) : cherche une LIGNE de déclaration non encore appariée sur
+    CETTE cuve précise dans la même fenêtre (refonte 2026-09-17 — bien plus
+    précis que l'ancien filtre station+produit, qui pouvait apparier la
+    mauvaise cuve quand plusieurs cuves du même produit recevaient en même
+    temps) ; si trouvée, relance le rapprochement de sa déclaration (qui
+    trouvera maintenant cette détection) ; sinon, la livraison physique n'a
+    aucune trace administrative — alerte `delivery_undeclared`, le cas
+    explicitement désigné comme le plus important à signaler."""
     settings = await _get_reconciliation_settings(db, tank.stationId)
     window_hours = _tolerance(settings, "deliveryWindowHours", RECONCILIATION_DELIVERY_WINDOW_HOURS_DEFAULT)
     window_start = detected.startTime - timedelta(hours=window_hours)
     window_end = detected.startTime + timedelta(hours=window_hours)
 
     candidates_result = await db.execute(
-        select(DeliveryDeclaration).where(
-            DeliveryDeclaration.stationId == tank.stationId,
-            DeliveryDeclaration.fuelProductId == tank.fuelProductId,
+        select(DeliveryDeclarationLine)
+        .join(DeliveryDeclaration, DeliveryDeclaration.id == DeliveryDeclarationLine.declarationId)
+        .where(
+            DeliveryDeclarationLine.tankId == tank.id,
             DeliveryDeclaration.eventAt >= window_start,
             DeliveryDeclaration.eventAt <= window_end,
         )
     )
-    best, best_delta = None, None
-    for candidate in candidates_result.scalars().all():
-        delta = abs((candidate.eventAt - detected.startTime).total_seconds())
+    best_line, best_delta, best_declaration = None, None, None
+    for candidate_line in candidates_result.scalars().all():
+        declaration = await db.get(DeliveryDeclaration, candidate_line.declarationId)
+        delta = abs((declaration.eventAt - detected.startTime).total_seconds())
         if best_delta is None or delta < best_delta:
-            best, best_delta = candidate, delta
+            best_line, best_delta, best_declaration = candidate_line, delta, declaration
 
-    if best is not None:
-        await _evaluate_delivery_declaration_reconciliation_core(db, best)
+    if best_line is not None:
+        await _evaluate_delivery_declaration_line_reconciliation_core(db, best_declaration, best_line)
         return
 
     await _create_alert_if_not_already_active(db, tank.id, "delivery_undeclared", detected.startTime, detected.volumeLiters, None)

@@ -48,6 +48,7 @@ from app.modules.zylo_liquid.schemas import (
     CreateAuthorizationRequest,
     CreateCarrierRequest,
     CreateCommercialAccountRequest,
+    CorrectDeliveryDeclarationLinesRequest,
     CreateDeliveryDeclarationRequest,
     CreateDriverRequest,
     ReconciliationRecordResponse,
@@ -1058,6 +1059,16 @@ async def lock_delivery_declaration(
     db: AsyncSession = Depends(get_db),
 ) -> DeliveryDeclarationResponse:
     return await service.lock_delivery_declaration(db, organization_id, current_user.id, declaration_id)
+
+
+@router.post("/delivery-declarations/correct-lines", response_model=DeliveryDeclarationResponse, status_code=201)
+async def correct_delivery_declaration_lines(
+    data: CorrectDeliveryDeclarationLinesRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> DeliveryDeclarationResponse:
+    return await service.correct_delivery_declaration_lines(db, organization_id, current_user.id, data)
 
 
 # ================================================================
@@ -2133,13 +2144,13 @@ async def list_reconciliation_records(
 # ================================================================
 
 
-@router.post("/delivery-declarations/{declaration_id}/reconcile", response_model=ReconciliationRecordResponse)
+@router.post("/delivery-declarations/{declaration_id}/reconcile", response_model=list[ReconciliationRecordResponse])
 async def reconcile_delivery_declaration(
     declaration_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     organization_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
-) -> ReconciliationRecordResponse:
+) -> list[ReconciliationRecordResponse]:
     return await service.evaluate_delivery_declaration_reconciliation(db, organization_id, current_user.id, declaration_id)
 
 

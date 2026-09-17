@@ -663,7 +663,6 @@ class DeliveryDeclaration(DeclarationMixin, UUIDPrimaryKeyMixin, TimestampMixin,
         {"comment": "Réception de livraison déclarée — distincte de DeliveryDetected (télémétrique)."},
     )
 
-    fuelProductId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidFuelProduct.id", ondelete="RESTRICT"), nullable=False, index=True)
     # Libellé libre conservé pour les lignes historiques et les saisies sans
     # référence ; quand `supplierId` est renseigné, le service le fige au nom
     # du fournisseur au moment de la saisie — snapshot documentaire (même
@@ -675,12 +674,49 @@ class DeliveryDeclaration(DeclarationMixin, UUIDPrimaryKeyMixin, TimestampMixin,
     # restent valides sans elles, le rapprochement n'en dépend pas.
     supplierId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidSupplier.id", ondelete="RESTRICT"), nullable=True, index=True)
     truckId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTruck.id", ondelete="RESTRICT"), nullable=True, index=True)
-    purchaseOrderId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidPurchaseOrder.id", ondelete="RESTRICT"), nullable=True, index=True)
-    declaredVolumeLiters: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
     # Structuré (pas une simple pièce jointe) : pratique courante confirmée
     # par la recherche externe (Phase 4 v2 §7 de 04-matrice-roles-actions-v2.md).
     deliveryNoteReference: Mapped[str | None] = mapped_column(String(100), nullable=True)
     correctsDeclarationId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidDeliveryDeclaration.id", ondelete="RESTRICT"), nullable=True)
+    # `fuelProductId`/`declaredVolumeLiters`/`purchaseOrderId`/
+    # `reconciledWithId`/`reconciledWithType` ont migré sur
+    # `DeliveryDeclarationLine` (refonte « cuve choisie à la livraison, pas à
+    # la commande », 2026-09-17, validée scénario par scénario avec le
+    # commanditaire — B/C : une livraison peut toucher plusieurs cuves et/ou
+    # plusieurs produits en une seule visite, ce qu'une déclaration mono-ligne
+    # ne pouvait pas représenter). Cette en-tête ne porte plus que ce qui est
+    # commun à toute la visite (station, auteur, date, fournisseur, camion,
+    # référence du bon) — jamais un produit/volume/cuve unique.
+
+
+class DeliveryDeclarationLine(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Une ligne = une cuve réellement remplie durant la visite (refonte
+    2026-09-17). `purchaseOrderLineId` NULL = livraison sans commande
+    préalable (scénario E, validé explicitement) ; sinon doit référencer une
+    ligne de commande du même produit que la cuve visée (contrôlé côté
+    service, jamais en base — la cuve détermine le produit, pas de double
+    vérité). `correctsLineId` permet une correction CIBLÉE d'une seule ligne
+    (scénario I, option validée) : une déclaration corrective ne porte que
+    la/les ligne(s) à corriger, chacune pointant la ligne d'origine qu'elle
+    remplace — les autres lignes de la déclaration d'origine restent
+    valables telles quelles, contrairement à `correctsDeclarationId` qui
+    remplace toute la déclaration."""
+
+    __tablename__ = "zyloLiquidDeliveryDeclarationLine"
+    __table_args__ = (
+        CheckConstraint('"volumeLiters" > 0', name="ck_zlDeliveryDeclarationLine_volumeLiters_positive"),
+        {"comment": "Une cuve réellement remplie durant une visite de livraison — une déclaration peut en porter plusieurs."},
+    )
+
+    declarationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidDeliveryDeclaration.id", ondelete="CASCADE"), nullable=False, index=True)
+    tankId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="RESTRICT"), nullable=False, index=True)
+    purchaseOrderLineId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidPurchaseOrderLine.id", ondelete="RESTRICT"), nullable=True, index=True)
+    volumeLiters: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
+    correctsLineId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidDeliveryDeclarationLine.id", ondelete="RESTRICT"), nullable=True)
+    # Rapprochement désormais par ligne (cuve précise), plus par déclaration
+    # entière — corrige l'ambiguïté d'une livraison multi-cuves du même
+    # produit où l'ancien mécanisme (station+produit+fenêtre de temps)
+    # choisissait arbitrairement la cuve la plus proche en temps.
     reconciledWithId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     reconciledWithType: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
@@ -936,31 +972,54 @@ class Truck(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class PurchaseOrder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Commande d'approvisionnement (prototype `commandes`, portée station
     comme les entités déclaratives — jamais une colonne organizationId, la
-    portée passe par la station, même mécanisme que DeclarationMixin). Une
-    commande vise une cuve précise (le contrôle d'ullage de la réception se
-    fait cuve par cuve) ; le produit est celui de la cuve, jamais stocké
-    séparément (pas de double vérité). `status` n'a que deux états réels —
-    les états intermédiaires du prototype (confirmée, en transit) décrivent
-    le cycle fournisseur, hors périmètre de l'application (aucune action ne
-    les déclenche) ; le passage à 'received' se fait côté service quand les
-    volumes déclarés rattachés atteignent le volume commandé (jamais avant)."""
+    portée passe par la station, même mécanisme que DeclarationMixin).
+
+    Refonte 2026-09-17 (validée scénario par scénario avec le commanditaire) :
+    une commande ne vise plus une cuve précise — la cuve se choisit à la
+    LIVRAISON (`DeliveryDeclarationLine.tankId`), jamais à la commande,
+    pour permettre qu'une même visite de camion touche plusieurs cuves
+    et/ou plusieurs produits (camion compartimenté). Une commande porte
+    donc un ou plusieurs produits, chacun sur sa propre `PurchaseOrderLine`
+    avec son propre volume commandé et son propre statut de réception.
+
+    `status` (3 états, contrairement aux 2 d'avant la refonte) est agrégé
+    depuis les lignes : `open` si aucune ligne n'a reçu de volume,
+    `received` si toutes les lignes sont complètes, `partially_received`
+    sinon — un gérant voit ainsi dans la liste des commandes qu'un produit
+    est déjà arrivé sans devoir ouvrir le détail (ex. Super livré, Gasoil
+    encore attendu sur la même commande)."""
 
     __tablename__ = "zyloLiquidPurchaseOrder"
     __table_args__ = (
-        CheckConstraint("status IN ('open','received')", name="ck_zlPurchaseOrder_status"),
-        CheckConstraint('"orderedVolumeLiters" > 0', name="ck_zlPurchaseOrder_orderedVolumeLiters_positive"),
-        {"comment": "Commande d'approvisionnement d'une cuve — états open/received, transition posée par le service de réception."},
+        CheckConstraint("status IN ('open','partially_received','received')", name="ck_zlPurchaseOrder_status"),
+        {"comment": "Commande d'approvisionnement multi-produits — statut agrégé depuis PurchaseOrderLine."},
     )
 
     stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True)
-    tankId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="RESTRICT"), nullable=False, index=True)
     supplierId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidSupplier.id", ondelete="RESTRICT"), nullable=False, index=True)
     authorUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)
     orderReference: Mapped[str] = mapped_column(String(100), nullable=False)
-    orderedVolumeLiters: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
     orderedAt: Mapped[datetime] = mapped_column(nullable=False, index=True)
     expectedAt: Mapped[datetime | None] = mapped_column(nullable=True)
-    status: Mapped[str] = mapped_column(String(10), nullable=False, server_default="open")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="open")
+
+
+class PurchaseOrderLine(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Une ligne = un produit commandé, avec son propre volume et son propre
+    statut de réception — une commande multi-produits (camion compartimenté,
+    scénario C) porte autant de lignes que de produits distincts."""
+
+    __tablename__ = "zyloLiquidPurchaseOrderLine"
+    __table_args__ = (
+        CheckConstraint("status IN ('open','partially_received','received')", name="ck_zlPurchaseOrderLine_status"),
+        CheckConstraint('"orderedVolumeLiters" > 0', name="ck_zlPurchaseOrderLine_orderedVolumeLiters_positive"),
+        {"comment": "Un produit commandé — le statut de la commande est agrégé depuis ses lignes."},
+    )
+
+    purchaseOrderId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidPurchaseOrder.id", ondelete="CASCADE"), nullable=False, index=True)
+    fuelProductId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidFuelProduct.id", ondelete="RESTRICT"), nullable=False, index=True)
+    orderedVolumeLiters: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="open")
 
 
 class StationSupplier(UUIDPrimaryKeyMixin, TimestampMixin, Base):

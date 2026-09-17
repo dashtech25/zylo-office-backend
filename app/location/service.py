@@ -48,6 +48,8 @@ from app.core.errors import AppError
 from app.location.algorithms import (
     TRUCK_STOP_RADIUS_METERS_DEFAULT,
     TRUCK_STOP_STABILIZATION_MINUTES_DEFAULT,
+    VESSEL_MOORED_DISTANCE_METERS_DEFAULT,
+    _haversine_distance_meters,
     detect_truck_stop_in_progress,
     detect_truck_stops,
     is_position_plausible,
@@ -494,7 +496,7 @@ async def ingest_truck_position(db: AsyncSession, organization_id: uuid.UUID, se
         # trouvé et corrigé plus tôt dans cette même mission).
         recordedAt=recorded_at,
         latitude=data.latitude, longitude=data.longitude,
-        channel=data.channel, accuracyMeters=data.accuracyMeters, speedKmh=data.speedKmh,
+        channel=data.channel, accuracyMeters=data.accuracyMeters, speedKmh=data.speedKmh, headingDeg=data.headingDeg,
         rawPayload=data.model_dump(mode="json"),
     )
     db.add(ping)
@@ -528,17 +530,19 @@ async def _resolve_owner_current_position(db: AsyncSession, device: GpsDevice | 
     """Cœur partagé de `list_truck_current_positions`/
     `list_vessel_current_positions` (généralisation Zylo Tanker,
     2026-09-16) — jamais dupliqué. Retourne
-    (latitude, longitude, recordedAt, channel, in_progress) où `in_progress`
-    est le payload d'arrêt en cours (voir `detect_truck_stop_in_progress`)
-    ou `None`, tous `None` si aucune position exploitable."""
+    (latitude, longitude, recordedAt, channel, in_progress, speedKmh,
+    headingDeg) où `in_progress` est le payload d'arrêt en cours (voir
+    `detect_truck_stop_in_progress`) ou `None`, tous `None` si aucune
+    position exploitable. `speedKmh`/`headingDeg` (2026-09-17, ETA/statut
+    navire) viennent tels quels du dernier ping, jamais recalculés ici."""
     if device is None:
-        return None, None, None, None, None
+        return None, None, None, None, None, None, None
     last_ping_result = await db.execute(
         select(TruckPositionPing).where(TruckPositionPing.gpsDeviceId == device.id).order_by(TruckPositionPing.recordedAt.desc()).limit(1)
     )
     last_ping = last_ping_result.scalar_one_or_none()
     if last_ping is None:
-        return None, None, None, None, None
+        return None, None, None, None, None, None, None
 
     # Bornée à l'affectation en cours de CE véhicule (2026-09-13,
     # correction) — jamais 48h de positions du boîtier sans savoir s'il
@@ -561,7 +565,9 @@ async def _resolve_owner_current_position(db: AsyncSession, device: GpsDevice | 
     )
     recent_positions = [(recordedAt, float(lat), float(lon)) for recordedAt, lat, lon in recent_result.all()]
     in_progress = detect_truck_stop_in_progress(recent_positions, TRUCK_STOP_RADIUS_METERS_DEFAULT, TRUCK_STOP_STABILIZATION_MINUTES_DEFAULT) if len(recent_positions) >= 2 else None
-    return float(last_ping.latitude), float(last_ping.longitude), last_ping.recordedAt, last_ping.channel, in_progress
+    speed_kmh = float(last_ping.speedKmh) if last_ping.speedKmh is not None else None
+    heading_deg = float(last_ping.headingDeg) if last_ping.headingDeg is not None else None
+    return float(last_ping.latitude), float(last_ping.longitude), last_ping.recordedAt, last_ping.channel, in_progress, speed_kmh, heading_deg
 
 
 async def list_truck_current_positions(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID) -> list[TruckCurrentPositionResponse]:
@@ -577,7 +583,7 @@ async def list_truck_current_positions(db: AsyncSession, organization_id: uuid.U
     responses: list[TruckCurrentPositionResponse] = []
     for truck_id in truck_ids:
         device = await _get_current_gps_device_for_owner(db, truck_id=truck_id)
-        latitude, longitude, recorded_at, channel, in_progress = await _resolve_owner_current_position(db, device, truck_id=truck_id)
+        latitude, longitude, recorded_at, channel, in_progress, _speed_kmh, _heading_deg = await _resolve_owner_current_position(db, device, truck_id=truck_id)
         current_stop = None
         if in_progress is not None:
             current_stop = TruckStopEventResponse(
@@ -593,26 +599,68 @@ async def list_truck_current_positions(db: AsyncSession, organization_id: uuid.U
 
 async def list_vessel_current_positions(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID) -> list[VesselCurrentPositionResponse]:
     """Généralisation Zylo Tanker (2026-09-16) de `list_truck_current_positions`
-    — même cœur partagé (`_resolve_owner_current_position`), jamais dupliqué."""
+    — même cœur partagé (`_resolve_owner_current_position`), jamais dupliqué.
+
+    ETA/statut (2026-09-17) : `etaMinutes = distance_haversine(position
+    actuelle, destination) / vitesse_actuelle_kmh * 60`, réutilise
+    `_haversine_distance_meters` (`app.location.algorithms`), jamais
+    réimplémentée. Règle stricte (voir les docstrings des KPI zylo_liquid) :
+    si la destination est absente, la vitesse nulle/`None`, ou la position
+    actuelle absente, `etaMinutes`/`etaAt` restent `None` — jamais une
+    valeur inventée ou un 0 par défaut. `status` dérivé de `currentStop` :
+    'moored' si l'arrêt est à moins de
+    `VESSEL_MOORED_DISTANCE_METERS_DEFAULT` d'une destination connue,
+    'anchored' sinon (arrêté ailleurs, ou sans destination connue),
+    'underway' si aucun arrêt en cours (en mouvement ou sans position)."""
     await _check_org_scope(db, organization_id, actor_user_id, VESSEL_READ)
-    vessels_result = await db.execute(select(Vessel.id).where(Vessel.organizationId == organization_id))
-    vessel_ids = [row[0] for row in vessels_result.all()]
-    if not vessel_ids:
+    vessels_result = await db.execute(select(Vessel).where(Vessel.organizationId == organization_id))
+    vessels = vessels_result.scalars().all()
+    if not vessels:
         return []
 
     responses: list[VesselCurrentPositionResponse] = []
-    for vessel_id in vessel_ids:
+    for vessel in vessels:
+        vessel_id = vessel.id
         device = await _get_current_gps_device_for_owner(db, vessel_id=vessel_id)
-        latitude, longitude, recorded_at, channel, in_progress = await _resolve_owner_current_position(db, device, vessel_id=vessel_id)
+        latitude, longitude, recorded_at, channel, in_progress, speed_kmh, heading_deg = await _resolve_owner_current_position(db, device, vessel_id=vessel_id)
         current_stop = None
         if in_progress is not None:
             current_stop = TruckStopEventResponse(
                 id=uuid.uuid4(), vesselId=vessel_id, latitude=in_progress["latitude"], longitude=in_progress["longitude"],
                 startAt=in_progress["startTime"], endAt=None,
             )
+
+        destination_latitude = float(vessel.destinationLatitude) if vessel.destinationLatitude is not None else None
+        destination_longitude = float(vessel.destinationLongitude) if vessel.destinationLongitude is not None else None
+
+        eta_minutes = None
+        eta_at = None
+        if (
+            destination_latitude is not None and destination_longitude is not None
+            and latitude is not None and longitude is not None
+            and speed_kmh is not None and speed_kmh > 0
+            and recorded_at is not None
+        ):
+            distance_meters = _haversine_distance_meters(latitude, longitude, destination_latitude, destination_longitude)
+            eta_minutes = (distance_meters / 1000.0) / speed_kmh * 60.0
+            eta_at = recorded_at + timedelta(minutes=eta_minutes)
+
+        if current_stop is None:
+            status = "underway"
+        elif (
+            destination_latitude is not None and destination_longitude is not None
+            and _haversine_distance_meters(current_stop.latitude, current_stop.longitude, destination_latitude, destination_longitude) < VESSEL_MOORED_DISTANCE_METERS_DEFAULT
+        ):
+            status = "moored"
+        else:
+            status = "anchored"
+
         responses.append(VesselCurrentPositionResponse(
             vesselId=vessel_id, latitude=latitude, longitude=longitude,
             recordedAt=recorded_at, channel=channel, currentStop=current_stop,
+            speedKmh=speed_kmh, headingDeg=heading_deg,
+            destinationLatitude=destination_latitude, destinationLongitude=destination_longitude, destinationLabel=vessel.destinationLabel,
+            etaMinutes=eta_minutes, etaAt=eta_at, status=status,
         ))
     return responses
 

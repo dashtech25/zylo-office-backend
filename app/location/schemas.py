@@ -5,6 +5,7 @@ inchangé, seul l'emplacement du code Python bouge."""
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -177,6 +178,7 @@ class IngestTruckPositionRequest(BaseModel):
     channel: str | None = None
     accuracyMeters: float | None = Field(default=None, ge=0)
     speedKmh: float | None = Field(default=None, ge=0)
+    headingDeg: float | None = Field(default=None, ge=0, le=360, description="Cap/route GPS/AIS (0-360°, 0=nord) — optionnel, null si le boîtier ne le fournit pas.")
 
 
 class TruckPositionPingResponse(BaseModel):
@@ -189,6 +191,7 @@ class TruckPositionPingResponse(BaseModel):
     channel: str | None
     accuracyMeters: float | None
     speedKmh: float | None
+    headingDeg: float | None = None
 
     model_config = {"from_attributes": True}
 
@@ -229,7 +232,19 @@ class TruckCurrentPositionResponse(BaseModel):
 class VesselCurrentPositionResponse(BaseModel):
     """Symétrique de `TruckCurrentPositionResponse` pour un navire
     (généralisation Zylo Tanker, 2026-09-16) — une entrée existe pour
-    chaque navire de l'organisation, mêmes règles de champs null."""
+    chaque navire de l'organisation, mêmes règles de champs null.
+
+    ETA/statut (2026-09-17) — `speedKmh`/`headingDeg` viennent du dernier
+    `TruckPositionPing` du navire (GPS/AIS, jamais recalculés).
+    `destinationLatitude`/`destinationLongitude`/`destinationLabel` sont
+    recopiés de `Vessel` tels quels. `etaMinutes`/`etaAt` restent `None`
+    dès que l'un des ingrédients du calcul manque (pas de destination, pas
+    de position actuelle, vitesse nulle ou `None`) — jamais une valeur
+    inventée ou un 0 par défaut (règle « jamais de donnée inventée »,
+    CLAUDE.md). `status` : 'moored' (arrêté à proximité — moins de 500m —
+    d'une destination connue), 'anchored' (arrêté ailleurs, ou sans
+    destination connue), 'underway' (en mouvement, ou aucune position
+    connue)."""
 
     vesselId: uuid.UUID
     latitude: float | None = Field(description="null si le navire n'a pas de boîtier GPS assigné ou n'a jamais émis de position.")
@@ -237,3 +252,11 @@ class VesselCurrentPositionResponse(BaseModel):
     recordedAt: datetime | None = Field(description="Horodatage de la dernière position connue — null dans les mêmes cas que latitude/longitude.")
     channel: str | None
     currentStop: TruckStopEventResponse | None = Field(default=None, description="Arrêt en cours si le navire est actuellement immobile depuis le seuil de stabilisation configuré — null s'il est en mouvement ou sans position.")
+    speedKmh: float | None = Field(default=None, description="Vitesse du dernier ping GPS/AIS connu — null si aucune position connue ou boîtier ne la fournissant pas.")
+    headingDeg: float | None = Field(default=None, description="Cap/route du dernier ping GPS/AIS connu — null si aucune position connue ou boîtier ne le fournissant pas.")
+    destinationLatitude: float | None = Field(default=None, description="Recopié de Vessel.destinationLatitude — null si aucune destination fixée.")
+    destinationLongitude: float | None = Field(default=None, description="Recopié de Vessel.destinationLongitude — null si aucune destination fixée.")
+    destinationLabel: str | None = Field(default=None, description="Recopié de Vessel.destinationLabel — null si aucune destination fixée ou aucun libellé fourni.")
+    etaMinutes: float | None = Field(default=None, description="Temps estimé (minutes) jusqu'à la destination à la vitesse actuelle — null si destination, position actuelle ou vitesse (non nulle) manquante. Jamais une valeur inventée.")
+    etaAt: datetime | None = Field(default=None, description="Horodatage estimé d'arrivée (recordedAt + etaMinutes) — null dans les mêmes cas qu'etaMinutes.")
+    status: Literal["underway", "moored", "anchored"] = Field(description="'underway' (en mouvement ou position inconnue), 'moored' (arrêté à moins de 500m d'une destination connue), 'anchored' (arrêté ailleurs, ou sans destination connue).")

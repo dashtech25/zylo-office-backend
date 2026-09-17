@@ -12,8 +12,9 @@ commanditaire, hors périmètre de ce chantier (tracking de position
 uniquement)."""
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import String, UniqueConstraint
+from sqlalchemy import Numeric, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy import ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
@@ -26,7 +27,16 @@ class Vessel(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Bateau-citerne du réseau — référentiel minimal (nom, code
     d'immatriculation), même esprit que `Truck` côté zylo_liquid. Le code
     reste unique par organisation, même règle que `plateNumber` sur
-    `Truck`."""
+    `Truck`.
+
+    Destination (2026-09-17) : `destinationLatitude`/`destinationLongitude`/
+    `destinationLabel`/`destinationSetAt` sont tous les quatre nullable et
+    renseignés ensemble par `set_vessel_destination` (jamais un seul des
+    quatre) — une destination absente (jamais fixée, ou effacée par
+    `clear_vessel_destination`) laisse les quatre à `None`, jamais une
+    valeur plausible mais inventée (voir la règle « jamais de donnée
+    inventée », CLAUDE.md). Consommée par `app.location.service` pour
+    calculer l'ETA d'un navire, jamais dupliquée ailleurs."""
 
     __tablename__ = "zyloTankerVessel"
     __table_args__ = (
@@ -37,3 +47,7 @@ class Vessel(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id", ondelete="RESTRICT"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     code: Mapped[str] = mapped_column(String(50), nullable=False, comment="Immatriculation/code d'identification du navire — unique par organisation.")
+    destinationLatitude: Mapped[float | None] = mapped_column(Numeric(10, 7), nullable=True, comment="Destination fixée manuellement — null si aucune destination n'est actuellement définie.")
+    destinationLongitude: Mapped[float | None] = mapped_column(Numeric(10, 7), nullable=True, comment="Destination fixée manuellement — null si aucune destination n'est actuellement définie.")
+    destinationLabel: Mapped[str | None] = mapped_column(String(150), nullable=True, comment="Libellé libre de la destination (ex. nom du port) — optionnel même quand une destination est fixée.")
+    destinationSetAt: Mapped[datetime | None] = mapped_column(nullable=True, comment="Horodatage de la dernière fixation de destination — null si aucune destination n'est actuellement définie.")

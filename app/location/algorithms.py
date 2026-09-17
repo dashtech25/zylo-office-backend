@@ -27,6 +27,13 @@ TRUCK_STOP_STABILIZATION_MINUTES_DEFAULT = 10.0
 # rejeter un point trop rarement qu'exclure un vrai déplacement rapide.
 TRUCK_POSITION_MAX_PLAUSIBLE_SPEED_KMH_DEFAULT = 150.0
 
+# Statut navire (ETA/statut, 2026-09-17) — distance en dessous de laquelle
+# un navire à l'arrêt, proche d'une destination connue, est considéré
+# "amarré" (moored) plutôt que simplement "au mouillage" (anchored)
+# ailleurs. Valeur de démarrage prudente (jamais calibrée sur trajet réel),
+# même esprit que les seuils de détection d'arrêt ci-dessus.
+VESSEL_MOORED_DISTANCE_METERS_DEFAULT = 500.0
+
 
 def is_position_plausible(
     prev_recorded_at,

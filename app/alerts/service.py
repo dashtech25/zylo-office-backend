@@ -120,6 +120,11 @@ SEVERITY_BY_ALERT_TYPE = {
     # qu'un `sensor_offline` isolé (une seule cuve), la station entière
     # échappe à toute supervision (P1-9, audit module Stations 2026-09-16).
     "station_offline": "critical",
+    # Ventes déclarées vs stock détecté (mission détection de pertes,
+    # 2026-09-18 §1) — un écart réel est un signal fort (vol potentiel),
+    # mais reste "high" et non "critical" tant que la journée n'est pas
+    # terminée (l'écart peut encore se résorber, voir auto_resolve_alert).
+    "stock_declared_discrepancy": "high",
 }
 
 # D2 : types pour lesquels une source de vérité mesurable existe et peut
@@ -132,6 +137,7 @@ SEVERITY_BY_ALERT_TYPE = {
 AUTO_VERIFIABLE_ALERT_TYPES = {
     "level_high", "level_high_pre_alarm", "level_low", "water", "sensor_offline",
     "leak", "delivery_discrepancy", "delivery_undeclared", "delivery_declaration_pending",
+    "stock_declared_discrepancy",
 }
 
 

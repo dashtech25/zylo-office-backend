@@ -5839,18 +5839,32 @@ async def evaluate_stock_reconciliation(db: AsyncSession, organization_id: uuid.
         db, "TankStockDay", subject_id, "TankCashDailyAggregate", f"{tank_id}:{day.isoformat()}",
         "quantitative", result["status"], discrepancy_value, "liters" if discrepancy_value is not None else None, result["toleranceApplied"],
     )
+
+    # Mission détection de pertes phase 3 (2026-09-18) : « confirmation/
+    # annulation automatique » — ce même calcul est aussi celui qui
+    # confirme ou annule une alerte déjà ouverte quand il est redéclenché
+    # PLUS TARD pour un jour déjà passé (consultation de la page « Écarts
+    # de caisse », ou une nouvelle déclaration sur cette cuve un autre
+    # jour). Aucune notion de "provisoire" séparée dans le modèle Alert :
+    # c'est simplement le résultat du dernier calcul en date pour cette
+    # cuve qui prévaut, exactement comme les autres alertes auto-vérifiables.
+    try:
+        await _apply_stock_discrepancy_alert(db, tank, result)
+    except Exception:
+        logger.exception("Échec de la confirmation/annulation de l'alerte stock_declared_discrepancy (tank=%s, day=%s)", tank.id, day)
+
     await db.commit()
     await db.refresh(record)
     return ReconciliationRecordResponse.model_validate(record)
 
 
-async def _trigger_stock_discrepancy_alert(db: AsyncSession, tank: Tank, day: date) -> None:
-    """Déclenché juste après chaque déclaration de vente réussie
-    (`create_sale`/`bulk_import_sales`) — mission détection de pertes phase 2
-    (2026-09-18) : jamais de tâche planifiée dans cette application (aucune
-    n'existe), donc c'est l'événement de déclaration lui-même qui réveille
-    la vérification, pas une horloge. Ne bloque jamais la déclaration de
-    vente elle-même : les appelants entourent cet appel d'un try/except.
+async def _apply_stock_discrepancy_alert(db: AsyncSession, tank: Tank, result: dict) -> None:
+    """Effet de bord partagé par `_trigger_stock_discrepancy_alert` (Phase 2
+    — déclaration de vente) et `evaluate_stock_reconciliation` (Phase 3 —
+    consultation/nouvelle vérification d'un jour déjà passé) : à partir d'un
+    résultat déjà calculé par `_compute_stock_reconciliation`, ouvre/met à
+    jour ou referme l'alerte `stock_declared_discrepancy`. Un seul calcul,
+    un seul effet de bord, jamais deux implémentations divergentes.
 
     - "discrepancy" : ouvre/met à jour l'alerte (`upsert_active_alert`,
       jamais de construction directe d'`Alert`, cf. `.importlinter`).
@@ -5859,7 +5873,6 @@ async def _trigger_stock_discrepancy_alert(db: AsyncSession, tank: Tank, day: da
       autres alertes auto-vérifiables).
     - "insufficient_data" : ne rien faire — un capteur muet ne prouve ni
       n'infirme rien, jamais une fermeture ou une ouverture sur cette base."""
-    result = await _compute_stock_reconciliation(db, tank, day)
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     if result["status"] == "discrepancy":
@@ -5880,6 +5893,17 @@ async def _trigger_stock_discrepancy_alert(db: AsyncSession, tank: Tank, day: da
             db, station_id=tank.stationId, tank_id=tank.id, product_id=tank.fuelProductId,
             alert_type="stock_declared_discrepancy", resolved_at=now,
         )
+
+
+async def _trigger_stock_discrepancy_alert(db: AsyncSession, tank: Tank, day: date) -> None:
+    """Déclenché juste après chaque déclaration de vente réussie
+    (`create_sale`/`bulk_import_sales`) — mission détection de pertes phase 2
+    (2026-09-18) : jamais de tâche planifiée dans cette application (aucune
+    n'existe), donc c'est l'événement de déclaration lui-même qui réveille
+    la vérification, pas une horloge. Ne bloque jamais la déclaration de
+    vente elle-même : les appelants entourent cet appel d'un try/except."""
+    result = await _compute_stock_reconciliation(db, tank, day)
+    await _apply_stock_discrepancy_alert(db, tank, result)
     await db.commit()
 
 

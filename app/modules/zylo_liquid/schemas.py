@@ -314,6 +314,28 @@ class TankResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CreatePumpRequest(BaseModel):
+    stationId: uuid.UUID
+    tankId: uuid.UUID
+    name: str = Field(min_length=1, max_length=100)
+
+
+class UpdatePumpRequest(BaseModel):
+    tankId: uuid.UUID | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    active: bool | None = None
+
+
+class PumpResponse(BaseModel):
+    id: uuid.UUID
+    stationId: uuid.UUID
+    tankId: uuid.UUID
+    name: str
+    active: bool
+
+    model_config = {"from_attributes": True}
+
+
 class CreateTankSensorMappingRequest(BaseModel):
     tankId: uuid.UUID
     hkSerialNumber: str = Field(min_length=1, max_length=100)
@@ -1229,6 +1251,27 @@ class StationReconciliationSettingsResponse(BaseModel):
     qualityCheckWindowHours: float | None
 
     model_config = {"from_attributes": True}
+
+
+class DeliveryReconciliationCandidateResponse(BaseModel):
+    """Une détection candidate pour le rapprochement MANUEL d'une ligne de
+    livraison déclarée (mission « rapprochement manuel », 2026-09-17,
+    validée scénario par scénario) — jamais un choix silencieux comme
+    l'automatique (qui prend toujours la plus proche en temps) : la
+    personne habilitée voit tous les candidats de la fenêtre et choisit
+    elle-même. `alreadyReconciledWith` signale qu'une autre ligne, encore
+    active, utilise déjà ce candidat (scénario "détection consommée deux
+    fois") — jamais bloqué d'office, mais jamais silencieux non plus :
+    l'action de confirmation doit exiger `force=true` pour ce cas."""
+
+    detected: DeliveryDetectedResponse
+    deltaMinutes: float = Field(description="Écart en minutes entre l'heure déclarée et le début de cette détection — permet de trier/juger sans recalcul côté client.")
+    alreadyReconciledWith: uuid.UUID | None = Field(default=None, description="Id de la ligne de déclaration (DeliveryDeclarationLine) qui utilise déjà ce candidat comme contrepartie confirmée (matched/discrepancy), si applicable.")
+
+
+class ManualReconcileDeliveryDeclarationLineRequest(BaseModel):
+    detectedId: uuid.UUID
+    force: bool = Field(default=False, description="Obligatoire à true si `detectedId` est déjà utilisé par une autre ligne active — confirme sciemment un rapprochement partagé plutôt que de le refuser silencieusement.")
 
 
 class ReconciliationRecordResponse(BaseModel):

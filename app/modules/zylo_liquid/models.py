@@ -433,6 +433,30 @@ class Tank(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class Pump(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Pompe physique de distribution, rattachée à une cuve — détermine le
+    produit vendu (pas de champ produit séparé). Pour la vente/rapprochement
+    (déclaration de volume vendu par pompe/shift) : la déclaration elle-même
+    est hors périmètre de cette Phase, seul le référentiel CRUD est construit
+    ici. Une pompe n'est jamais supprimée, seulement désactivée (`active`),
+    pour préserver l'historique — même convention que `Tank.active`."""
+
+    __tablename__ = "zyloLiquidPump"
+    __table_args__ = (
+        {"comment": "Pompe de distribution rattachée à une cuve (référentiel, sans logique de déclaration de vente)."},
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    tankId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    active: Mapped[bool] = mapped_column(nullable=False, default=True)
+
+
 class TankSensorMapping(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "zyloLiquidTankSensorMapping"
     __table_args__ = (

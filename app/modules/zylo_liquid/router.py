@@ -20,7 +20,7 @@ from app.modules.zylo_liquid.algorithms import (
     DELIVERY_STABILIZATION_MINUTES,
     LEAK_THRESHOLD_LPH,
 )
-from app.modules.zylo_liquid.models import FuelProduct, HolykellAccount, Station, Tank, TankSensorMapping
+from app.modules.zylo_liquid.models import FuelProduct, HolykellAccount, Pump, Station, Tank, TankSensorMapping
 from app.modules.zylo_liquid.permissions import (
     CASH_READ,
     DELIVERY_READ,
@@ -30,6 +30,8 @@ from app.modules.zylo_liquid.permissions import (
     LEAK_EVENT_READ,
     PRICE_HISTORY_CREATE,
     PRICE_HISTORY_READ,
+    PUMP_MANAGE,
+    PUMP_READ,
     STATION_FUEL_PRODUCT_MANAGE,
     STATION_FUEL_PRODUCT_READ,
     STATION_MANAGE,
@@ -67,6 +69,9 @@ from app.modules.zylo_liquid.schemas import (
     CreateStationFuelProductRequest,
     CreateStationRequest,
     CreateSupplierRequest,
+    CreatePumpRequest,
+    UpdatePumpRequest,
+    PumpResponse,
     CreateTankRequest,
     CreateTankSensorMappingRequest,
     CreateTruckRequest,
@@ -74,6 +79,8 @@ from app.modules.zylo_liquid.schemas import (
     CreatePriceHistoryRequest,
     DeliveryDeclarationResponse,
     DeliveryDetectedResponse,
+    DeliveryReconciliationCandidateResponse,
+    ManualReconcileDeliveryDeclarationLineRequest,
     DriverResponse,
     FuelProductResponse,
     IncidentDeclarationResponse,
@@ -186,6 +193,15 @@ async def _tank_station_scope(db: AsyncSession, organization_id: uuid.UUID, path
         return None, None
     tank = await service.get_tank(db, organization_id, uuid.UUID(str(raw_id)))
     return "station", tank.stationId
+
+
+async def _pump_station_scope(db: AsyncSession, organization_id: uuid.UUID, path_params: dict) -> tuple[str | None, uuid.UUID | None]:
+    """Une pompe n'a pas de portée propre : même principe que `_tank_station_scope`."""
+    raw_id = path_params.get("pump_id")
+    if raw_id is None:
+        return None, None
+    pump = await service.get_pump(db, organization_id, uuid.UUID(str(raw_id)))
+    return "station", pump.stationId
 
 
 # _alert_station_scope — déplacée vers `app/alerts/router.py` (2026-09-15,
@@ -598,6 +614,76 @@ async def update_tank(
     db: AsyncSession = Depends(get_db),
 ) -> Tank:
     return await service.update_tank(db, organization_id, current_user.id, tank_id, data)
+
+
+@router.post(
+    "/pumps",
+    response_model=PumpResponse,
+    status_code=201,
+    dependencies=[Depends(require_permission(PUMP_MANAGE))],
+    summary="Créer une pompe",
+    description=(
+        "Crée une pompe rattachée à une cuve (le produit vendu se déduit de la cuve, pas de champ produit "
+        "séparé). La pompe n'a pas de portée RBAC propre : les droits s'évaluent via la station qui la "
+        "contient (cf. `_pump_station_scope`)."
+    ),
+)
+async def create_pump(
+    data: CreatePumpRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Pump:
+    return await service.create_pump(db, organization_id, current_user.id, data)
+
+
+@router.get(
+    "/pumps",
+    response_model=Page[PumpResponse],
+    summary="Lister les pompes",
+    description="Liste paginée des pompes, filtrable par station et par statut actif/inactif.",
+)
+async def list_pumps(
+    pagination: PaginationParams = Depends(),
+    stationId: uuid.UUID | None = None,
+    active: bool | None = None,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    return await service.list_pumps(db, organization_id, current_user.id, pagination, stationId, active)
+
+
+@router.get(
+    "/pumps/{pump_id}",
+    response_model=PumpResponse,
+    dependencies=[Depends(require_permission_scoped_via(PUMP_READ, _pump_station_scope))],
+    summary="Détail d'une pompe",
+    description="Retourne une pompe par son identifiant.",
+)
+async def get_pump(
+    pump_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Pump:
+    return await service.get_pump(db, organization_id, pump_id)
+
+
+@router.patch(
+    "/pumps/{pump_id}",
+    response_model=PumpResponse,
+    dependencies=[Depends(require_permission_scoped_via(PUMP_MANAGE, _pump_station_scope))],
+    summary="Modifier une pompe",
+    description="Met à jour partiellement une pompe (cuve rattachée, nom, statut actif). Jamais la station, immuable après création.",
+)
+async def update_pump(
+    pump_id: uuid.UUID,
+    data: UpdatePumpRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Pump:
+    return await service.update_pump(db, organization_id, current_user.id, pump_id, data)
 
 
 @router.post(
@@ -2152,6 +2238,27 @@ async def reconcile_delivery_declaration(
     db: AsyncSession = Depends(get_db),
 ) -> list[ReconciliationRecordResponse]:
     return await service.evaluate_delivery_declaration_reconciliation(db, organization_id, current_user.id, declaration_id)
+
+
+@router.get("/delivery-declaration-lines/{line_id}/reconciliation-candidates", response_model=list[DeliveryReconciliationCandidateResponse])
+async def list_delivery_declaration_line_reconciliation_candidates(
+    line_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[DeliveryReconciliationCandidateResponse]:
+    return await service.list_delivery_declaration_line_reconciliation_candidates(db, organization_id, current_user.id, line_id)
+
+
+@router.post("/delivery-declaration-lines/{line_id}/reconcile-manual", response_model=ReconciliationRecordResponse)
+async def manually_reconcile_delivery_declaration_line(
+    line_id: uuid.UUID,
+    data: ManualReconcileDeliveryDeclarationLineRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> ReconciliationRecordResponse:
+    return await service.manually_reconcile_delivery_declaration_line(db, organization_id, current_user.id, line_id, data)
 
 
 @router.post("/manual-gauging-declarations/{declaration_id}/reconcile", response_model=ReconciliationRecordResponse)

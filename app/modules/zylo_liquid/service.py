@@ -5008,6 +5008,10 @@ async def create_sale(db: AsyncSession, organization_id: uuid.UUID, actor_user_i
         raise AppError(code="vehicle_not_found", message="Véhicule introuvable.", status_code=404)
     if data.driverId is not None and await db.get(Driver, data.driverId) is None:
         raise AppError(code="driver_not_found", message="Conducteur introuvable.", status_code=404)
+    if data.pumpId is not None:
+        pump = await db.get(Pump, data.pumpId)
+        if pump is None or pump.stationId != station.id:
+            raise AppError(code="pump_not_found", message="Pompe introuvable pour cette station.", status_code=404)
 
     sale = Sale(
         stationId=station.id,
@@ -5021,6 +5025,7 @@ async def create_sale(db: AsyncSession, organization_id: uuid.UUID, actor_user_i
         commercialAccountId=data.commercialAccountId,
         vehicleId=data.vehicleId,
         driverId=data.driverId,
+        pumpId=data.pumpId,
     )
     db.add(sale)
     await db.flush()

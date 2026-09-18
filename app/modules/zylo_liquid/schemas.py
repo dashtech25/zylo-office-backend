@@ -1151,6 +1151,7 @@ class CreateSaleRequest(BaseModel):
     commercialAccountId: uuid.UUID | None = None
     vehicleId: uuid.UUID | None = None
     driverId: uuid.UUID | None = None
+    pumpId: uuid.UUID | None = None
 
     @field_validator("paymentMethod")
     @classmethod
@@ -1175,6 +1176,7 @@ class SaleResponse(BaseModel):
     commercialAccountId: uuid.UUID | None
     vehicleId: uuid.UUID | None
     driverId: uuid.UUID | None
+    pumpId: uuid.UUID | None
 
     model_config = {"from_attributes": True}
 

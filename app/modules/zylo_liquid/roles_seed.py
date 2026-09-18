@@ -21,6 +21,8 @@ from app.modules.zylo_liquid.permissions import (
     PRODUCT_SALE_CANCEL,
     PRODUCT_SALE_CREATE,
     PRODUCT_SALE_READ,
+    PUMP_MANAGE,
+    PUMP_READ,
     REGULATORY_DECLARATION_MANAGE,
     REGULATORY_DECLARATION_READ,
     REGULATORY_DOCUMENT_ARCHIVE,
@@ -200,6 +202,8 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
             FUEL_PRODUCT_READ,
             TANK_READ,
             TANK_MANAGE,
+            PUMP_READ,
+            PUMP_MANAGE,
             TANK_SENSOR_MAPPING_READ,
             TANK_SENSOR_MAPPING_MANAGE,
             TANK_CALIBRATION_READ,
@@ -265,6 +269,7 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
         [
             STATION_READ,
             TANK_READ,
+            PUMP_READ,
             ALERT_READ,
             ALERT_ACKNOWLEDGE,
             DELIVERY_READ,
@@ -290,6 +295,7 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
         [
             STATION_READ,
             TANK_READ,
+            PUMP_READ,
             ALERT_READ,
             CASH_READ,
             DELIVERY_READ,
@@ -349,6 +355,7 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
         [
             STATION_READ,
             TANK_READ,
+            PUMP_READ,
             ALERT_READ,
             DELIVERY_READ,
             LEAK_EVENT_READ,

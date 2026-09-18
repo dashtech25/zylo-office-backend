@@ -101,6 +101,7 @@ from app.modules.zylo_liquid.permissions import (
     SUPPLIER_MANAGE,
     SUPPLIER_READ,
     TANK_READ,
+    PUMP_READ,
 )
 from app.rbac.service import list_visible_resource_ids, user_has_permission
 from app.modules.zylo_liquid.algorithms import (
@@ -143,6 +144,7 @@ from app.modules.zylo_liquid.models import (
     ManualGaugingDeclaration,
     Payment,
     PriceHistory,
+    Pump,
     SellableProductPrice,
     ProductSaleLine,
     ProductSaleTransaction,
@@ -193,6 +195,9 @@ from app.modules.zylo_liquid.schemas import (
     CreateManualGaugingDeclarationRequest,
     CreatePaymentRequest,
     CreatePriceHistoryRequest,
+    CreatePumpRequest,
+    UpdatePumpRequest,
+    PumpResponse,
     CreatePurchaseOrderRequest,
     CreateQualityCheckDeclarationRequest,
     GeneratePurchaseOrderDocumentRequest,
@@ -209,6 +214,8 @@ from app.modules.zylo_liquid.schemas import (
     DeliveryDeclarationLineResponse,
     DeliveryDeclarationResponse,
     DeliveryDetectedResponse,
+    DeliveryReconciliationCandidateResponse,
+    ManualReconcileDeliveryDeclarationLineRequest,
     DeliveryInProgressResponse,
     DriverResponse,
     HolykellSensorLiveState,
@@ -987,6 +994,118 @@ async def list_tanks(
     result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
     tanks = result.scalars().all()
     data = [TankResponse.model_validate(tank) for tank in tanks]
+    return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
+
+
+async def create_pump(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreatePumpRequest) -> Pump:
+    await get_station(db, organization_id, data.stationId)  # lève station_not_found si hors périmètre
+    tank = await get_tank(db, organization_id, data.tankId)
+    if tank.stationId != data.stationId:
+        raise AppError(
+            code="pump_tank_station_mismatch",
+            message="La cuve sélectionnée n'appartient pas à la station de la pompe.",
+            status_code=422,
+        )
+
+    pump = Pump(stationId=data.stationId, tankId=data.tankId, name=data.name)
+    db.add(pump)
+    await db.flush()
+    await record_audit_event(
+        db,
+        organization_id,
+        actor_user_id,
+        action="zyloLiquid.pump.create",
+        entity_type="Pump",
+        entity_id=pump.id,
+        summary=f"Création de la pompe {pump.name}",
+        scope_resource_type="station",
+        scope_resource_id=pump.stationId,
+    )
+    await db.commit()
+    await db.refresh(pump)
+    return pump
+
+
+async def _assert_pump_station_in_organization(db: AsyncSession, organization_id: uuid.UUID, pump: Pump) -> None:
+    result = await db.execute(
+        select(Station.id).where(Station.id == pump.stationId, Station.organizationId == organization_id)
+    )
+    if result.scalar_one_or_none() is None:
+        raise AppError(code="pump_not_found", message="Pompe introuvable.", status_code=404)
+
+
+async def get_pump(db: AsyncSession, organization_id: uuid.UUID, pump_id: uuid.UUID) -> Pump:
+    result = await db.execute(select(Pump).where(Pump.id == pump_id))
+    pump = result.scalar_one_or_none()
+    if pump is None:
+        raise AppError(code="pump_not_found", message="Pompe introuvable.", status_code=404)
+    await _assert_pump_station_in_organization(db, organization_id, pump)
+    return pump
+
+
+async def update_pump(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, pump_id: uuid.UUID, data: UpdatePumpRequest
+) -> Pump:
+    pump = await get_pump(db, organization_id, pump_id)
+    updates = data.model_dump(exclude_unset=True)
+
+    if "tankId" in updates and updates["tankId"] is not None:
+        tank = await get_tank(db, organization_id, updates["tankId"])
+        if tank.stationId != pump.stationId:
+            raise AppError(
+                code="pump_tank_station_mismatch",
+                message="La cuve sélectionnée n'appartient pas à la station de la pompe.",
+                status_code=422,
+            )
+
+    before = {field: getattr(pump, field) for field in updates}
+    for field, value in updates.items():
+        setattr(pump, field, value)
+
+    await record_audit_event(
+        db,
+        organization_id,
+        actor_user_id,
+        action="zyloLiquid.pump.update",
+        entity_type="Pump",
+        entity_id=pump.id,
+        summary=f"Modification de la pompe {pump.name}",
+        changes={field: {"before": str(before[field]), "after": str(updates[field])} for field in updates},
+        scope_resource_type="station",
+        scope_resource_id=pump.stationId,
+    )
+    await db.commit()
+    await db.refresh(pump)
+    return pump
+
+
+async def list_pumps(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    pagination: PaginationParams,
+    station_id: uuid.UUID | None,
+    active: bool | None,
+) -> Page:
+    """Une pompe n'a pas de portée propre : filtrée par la STATION visible de
+    l'utilisateur, même principe que `list_tanks`/`_tank_station_scope`."""
+    sees_all, visible_station_ids = await list_visible_resource_ids(db, actor_user_id, organization_id, PUMP_READ, "station")
+    if not sees_all and not visible_station_ids:
+        raise AppError(code="permission_denied", message=f"Permission manquante : {PUMP_READ}.", status_code=403)
+
+    stmt = select(Pump).join(Station, Station.id == Pump.stationId).where(Station.organizationId == organization_id)
+    if not sees_all:
+        stmt = stmt.where(Pump.stationId.in_(visible_station_ids))
+    if station_id is not None:
+        stmt = stmt.where(Pump.stationId == station_id)
+    if active is not None:
+        stmt = stmt.where(Pump.active.is_(active))
+    stmt = stmt.order_by(Pump.name)
+
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
+    result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
+    pumps = result.scalars().all()
+    data = [PumpResponse.model_validate(pump) for pump in pumps]
     return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
 
 
@@ -5089,6 +5208,7 @@ async def _record_reconciliation(
     discrepancy_value: float | None,
     discrepancy_unit: str | None,
     tolerance_applied: float | None,
+    evaluated_by_user_id: uuid.UUID | None = None,
 ) -> ReconciliationRecord:
     record = ReconciliationRecord(
         subjectType=subject_type,
@@ -5101,11 +5221,45 @@ async def _record_reconciliation(
         discrepancyUnit=discrepancy_unit,
         toleranceApplied=tolerance_applied,
         evaluatedAt=datetime.now(timezone.utc).replace(tzinfo=None),
-        evaluatedByUserId=None,  # calcul automatique — jamais une chaîne magique "system" (Phase 6 §2)
+        # None = calcul automatique — jamais une chaîne magique "system"
+        # (Phase 6 §2) ; un rapprochement MANUEL (mission « rapprochement
+        # manuel », 2026-09-17) passe l'acteur humain qui a choisi le
+        # candidat, pour distinguer clairement les deux dans l'historique.
+        evaluatedByUserId=evaluated_by_user_id,
     )
     db.add(record)
     await db.flush()
     return record
+
+
+async def _find_active_line_using_detected(db: AsyncSession, detected_id: uuid.UUID, exclude_line_id: uuid.UUID | None = None) -> DeliveryDeclarationLine | None:
+    """Cherche si une détection sert déjà de contrepartie CONFIRMÉE (matched
+    ou discrepancy — jamais "pending"/"insufficient_data", qui ne
+    consomment rien) à une ligne de déclaration encore ACTIVE (non
+    supplantée par une correction ciblée). Sert à éviter qu'une même montée
+    de niveau physique soit silencieusement rapprochée avec deux
+    déclarations différentes (scénario 4, validé avec le commanditaire) —
+    jamais un blocage dur, juste un signal explicite avant confirmation."""
+    superseded_line_ids = select(DeliveryDeclarationLine.correctsLineId).where(DeliveryDeclarationLine.correctsLineId.is_not(None))
+    stmt = (
+        select(DeliveryDeclarationLine)
+        .join(ReconciliationRecord, ReconciliationRecord.id == DeliveryDeclarationLine.reconciledWithId)
+        .where(
+            ReconciliationRecord.counterpartType == "DeliveryDetected",
+            ReconciliationRecord.counterpartId == str(detected_id),
+            ReconciliationRecord.status.in_(("matched", "discrepancy")),
+            DeliveryDeclarationLine.id.not_in(superseded_line_ids),
+        )
+    )
+    if exclude_line_id is not None:
+        stmt = stmt.where(DeliveryDeclarationLine.id != exclude_line_id)
+    result = await db.execute(stmt.limit(1))
+    return result.scalar_one_or_none()
+
+
+async def _is_delivery_declaration_line_superseded(db: AsyncSession, line_id: uuid.UUID) -> bool:
+    result = await db.execute(select(DeliveryDeclarationLine.id).where(DeliveryDeclarationLine.correctsLineId == line_id).limit(1))
+    return result.scalar_one_or_none() is not None
 
 
 async def _evaluate_delivery_declaration_line_reconciliation_core(db: AsyncSession, declaration: DeliveryDeclaration, line: DeliveryDeclarationLine) -> ReconciliationRecord:
@@ -5142,6 +5296,15 @@ async def _evaluate_delivery_declaration_line_reconciliation_core(db: AsyncSessi
     )
     best, best_delta = None, None
     for candidate in candidates_result.scalars().all():
+        # Scénario 4 (validé avec le commanditaire) : une détection déjà
+        # confirmée (matched/discrepancy) pour une AUTRE ligne active ne
+        # doit plus être proposée automatiquement — une même montée de
+        # niveau physique ne correspond jamais à deux livraisons distinctes.
+        # Reste disponible en rapprochement MANUEL (voir
+        # `list_delivery_declaration_line_reconciliation_candidates`), avec
+        # confirmation explicite requise (`force=true`).
+        if await _find_active_line_using_detected(db, candidate.id, exclude_line_id=line.id) is not None:
+            continue
         delta = abs((candidate.startTime - declaration.eventAt).total_seconds())
         if best_delta is None or delta < best_delta:
             best, best_delta = candidate, delta
@@ -5202,6 +5365,111 @@ async def evaluate_delivery_declaration_reconciliation(db: AsyncSession, organiz
     lines = await _load_delivery_declaration_lines(db, declaration.id)
     records = [await _evaluate_delivery_declaration_line_reconciliation_core(db, declaration, line) for line in lines]
     return [ReconciliationRecordResponse.model_validate(r) for r in records]
+
+
+async def _get_delivery_declaration_line_and_context(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, line_id: uuid.UUID) -> tuple[DeliveryDeclarationLine, DeliveryDeclaration, Station]:
+    line = await db.get(DeliveryDeclarationLine, line_id)
+    if line is None:
+        raise AppError(code="delivery_declaration_line_not_found", message="Ligne de livraison introuvable.", status_code=404)
+    declaration = await db.get(DeliveryDeclaration, line.declarationId)
+    station = await db.get(Station, declaration.stationId) if declaration is not None else None
+    if declaration is None or station is None or station.organizationId != organization_id:
+        raise AppError(code="delivery_declaration_line_not_found", message="Ligne de livraison introuvable.", status_code=404)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, RECONCILIATION_READ)
+    return line, declaration, station
+
+
+async def list_delivery_declaration_line_reconciliation_candidates(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, line_id: uuid.UUID
+) -> list[DeliveryReconciliationCandidateResponse]:
+    """Liste des détections candidates pour le rapprochement MANUEL d'une
+    ligne (mission « rapprochement manuel », 2026-09-17) — jamais un choix
+    silencieux : la personne habilitée voit tous les candidats de la
+    fenêtre, avec leur écart en temps et un signal explicite si un autre
+    candidat est déjà utilisé ailleurs (scénario 4)."""
+    line, declaration, _station = await _get_delivery_declaration_line_and_context(db, organization_id, actor_user_id, line_id)
+    settings = await _get_reconciliation_settings(db, declaration.stationId)
+    window_hours = _tolerance(settings, "deliveryWindowHours", RECONCILIATION_DELIVERY_WINDOW_HOURS_DEFAULT)
+    window_start = declaration.eventAt - timedelta(hours=window_hours)
+    window_end = declaration.eventAt + timedelta(hours=window_hours)
+    result = await db.execute(
+        select(DeliveryDetected)
+        .where(DeliveryDetected.tankId == line.tankId, DeliveryDetected.startTime >= window_start, DeliveryDetected.startTime <= window_end)
+        .order_by(DeliveryDetected.startTime.asc())
+    )
+    tank = await db.get(Tank, line.tankId)
+    candidates: list[DeliveryReconciliationCandidateResponse] = []
+    for detected in result.scalars().all():
+        delta_minutes = abs((detected.startTime - declaration.eventAt).total_seconds()) / 60
+        used_by = await _find_active_line_using_detected(db, detected.id, exclude_line_id=line.id)
+        candidates.append(
+            DeliveryReconciliationCandidateResponse(
+                detected=_delivery_to_response(detected, tank),
+                deltaMinutes=round(delta_minutes, 1),
+                alreadyReconciledWith=used_by.id if used_by is not None else None,
+            )
+        )
+    return candidates
+
+
+async def manually_reconcile_delivery_declaration_line(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, line_id: uuid.UUID, data: ManualReconcileDeliveryDeclarationLineRequest
+) -> ReconciliationRecordResponse:
+    """Rapprochement MANUEL : la personne habilitée choisit elle-même la
+    détection avec laquelle rapprocher cette ligne, plutôt que de subir le
+    choix automatique « la plus proche en temps » — utile quand plusieurs
+    candidats existent dans la fenêtre (scénario 3) ou que l'automatique
+    n'a rien trouvé (fenêtre mal calée, scénario 6 : le choix manuel n'a
+    pas la même contrainte de fenêtre stricte que l'automatique, la
+    personne peut choisir n'importe quel candidat listé). Une ligne déjà
+    remplacée par une correction ciblée ne peut plus être rapprochée — le
+    rapprochement doit se faire sur la nouvelle ligne (scénario 5)."""
+    line, declaration, _station = await _get_delivery_declaration_line_and_context(db, organization_id, actor_user_id, line_id)
+    if await _is_delivery_declaration_line_superseded(db, line.id):
+        raise AppError(code="delivery_declaration_line_superseded", message="Cette ligne a été remplacée par une correction — rapprochez la nouvelle ligne.", status_code=409)
+
+    detected = await db.get(DeliveryDetected, data.detectedId)
+    if detected is None or detected.tankId != line.tankId:
+        raise AppError(code="delivery_detected_not_found", message="Détection introuvable pour cette cuve.", status_code=404)
+
+    used_by = await _find_active_line_using_detected(db, detected.id, exclude_line_id=line.id)
+    if used_by is not None and not data.force:
+        raise AppError(
+            code="delivery_detected_already_reconciled",
+            message="Cette détection est déjà rapprochée avec une autre ligne — confirmez explicitement (force) pour la partager quand même.",
+            status_code=409,
+        )
+
+    settings = await _get_reconciliation_settings(db, declaration.stationId)
+    fixed_tolerance = _tolerance(settings, "deliveryVolumeToleranceFixedLiters", RECONCILIATION_DELIVERY_VOLUME_TOLERANCE_FIXED_LITERS_DEFAULT)
+    percent_tolerance = _tolerance(settings, "deliveryVolumeTolerancePercent", RECONCILIATION_DELIVERY_VOLUME_TOLERANCE_PERCENT_DEFAULT)
+
+    if detected.volumeLiters is None:
+        status, discrepancy_value, tolerance_applied = "insufficient_data", None, None
+    else:
+        tolerance_applied = max(fixed_tolerance, float(line.volumeLiters) * percent_tolerance / 100)
+        discrepancy_value = abs(float(line.volumeLiters) - float(detected.volumeLiters))
+        status = "matched" if discrepancy_value <= tolerance_applied else "discrepancy"
+
+    record = await _record_reconciliation(
+        db, "DeliveryDeclarationLine", line.id, "DeliveryDetected", str(detected.id),
+        "quantitative", status, discrepancy_value, "liters" if discrepancy_value is not None else None, tolerance_applied,
+        evaluated_by_user_id=actor_user_id,
+    )
+    line.reconciledWithId = record.id
+    line.reconciledWithType = "ReconciliationRecord"
+
+    if status == "discrepancy":
+        await _create_alert_if_not_already_active(db, line.tankId, "delivery_discrepancy", declaration.eventAt, discrepancy_value, tolerance_applied)
+    elif status == "matched":
+        resolved_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        await alerts_service.auto_resolve_alert(db, station_id=declaration.stationId, tank_id=line.tankId, product_id=None, alert_type="delivery_discrepancy", resolved_at=resolved_at)
+        await alerts_service.auto_resolve_alert(db, station_id=declaration.stationId, tank_id=line.tankId, product_id=None, alert_type="delivery_undeclared", resolved_at=resolved_at)
+        await alerts_service.auto_resolve_alert(db, station_id=declaration.stationId, tank_id=line.tankId, product_id=None, alert_type="delivery_declaration_pending", resolved_at=resolved_at)
+
+    await db.commit()
+    await db.refresh(record)
+    return ReconciliationRecordResponse.model_validate(record)
 
 
 async def _sweep_stale_pending_delivery_declarations(db: AsyncSession, station_id: uuid.UUID) -> None:

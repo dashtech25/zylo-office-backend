@@ -6,6 +6,7 @@ from app.auth.router import router as auth_router
 from app.billing.router import router as billing_router
 from app.files.router import router as files_router
 from app.identity.router import router as organizations_router
+from app.identity.router import users_router
 from app.location.router import router as location_router
 from app.modules.zylo_liquid.router import router as zylo_liquid_router
 from app.modules.zylo_tanker.router import router as zylo_tanker_router
@@ -22,6 +23,7 @@ api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 api_router.include_router(organizations_router, prefix="/organizations", tags=["organizations"])
+api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(modules_router, prefix="/modules", tags=["modules"])
 api_router.include_router(rbac_router, prefix="/rbac", tags=["rbac"])
 api_router.include_router(audit_router, prefix="/audit", tags=["audit"])

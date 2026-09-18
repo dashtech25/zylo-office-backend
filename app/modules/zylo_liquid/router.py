@@ -140,6 +140,8 @@ from app.modules.zylo_liquid.schemas import (
     UpdateTruckRequest,
     AssignInterventionRequest,
     CloseInterventionRequest,
+    BulkImportSalesRequest,
+    BulkImportSalesResponse,
     BulkImportSellableProductsRequest,
     BulkImportSellableProductsResponse,
     CreateEquipmentRequest,
@@ -1691,6 +1693,16 @@ async def list_sales(
     db: AsyncSession = Depends(get_db),
 ) -> Page:
     return await service.list_sales(db, organization_id, current_user.id, pagination, stationId)
+
+
+@router.post("/sales/bulk-import", response_model=BulkImportSalesResponse)
+async def bulk_import_sales(
+    data: BulkImportSalesRequest,
+    current_user: User = Depends(get_current_user),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> BulkImportSalesResponse:
+    return await service.bulk_import_sales(db, organization_id, current_user.id, data)
 
 
 @router.get("/receivables", response_model=Page[ReceivableResponse])

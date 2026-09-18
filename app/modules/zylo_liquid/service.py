@@ -291,6 +291,8 @@ from app.modules.zylo_liquid.schemas import (
     UpdateTruckRequest,
     AssignInterventionRequest,
     BulkImportRowError,
+    BulkImportSalesRequest,
+    BulkImportSalesResponse,
     BulkImportSellableProductsRequest,
     BulkImportSellableProductsResponse,
     CloseInterventionRequest,
@@ -5036,6 +5038,119 @@ async def create_sale(db: AsyncSession, organization_id: uuid.UUID, actor_user_i
     await db.commit()
     await db.refresh(sale)
     return SaleResponse.model_validate(sale)
+
+
+async def bulk_import_sales(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: BulkImportSalesRequest
+) -> BulkImportSalesResponse:
+    """Dernière ligne de défense d'un import de ventes (même philosophie que
+    bulk_import_sellable_products) — chaque ligne est vérifiée et insérée
+    indépendamment (savepoint) pour qu'une ligne invalide n'annule jamais les
+    lignes valides du même fichier, tout en rapportant une erreur précise
+    par ligne (jamais un rejet global opaque). Reprend telles quelles les
+    règles métier de create_sale (portée de déclaration, pompe de la
+    station, limite de crédit)."""
+    created_count = 0
+    errors: list[BulkImportRowError] = []
+    station_cache: dict[uuid.UUID, Station | None] = {}
+    currency_ids = {row.currencyId for row in data.rows}
+    known_currencies = set(
+        (await db.execute(select(Currency.id).where(Currency.id.in_(currency_ids)))).scalars().all()
+    )
+
+    for row in data.rows:
+        if row.indexEnd <= row.indexStart:
+            errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="L'index de fin doit être supérieur à l'index de début."))
+            continue
+
+        if row.stationId not in station_cache:
+            candidate = await db.get(Station, row.stationId)
+            station_cache[row.stationId] = candidate if candidate is not None and candidate.organizationId == organization_id else None
+        station = station_cache[row.stationId]
+        if station is None:
+            errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="Station introuvable dans cette organisation."))
+            continue
+
+        try:
+            await _check_declaration_scope(db, organization_id, actor_user_id, station, SALE_CREATE)
+        except AppError:
+            errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="Permission manquante pour déclarer une vente sur cette station."))
+            continue
+
+        pump = await db.get(Pump, row.pumpId)
+        if pump is None:
+            errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="Pompe introuvable."))
+            continue
+        if pump.stationId != station.id:
+            errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="Cette pompe n'appartient pas à la station indiquée."))
+            continue
+
+        tank = await db.get(Tank, pump.tankId)
+        if tank is None:
+            errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="Cuve associée à la pompe introuvable."))
+            continue
+        fuel_product_id = tank.fuelProductId
+
+        if row.currencyId not in known_currencies:
+            errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="Devise introuvable."))
+            continue
+
+        account: CommercialAccount | None = None
+        quantity_liters = row.indexEnd - row.indexStart
+        if row.paymentMethod == "credit":
+            if row.commercialAccountId is None:
+                errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="commercialAccountId est obligatoire pour une vente à crédit."))
+                continue
+            try:
+                account = await _get_commercial_account_or_404(db, organization_id, row.commercialAccountId)
+            except AppError:
+                errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="Compte client introuvable."))
+                continue
+            if not account.active:
+                errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="Ce compte client est inactif."))
+                continue
+            sale_amount = quantity_liters * row.priceAmount
+            outstanding_result = await db.execute(
+                select(func.coalesce(func.sum(Receivable.amount), 0)).where(
+                    Receivable.commercialAccountId == account.id, Receivable.status.in_(("open", "partially_settled"))
+                )
+            )
+            outstanding = float(outstanding_result.scalar_one())
+            if outstanding + sale_amount > float(account.creditLimit):
+                errors.append(
+                    BulkImportRowError(
+                        rowNumber=row.rowNumber,
+                        message=f"Cette vente dépasserait la limite de crédit du compte ({account.creditLimit}).",
+                    )
+                )
+                continue
+
+        try:
+            async with db.begin_nested():
+                sale = Sale(
+                    stationId=station.id,
+                    authorUserId=actor_user_id,
+                    eventAt=_to_naive_utc(row.eventAt),
+                    fuelProductId=fuel_product_id,
+                    quantityLiters=quantity_liters,
+                    priceAmount=row.priceAmount,
+                    currencyId=row.currencyId,
+                    paymentMethod=row.paymentMethod,
+                    commercialAccountId=row.commercialAccountId,
+                    pumpId=row.pumpId,
+                )
+                db.add(sale)
+                await db.flush()
+
+                if row.paymentMethod == "credit":
+                    db.add(Receivable(commercialAccountId=account.id, saleId=sale.id, amount=quantity_liters * row.priceAmount, currencyId=row.currencyId, status="open"))
+        except IntegrityError:
+            errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="Impossible d'enregistrer cette vente."))
+            continue
+        created_count += 1
+
+    await db.commit()
+    return BulkImportSalesResponse(createdCount=created_count, errors=errors)
 
 
 async def list_sales(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, pagination: PaginationParams, station_id: uuid.UUID | None) -> Page:

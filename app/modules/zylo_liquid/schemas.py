@@ -1852,6 +1852,43 @@ class BulkImportSellableProductsResponse(BaseModel):
     errors: list[BulkImportRowError]
 
 
+class BulkImportSaleRow(BaseModel):
+    """Une ligne déjà résolue côté client (noms -> ids déjà résolus avant
+    l'appel, même philosophie que BulkImportSellableProductRow) — ce
+    endpoint reste la dernière ligne de défense (règles métier : pompe
+    appartenant à la station, index cohérents, limite de crédit...), jamais
+    un simple passe-plat non vérifié."""
+
+    rowNumber: int
+    stationId: uuid.UUID
+    pumpId: uuid.UUID
+    indexStart: float = Field(ge=0)
+    indexEnd: float = Field(gt=0)
+    eventAt: datetime
+    priceAmount: float = Field(gt=0)
+    currencyId: uuid.UUID
+    paymentMethod: str
+    commercialAccountId: uuid.UUID | None = None
+
+    @field_validator("paymentMethod")
+    @classmethod
+    def _validate_payment_method(cls, value: str) -> str:
+        # Reflète exactement la contrainte CHECK de models.py (même validateur
+        # que CreateSaleRequest.paymentMethod).
+        if value not in PAYMENT_METHODS:
+            raise ValueError(f"paymentMethod doit être l'une des valeurs suivantes : {', '.join(PAYMENT_METHODS)}.")
+        return value
+
+
+class BulkImportSalesRequest(BaseModel):
+    rows: list[BulkImportSaleRow] = Field(min_length=1, max_length=500)
+
+
+class BulkImportSalesResponse(BaseModel):
+    createdCount: int
+    errors: list[BulkImportRowError]
+
+
 # ================================================================
 # Mission « vente-maintenant-reglementation » — Bloc 4 (corrigé) : ventes de
 # produits boutique. Entité séparée de Sale (cf. models.py, docstring

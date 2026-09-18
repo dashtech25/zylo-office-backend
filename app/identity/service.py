@@ -12,7 +12,7 @@ from app.core.errors import AppError
 from app.core.security import get_current_user
 from app.identity.models import Organization, OrganizationUser, User
 from app.identity.permissions import ORGANIZATION_MANAGE
-from app.identity.schemas import CreateOrganizationRequest, UpdateOrganizationRequest
+from app.identity.schemas import CreateOrganizationRequest, UpdateOrganizationRequest, UpdateUserProfileRequest
 from app.modules_registry.permissions import MODULE_MANAGE
 from app.rbac.models import Role, RolePermission, UserRole
 from app.rbac.permissions import GRANT_MANAGE, ROLE_MANAGE
@@ -163,6 +163,57 @@ async def update_organization(
     await db.commit()
     await db.refresh(organization)
     return organization
+
+
+async def _is_owner_of_target_user_organization(db: AsyncSession, actor_user_id: uuid.UUID, target_user_id: uuid.UUID) -> bool:
+    """Vrai si `actor_user_id` détient le rôle "owner" dans AU MOINS UNE des
+    organisations auxquelles appartient `target_user_id` — un owner d'une
+    organisation différente de celle de la cible reste refusé (pas de
+    fuite entre organisations), tout comme un membre non-owner de la MÊME
+    organisation que la cible."""
+    result = await db.execute(
+        select(UserRole.id)
+        .join(Role, Role.id == UserRole.roleId)
+        .join(
+            OrganizationUser,
+            (OrganizationUser.organizationId == UserRole.organizationId) & (OrganizationUser.userId == target_user_id),
+        )
+        .where(UserRole.userId == actor_user_id, Role.code == "owner")
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def update_user_profile(
+    db: AsyncSession, user_id: uuid.UUID, actor: User, data: UpdateUserProfileRequest
+) -> User:
+    """PATCH /users/{user_id} (module Personnel) — deux cas autorisés :
+    (a) l'utilisateur modifie sa propre photo (toujours permis, aucune
+    permission RBAC requise au-delà d'être authentifié) ; (b) un owner
+    d'une organisation modifie la photo d'un membre de CETTE organisation
+    (flux admin/config Personnel, en cours de construction côté frontend).
+    Tout autre cas est un 403 — jamais un 404 qui laisserait deviner
+    l'existence d'un compte à un tiers non autorisé."""
+    target = await db.get(User, user_id)
+    if target is None:
+        raise AppError(code="user_not_found", message="Utilisateur introuvable.", status_code=404)
+
+    if actor.id != target.id:
+        is_owner = await _is_owner_of_target_user_organization(db, actor.id, target.id)
+        if not is_owner:
+            raise AppError(
+                code="user_profile_forbidden",
+                message="Vous ne pouvez modifier que votre propre profil, ou celui d'un membre de votre organisation si vous en êtes propriétaire.",
+                status_code=403,
+            )
+
+    updates = data.model_dump(exclude_unset=True)
+    for field, value in updates.items():
+        setattr(target, field, value)
+
+    await db.commit()
+    await db.refresh(target)
+    return target
 
 
 async def require_organization_member(

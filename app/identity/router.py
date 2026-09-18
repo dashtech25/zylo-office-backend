@@ -1,15 +1,36 @@
+import uuid
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.schemas import UserResponse
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.identity import service
 from app.identity.models import Organization, User
 from app.identity.permissions import ORGANIZATION_MANAGE
-from app.identity.schemas import CreateOrganizationRequest, OrganizationResponse, UpdateOrganizationRequest
+from app.identity.schemas import CreateOrganizationRequest, OrganizationResponse, UpdateOrganizationRequest, UpdateUserProfileRequest
 from app.rbac.service import require_permission
 
 router = APIRouter()
+
+# Router séparé (préfixe /users) monté dans app/main.py à côté du router
+# /organizations — un même module `identity` peut exposer plusieurs préfixes,
+# jamais un nouveau module pour une seule route.
+users_router = APIRouter()
+
+
+@users_router.patch("/{user_id}", response_model=UserResponse)
+async def update_user_profile(
+    user_id: uuid.UUID,
+    data: UpdateUserProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Périmètre volontairement restreint à `photoStorageReference` pour
+    l'instant (voir UpdateUserProfileRequest) — self-service ou owner de
+    l'organisation de la cible, contrôlé dans `service.update_user_profile`."""
+    return await service.update_user_profile(db, user_id, current_user, data)
 
 
 @router.get("", response_model=list[OrganizationResponse])

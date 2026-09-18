@@ -33,6 +33,13 @@ class UserResponse(BaseModel):
     # (mot de passe temporaire) : le frontend force l'écran de changement
     # avant tout accès normal à l'application.
     mustChangePassword: bool = False
+    # Colonnes additives du module Personnel (voir app/identity/models.py) —
+    # réutilisées ici plutôt que de dupliquer un second schéma de réponse
+    # pour PATCH /users/{user_id} (identity/router.py).
+    firstName: str | None = None
+    lastName: str | None = None
+    phone: str | None = None
+    photoStorageReference: str | None = None
 
     model_config = {"from_attributes": True}
 

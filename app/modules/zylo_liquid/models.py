@@ -1130,6 +1130,7 @@ class Sale(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     commercialAccountId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidCommercialAccount.id", ondelete="RESTRICT"), nullable=True)
     vehicleId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidVehicle.id", ondelete="RESTRICT"), nullable=True)
     driverId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidDriver.id", ondelete="RESTRICT"), nullable=True)
+    pumpId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidPump.id", ondelete="RESTRICT"), nullable=True, index=True)
     declarationType: Mapped[str | None] = mapped_column(String(40), nullable=True)
     declarationId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 

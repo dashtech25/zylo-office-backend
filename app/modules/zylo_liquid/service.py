@@ -5037,6 +5037,19 @@ async def create_sale(db: AsyncSession, organization_id: uuid.UUID, actor_user_i
 
     await db.commit()
     await db.refresh(sale)
+
+    # Mission détection de pertes phase 2 (2026-09-18) : la déclaration
+    # elle-même réveille la vérification déclaré/détecté, jamais une tâche
+    # planifiée (aucune n'existe dans cette application). Ne bloque jamais
+    # la déclaration de vente : une panne de ce côté ne doit jamais empêcher
+    # un gérant de déclarer sa vente.
+    if data.pumpId is not None:
+        try:
+            tank = await get_tank(db, organization_id, pump.tankId)
+            await _trigger_stock_discrepancy_alert(db, tank, sale.eventAt.date())
+        except Exception:
+            logger.exception("Échec du déclenchement de l'alerte stock_declared_discrepancy après create_sale (sale=%s)", sale.id)
+
     return SaleResponse.model_validate(sale)
 
 
@@ -5057,6 +5070,11 @@ async def bulk_import_sales(
     known_currencies = set(
         (await db.execute(select(Currency.id).where(Currency.id.in_(currency_ids)))).scalars().all()
     )
+    # Mission détection de pertes phase 2 (2026-09-18) : une (cuve, jour)
+    # par ligne créée avec succès, dédupliquée — un import de plusieurs
+    # lignes sur la même cuve/jour ne déclenche qu'une seule vérification,
+    # après le commit final, jamais une par ligne.
+    tanks_days_to_check: dict[tuple[uuid.UUID, date], Tank] = {}
 
     for row in data.rows:
         if row.indexEnd <= row.indexStart:
@@ -5148,8 +5166,17 @@ async def bulk_import_sales(
             errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="Impossible d'enregistrer cette vente."))
             continue
         created_count += 1
+        tanks_days_to_check[(tank.id, _to_naive_utc(row.eventAt).date())] = tank
 
     await db.commit()
+
+    # Mission détection de pertes phase 2 : ne bloque jamais l'import lui-même.
+    for (_, day), tank in tanks_days_to_check.items():
+        try:
+            await _trigger_stock_discrepancy_alert(db, tank, day)
+        except Exception:
+            logger.exception("Échec du déclenchement de l'alerte stock_declared_discrepancy après bulk_import_sales (tank=%s, day=%s)", tank.id, day)
+
     return BulkImportSalesResponse(createdCount=created_count, errors=errors)
 
 
@@ -5751,16 +5778,13 @@ async def evaluate_quality_check_declaration_reconciliation(db: AsyncSession, or
     return ReconciliationRecordResponse.model_validate(record)
 
 
-async def evaluate_stock_reconciliation(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, tank_id: uuid.UUID, day: date) -> ReconciliationRecordResponse:
-    """Rapprochements n°1 (agrégé) et n°6 (le plus robuste) de Phase 4 v2
-    §6 — implémentation unique (Phase 6 §4.2 : même calcul, deux moments
-    d'intention différents) : ventes déclarées sur la journée pour cette
-    cuve, comparées à `TankCashDailyAggregate.volumeSoldLiters` (réutilisé
-    tel quel, aucun nouveau calcul télémétrique)."""
-    tank = await get_tank(db, organization_id, tank_id)
-    station = await db.get(Station, tank.stationId)
-    await _check_declaration_scope(db, organization_id, actor_user_id, station, RECONCILIATION_READ)
-
+async def _compute_stock_reconciliation(db: AsyncSession, tank: Tank, day: date) -> dict:
+    """Calcul pur (aucune vérification de permission, aucun effet de bord)
+    partagé par `evaluate_stock_reconciliation` (déclenchement manuel/à la
+    demande, Phase 4 v2 §6) et `_trigger_stock_discrepancy_alert`
+    (déclenchement automatique à la déclaration d'une vente, mission
+    détection de pertes phase 2, 2026-09-18) — un seul calcul, deux moments
+    d'intention différents, jamais deux implémentations divergentes."""
     day_start = datetime(day.year, day.month, day.day)
     day_end = day_start + timedelta(days=1)
 
@@ -5774,7 +5798,6 @@ async def evaluate_stock_reconciliation(db: AsyncSession, organization_id: uuid.
     cash_result = await _get_or_compute_tank_cash_for_day(db, tank, day_start, day_end)
     telemetric_volume = cash_result["volumeSoldLiters"]
 
-    subject_id = uuid.uuid5(uuid.NAMESPACE_URL, f"stock-reconciliation:{tank_id}:{day.isoformat()}")
     if telemetric_volume is None:
         status, discrepancy_value, tolerance_applied = "insufficient_data", None, None
     else:
@@ -5789,13 +5812,75 @@ async def evaluate_stock_reconciliation(db: AsyncSession, organization_id: uuid.
         discrepancy_value = abs(declared_volume - telemetric_volume)
         status = "matched" if discrepancy_value <= tolerance_applied else "discrepancy"
 
+    return {
+        "status": status,
+        "declaredVolume": declared_volume,
+        "telemetricVolume": telemetric_volume,
+        "discrepancyValue": discrepancy_value,
+        "toleranceApplied": tolerance_applied,
+    }
+
+
+async def evaluate_stock_reconciliation(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, tank_id: uuid.UUID, day: date) -> ReconciliationRecordResponse:
+    """Rapprochements n°1 (agrégé) et n°6 (le plus robuste) de Phase 4 v2
+    §6 — implémentation unique (Phase 6 §4.2 : même calcul, deux moments
+    d'intention différents) : ventes déclarées sur la journée pour cette
+    cuve, comparées à `TankCashDailyAggregate.volumeSoldLiters` (réutilisé
+    tel quel, aucun nouveau calcul télémétrique)."""
+    tank = await get_tank(db, organization_id, tank_id)
+    station = await db.get(Station, tank.stationId)
+    await _check_declaration_scope(db, organization_id, actor_user_id, station, RECONCILIATION_READ)
+
+    result = await _compute_stock_reconciliation(db, tank, day)
+    subject_id = uuid.uuid5(uuid.NAMESPACE_URL, f"stock-reconciliation:{tank_id}:{day.isoformat()}")
+    discrepancy_value = result["discrepancyValue"]
+
     record = await _record_reconciliation(
         db, "TankStockDay", subject_id, "TankCashDailyAggregate", f"{tank_id}:{day.isoformat()}",
-        "quantitative", status, discrepancy_value, "liters" if discrepancy_value is not None else None, tolerance_applied,
+        "quantitative", result["status"], discrepancy_value, "liters" if discrepancy_value is not None else None, result["toleranceApplied"],
     )
     await db.commit()
     await db.refresh(record)
     return ReconciliationRecordResponse.model_validate(record)
+
+
+async def _trigger_stock_discrepancy_alert(db: AsyncSession, tank: Tank, day: date) -> None:
+    """Déclenché juste après chaque déclaration de vente réussie
+    (`create_sale`/`bulk_import_sales`) — mission détection de pertes phase 2
+    (2026-09-18) : jamais de tâche planifiée dans cette application (aucune
+    n'existe), donc c'est l'événement de déclaration lui-même qui réveille
+    la vérification, pas une horloge. Ne bloque jamais la déclaration de
+    vente elle-même : les appelants entourent cet appel d'un try/except.
+
+    - "discrepancy" : ouvre/met à jour l'alerte (`upsert_active_alert`,
+      jamais de construction directe d'`Alert`, cf. `.importlinter`).
+    - "matched" : referme automatiquement une alerte encore ouverte, si son
+      écart a disparu (`auto_resolve_alert` — la même mécanique que les
+      autres alertes auto-vérifiables).
+    - "insufficient_data" : ne rien faire — un capteur muet ne prouve ni
+      n'infirme rien, jamais une fermeture ou une ouverture sur cette base."""
+    result = await _compute_stock_reconciliation(db, tank, day)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    if result["status"] == "discrepancy":
+        await alerts_service.upsert_active_alert(
+            db,
+            station_id=tank.stationId,
+            tank_id=tank.id,
+            product_id=tank.fuelProductId,
+            alert_type="stock_declared_discrepancy",
+            triggered_at=now,
+            triggered_value=result["discrepancyValue"],
+            threshold_value=result["toleranceApplied"],
+            source_type="TankStockDay",
+            source_id=tank.id,
+        )
+    elif result["status"] == "matched":
+        await alerts_service.auto_resolve_alert(
+            db, station_id=tank.stationId, tank_id=tank.id, product_id=tank.fuelProductId,
+            alert_type="stock_declared_discrepancy", resolved_at=now,
+        )
+    await db.commit()
 
 
 # ================================================================

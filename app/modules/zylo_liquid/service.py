@@ -5691,6 +5691,7 @@ async def evaluate_manual_gauging_declaration_reconciliation(db: AsyncSession, o
     declaration = await _get_declaration_or_404(db, ManualGaugingDeclaration, organization_id, declaration_id)
     station = await db.get(Station, declaration.stationId)
     await _check_declaration_scope(db, organization_id, actor_user_id, station, RECONCILIATION_READ)
+    tank = await db.get(Tank, declaration.tankId)
 
     settings = await _get_reconciliation_settings(db, declaration.stationId)
     tolerance = _tolerance(settings, "gaugingHeightToleranceMm", RECONCILIATION_GAUGING_HEIGHT_TOLERANCE_MM_DEFAULT)
@@ -5734,6 +5735,12 @@ async def evaluate_manual_gauging_declaration_reconciliation(db: AsyncSession, o
     )
     declaration.reconciledWithId = record.id
     declaration.reconciledWithType = "ReconciliationRecord"
+
+    try:
+        await _apply_manual_gauging_discrepancy_alert(db, tank, declaration.id, status, discrepancy_value, tolerance_applied)
+    except Exception:
+        logger.exception("Échec de la confirmation/annulation de l'alerte manual_gauging_discrepancy (declaration=%s)", declaration.id)
+
     await db.commit()
     await db.refresh(record)
     return ReconciliationRecordResponse.model_validate(record)
@@ -5748,6 +5755,7 @@ async def evaluate_quality_check_declaration_reconciliation(db: AsyncSession, or
     declaration = await _get_declaration_or_404(db, QualityCheckDeclaration, organization_id, declaration_id)
     station = await db.get(Station, declaration.stationId)
     await _check_declaration_scope(db, organization_id, actor_user_id, station, RECONCILIATION_READ)
+    tank = await db.get(Tank, declaration.tankId)
 
     settings = await _get_reconciliation_settings(db, declaration.stationId)
     window_hours = _tolerance(settings, "qualityCheckWindowHours", RECONCILIATION_QUALITY_CHECK_WINDOW_HOURS_DEFAULT)
@@ -5773,6 +5781,12 @@ async def evaluate_quality_check_declaration_reconciliation(db: AsyncSession, or
     record = await _record_reconciliation(db, "QualityCheckDeclaration", declaration.id, counterpart_type, counterpart_id, "quantitative", status, None, None, None)
     declaration.reconciledWithId = record.id
     declaration.reconciledWithType = "ReconciliationRecord"
+
+    try:
+        await _apply_quality_check_discrepancy_alert(db, tank, declaration.id, status)
+    except Exception:
+        logger.exception("Échec de la confirmation/annulation de l'alerte quality_check_discrepancy (declaration=%s)", declaration.id)
+
     await db.commit()
     await db.refresh(record)
     return ReconciliationRecordResponse.model_validate(record)
@@ -5892,6 +5906,62 @@ async def _apply_stock_discrepancy_alert(db: AsyncSession, tank: Tank, result: d
         await alerts_service.auto_resolve_alert(
             db, station_id=tank.stationId, tank_id=tank.id, product_id=tank.fuelProductId,
             alert_type="stock_declared_discrepancy", resolved_at=now,
+        )
+
+
+async def _apply_manual_gauging_discrepancy_alert(
+    db: AsyncSession, tank: Tank, declaration_id: uuid.UUID, status: str, discrepancy_value: float | None, tolerance_applied: float | None
+) -> None:
+    """Même mécanique que `_apply_stock_discrepancy_alert` (rapprochement,
+    2026-09-20) : le jaugeage manuel n'a qu'un seul point d'évaluation (à la
+    demande, jamais un événement automatique comme les ventes), donc l'appel
+    se fait directement depuis
+    `evaluate_manual_gauging_declaration_reconciliation`, pas de
+    `_trigger_*` séparé."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    if status == "discrepancy":
+        await alerts_service.upsert_active_alert(
+            db,
+            station_id=tank.stationId,
+            tank_id=tank.id,
+            product_id=tank.fuelProductId,
+            alert_type="manual_gauging_discrepancy",
+            triggered_at=now,
+            triggered_value=discrepancy_value,
+            threshold_value=tolerance_applied,
+            source_type="ManualGaugingDeclaration",
+            source_id=declaration_id,
+        )
+    elif status == "matched":
+        await alerts_service.auto_resolve_alert(
+            db, station_id=tank.stationId, tank_id=tank.id, product_id=tank.fuelProductId,
+            alert_type="manual_gauging_discrepancy", resolved_at=now,
+        )
+
+
+async def _apply_quality_check_discrepancy_alert(db: AsyncSession, tank: Tank, declaration_id: uuid.UUID, status: str) -> None:
+    """Même mécanique que `_apply_stock_discrepancy_alert`, sans écart
+    numérique (présence/absence uniquement, cf. docstring de
+    `evaluate_quality_check_declaration_reconciliation`) : `triggered_value`/
+    `threshold_value` valent toujours None."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    if status == "discrepancy":
+        await alerts_service.upsert_active_alert(
+            db,
+            station_id=tank.stationId,
+            tank_id=tank.id,
+            product_id=tank.fuelProductId,
+            alert_type="quality_check_discrepancy",
+            triggered_at=now,
+            source_type="QualityCheckDeclaration",
+            source_id=declaration_id,
+        )
+    elif status == "matched":
+        await alerts_service.auto_resolve_alert(
+            db, station_id=tank.stationId, tank_id=tank.id, product_id=tank.fuelProductId,
+            alert_type="quality_check_discrepancy", resolved_at=now,
         )
 
 

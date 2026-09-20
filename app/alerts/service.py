@@ -125,6 +125,16 @@ SEVERITY_BY_ALERT_TYPE = {
     # mais reste "high" et non "critical" tant que la journée n'est pas
     # terminée (l'écart peut encore se résorber, voir auto_resolve_alert).
     "stock_declared_discrepancy": "high",
+    # Jaugeage manuel <-> télémétrie (rapprochement, 2026-09-20) — un écart de
+    # mesure est un signal de calibration/saisie, pas une perte avérée :
+    # "medium", cohérent avec les autres types de configuration/mesure
+    # (sensor_mapping_missing, calibration_missing).
+    "manual_gauging_discrepancy": "medium",
+    # Contrôle qualité/eau <-> alerte `water` (rapprochement, 2026-09-20) —
+    # un écart ici signale soit une contamination non détectée par le
+    # capteur, soit une fausse déclaration : "high", au même niveau que
+    # `water` elle-même (signal de sécurité produit).
+    "quality_check_discrepancy": "high",
 }
 
 # D2 : types pour lesquels une source de vérité mesurable existe et peut
@@ -137,7 +147,7 @@ SEVERITY_BY_ALERT_TYPE = {
 AUTO_VERIFIABLE_ALERT_TYPES = {
     "level_high", "level_high_pre_alarm", "level_low", "water", "sensor_offline",
     "leak", "delivery_discrepancy", "delivery_undeclared", "delivery_declaration_pending",
-    "stock_declared_discrepancy",
+    "stock_declared_discrepancy", "manual_gauging_discrepancy", "quality_check_discrepancy",
 }
 
 

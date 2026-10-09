@@ -47,3 +47,46 @@ class ModuleRightsItem(BaseModel):
     active: bool
     roles: list[ModuleRightsRoleItem]
     permissionCodes: list[str]
+
+
+class ModuleRoleSetRequest(BaseModel):
+    """Corps de PUT : le rôle du module à donner (remplace l'éventuel rôle actuel)."""
+
+    roleId: uuid.UUID
+
+
+class ModuleMemberRoleItem(BaseModel):
+    assignmentId: uuid.UUID
+    roleId: uuid.UUID
+    code: str
+    name: str
+
+
+class ModuleMemberItem(BaseModel):
+    """Membre de l'organisation et son rôle sur un module (role=None si aucun)."""
+
+    userId: uuid.UUID
+    fullName: str
+    email: str
+    status: str
+    role: ModuleMemberRoleItem | None
+
+
+class ModuleRoleSnapshot(BaseModel):
+    roleId: uuid.UUID
+    code: str
+    name: str
+    permissionCodes: list[str]
+
+
+class ModuleRolePreviewResponse(BaseModel):
+    """Droits avant/après un changement, sans écriture. `refusal` non nul = action refusée."""
+
+    moduleCode: str
+    userId: uuid.UUID
+    current: ModuleRoleSnapshot | None
+    next: ModuleRoleSnapshot | None
+    gained: list[str]
+    lost: list[str]
+    allowed: bool
+    refusal: dict | None

@@ -271,12 +271,10 @@ async def contexte_attaque(client: AsyncClient, contexte: dict, test_city: dict)
     """Ajoute à `contexte` ce qu'il faut pour les cas d'attaque : un plan
     d'abonnement et l'attribution de propriétaire de B (cible de la révocation)."""
     plan_code = f"plan-{uuid.uuid4().hex[:8]}"
-    plan = await client.post(
-        "/api/v1/billing/plans",
-        json={"moduleCode": "zylo_liquid", "code": plan_code, "name": "Plan test", "priceCents": 1000, "currency": "XAF", "periodDays": 30},
-        headers=_entetes(contexte["owner_b"]),
-    )
-    assert plan.status_code == 201, plan.text
+    # Catalogue seedé hors API (T-019) : plus de création de plan par HTTP.
+    from tests.test_billing import creer_plan_catalogue
+
+    await creer_plan_catalogue(plan_code)
     membres = await client.get(
         f"/api/v1/rbac/organizations/{contexte['org_b']}/members", headers=_entetes(contexte["owner_b"], contexte["org_b"])
     )

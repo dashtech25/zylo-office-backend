@@ -88,3 +88,23 @@ codes par message d'erreur).
   `DELETE .../modules/{code}/users/{userId}/role`, `GET .../modules/{code}/users/{userId}/role-preview`.
 - Flux, résolution et garde-fous : `docs/modules/affectation-par-module/`.
 - Le remplacement d'un rôle est atomique ; le dernier administrateur du module ne peut pas être retiré (409).
+
+## 9. Gardes de route et garde-fous IAM (T-019)
+
+- Toute route de module porte une garde de permission, sauf quatre routes listées dans
+  `tests/route_baseline_sans_permission.txt` (deux webhooks GPS à secret, `system-defaults`, `ping`).
+  Choix de la garde : `require_permission` (organisation entière) si le service vérifie l'organisation
+  entière ; `require_permission_any_scope` si le service filtre par station (liste, création dans une station) ;
+  `require_any_permission` quand une fonction de routeur sert camions et navires.
+- Une affectation limitée à une station passe les gardes `require_permission_any_scope` (le service filtre la
+  liste ou la création par station), mais pas les routes qui exigent la permission sur l'organisation entière.
+- Garde-fous : retrait du dernier propriétaire actif refusé (409 `last_owner`) ; utilisateur désactivé ou
+  supprimé (soft-delete) : 401.
+- Non appliqué : refus d'un deny individuel visant un propriétaire. La fiche T-019 le demande, mais la règle
+  « un deny annule tout allow, y compris celui du propriétaire » (§5.4) est testée par `test_rbac_grants_and_audit.py`.
+  À trancher avec le client.
+- Limite connue : `zyloLiquid.gpsDevice.read` et `zyloLiquid.trackingLocation.read` ont `moduleCode = zylo_liquid`
+  même si la location est partagée. Une affectation par API à `zylo_tanker_operator` est donc refusée (422
+  `permission_module_mismatch`) ; le rôle seedé fonctionne. Corriger le catalogue est une décision distincte.
+- Non traité : le dernier porteur du grant `ORGANIZATION_MANAGE` n'est pas protégé (le retrait de grant n'est pas
+  refusé) ; le quota de création d'organisation attend la valeur fixée par le client.

@@ -24,10 +24,14 @@ from app.files.schemas import (
 from app.identity.models import User
 from app.rbac.service import get_current_organization_id
 
+# T-019 : gardes de permission des routes
+from app.files.permissions import DOCUMENT_CREATE, DOCUMENT_DELETE, DOCUMENT_READ
+from app.rbac.service import require_permission
+
 router = APIRouter()
 
 
-@router.post("/documents", response_model=DocumentResponse, status_code=201, summary="Référencer un nouveau document")
+@router.post("/documents", response_model=DocumentResponse, status_code=201, summary="Référencer un nouveau document", dependencies=[Depends(require_permission(DOCUMENT_CREATE))])
 async def create_document(
     data: CreateDocumentRequest,
     current_user: User = Depends(get_current_user),
@@ -40,7 +44,7 @@ async def create_document(
     return await service.create_document(db, organization_id, current_user.id, data)
 
 
-@router.post("/document-links", response_model=DocumentLinkResponse, status_code=201, summary="Lier un document existant à une entité supplémentaire")
+@router.post("/document-links", response_model=DocumentLinkResponse, status_code=201, summary="Lier un document existant à une entité supplémentaire", dependencies=[Depends(require_permission(DOCUMENT_CREATE))])
 async def create_document_link(
     data: CreateDocumentLinkRequest,
     current_user: User = Depends(get_current_user),
@@ -50,7 +54,7 @@ async def create_document_link(
     return await service.create_document_link(db, organization_id, current_user.id, data)
 
 
-@router.get("/documents/by-entity", response_model=list[DocumentResponse], summary="Lister les documents attachés à une entité")
+@router.get("/documents/by-entity", response_model=list[DocumentResponse], summary="Lister les documents attachés à une entité", dependencies=[Depends(require_permission(DOCUMENT_READ))])
 async def list_documents_for_entity(
     linkedEntityType: str,
     linkedEntityId: uuid.UUID,
@@ -61,7 +65,7 @@ async def list_documents_for_entity(
     return await service.list_document_links_for_entity(db, organization_id, current_user.id, linkedEntityType, linkedEntityId)
 
 
-@router.get("/documents/counts-by-entity", response_model=DocumentCountsResponse, summary="Compter les documents de plusieurs entités en un seul appel")
+@router.get("/documents/counts-by-entity", response_model=DocumentCountsResponse, summary="Compter les documents de plusieurs entités en un seul appel", dependencies=[Depends(require_permission(DOCUMENT_READ))])
 async def count_documents_for_entities(
     linkedEntityType: str,
     linkedEntityIds: str,
@@ -77,7 +81,7 @@ async def count_documents_for_entities(
     return DocumentCountsResponse(counts=counts)
 
 
-@router.delete("/documents/{document_id}", response_model=DocumentResponse, summary="Supprimer un document (suppression logique)")
+@router.delete("/documents/{document_id}", response_model=DocumentResponse, summary="Supprimer un document (suppression logique)", dependencies=[Depends(require_permission(DOCUMENT_DELETE))])
 async def delete_document(
     document_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -89,7 +93,7 @@ async def delete_document(
     return await service.delete_document(db, organization_id, current_user.id, document_id)
 
 
-@router.get("/documents/{document_id}/download-url", response_model=DocumentDownloadUrlResponse, summary="Obtenir un lien de téléchargement signé et temporaire")
+@router.get("/documents/{document_id}/download-url", response_model=DocumentDownloadUrlResponse, summary="Obtenir un lien de téléchargement signé et temporaire", dependencies=[Depends(require_permission(DOCUMENT_READ))])
 async def get_document_download_url(
     document_id: uuid.UUID,
     current_user: User = Depends(get_current_user),

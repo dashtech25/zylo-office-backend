@@ -515,6 +515,27 @@ async def assign_role(
     return user_role
 
 
+
+async def _autres_proprietaires_actifs(db: AsyncSession, organization_id: uuid.UUID, exclure_assignment_id: uuid.UUID) -> int:
+    """Nombre d'attributions du rôle propriétaire (transverse) à un utilisateur
+    actif, hors l'attribution visée. Utilisé pour refuser de retirer le dernier."""
+    stmt = (
+        select(UserRole.id)
+        .join(Role, Role.id == UserRole.roleId)
+        .join(User, User.id == UserRole.userId)
+        .where(
+            UserRole.organizationId == organization_id,
+            Role.code == "owner",
+            Role.moduleCode.is_(None),
+            Role.organizationId == organization_id,
+            User.status == "active",
+            User.deletedAt.is_(None),
+            UserRole.id != exclure_assignment_id,
+        )
+    )
+    return len((await db.execute(stmt)).all())
+
+
 async def unassign_role(
     db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, assignment_id: uuid.UUID
 ) -> None:
@@ -529,6 +550,15 @@ async def unassign_role(
     target_user_id = user_role.userId
     role = await db.get(Role, role_id)
     target_user = await db.get(User, target_user_id)
+    if role is not None and role.code == "owner" and role.moduleCode is None:
+        # T-019 (IAM-002) : une organisation garde au moins un propriétaire actif.
+        autres = await _autres_proprietaires_actifs(db, organization_id, exclure_assignment_id=user_role.id)
+        if autres == 0:
+            raise AppError(
+                code="last_owner",
+                message="Impossible de retirer le dernier propriétaire actif de l'organisation.",
+                status_code=409,
+            )
     await db.delete(user_role)
     await record_audit_event(
         db,
@@ -595,7 +625,6 @@ async def create_grant(
     # IAM-004 : un grant (allow ou deny) ne vise qu'un membre de l'organisation.
     await assert_target_is_member(db, organization_id, target_user_id)
     permission = await _get_permission_or_404(db, permission_code)
-
     origin = "direct"
     if delegated_from_grant_id is not None:
         origin_grant = await db.get(UserPermissionGrant, delegated_from_grant_id)
@@ -785,3 +814,68 @@ async def list_effective_permission_codes(db: AsyncSession, organization_id: uui
     )).scalars().all())
     codes.update(grant_codes)
     return sorted(codes)
+
+
+async def user_has_permission_any_scope(db: AsyncSession, user_id: uuid.UUID, organization_id: uuid.UUID, permission_code: str) -> bool:
+    """Vrai si la permission est accordée sur l'organisation entière OU sur au
+    moins une ressource (ex. une station) où l'utilisateur la détient, sans
+    deny applicable. Intention (T-019) : pour une LISTE ou une création dont le
+    service filtre lui-même par portée (`list_visible_resource_ids`), le
+    routeur ne doit pas refuser un gérant limité à sa station. Le service reste
+    seul juge de la portée exacte : cette garde n'accorde jamais un accès à une
+    ressource précise."""
+    if await user_has_permission(db, user_id, organization_id, permission_code):
+        return True
+    candidats: set[tuple[str, uuid.UUID]] = set()
+    for code, r_type, r_id in await _role_permission_grants(db, user_id, organization_id):
+        if code == permission_code and r_type is not None and r_id is not None:
+            candidats.add((r_type, r_id))
+    for grant in await _applicable_grants(db, user_id, organization_id, permission_code):
+        if grant.effect == "allow" and grant.resourceType is not None and grant.resourceId is not None:
+            candidats.add((grant.resourceType, grant.resourceId))
+    for r_type, r_id in candidats:
+        if await user_has_permission(db, user_id, organization_id, permission_code, r_type, r_id):
+            return True
+    return False
+
+
+def require_permission_any_scope(permission_code: str):
+    """Garde de route pour les listes et créations dont le service applique la
+    portée (station) lui-même. Refuse seulement si l'utilisateur ne détient la
+    permission nulle part (ni organisation, ni ressource)."""
+
+    async def dependency(
+        current_user: User = Depends(get_current_user),
+        organization_id: uuid.UUID = Depends(get_current_organization_id),
+        db: AsyncSession = Depends(get_db),
+    ) -> None:
+        if not await user_has_permission_any_scope(db, current_user.id, organization_id, permission_code):
+            raise AppError(
+                code="permission_denied",
+                message=f"Permission manquante : {permission_code}.",
+                status_code=403,
+            )
+
+    return dependency
+
+
+def require_any_permission(permission_codes: tuple[str, ...]):
+    """Garde de route : au moins une des permissions, sur l'organisation entière.
+    Utilisée quand une même fonction de routeur sert deux familles de ressources
+    (camion ou navire) et que le service exige l'une ou l'autre."""
+
+    async def dependency(
+        current_user: User = Depends(get_current_user),
+        organization_id: uuid.UUID = Depends(get_current_organization_id),
+        db: AsyncSession = Depends(get_db),
+    ) -> None:
+        for code in permission_codes:
+            if await user_has_permission(db, current_user.id, organization_id, code):
+                return
+        raise AppError(
+            code="permission_denied",
+            message=f"Permission manquante : {' ou '.join(permission_codes)}.",
+            status_code=403,
+        )
+
+    return dependency

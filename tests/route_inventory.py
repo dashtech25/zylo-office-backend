@@ -21,13 +21,14 @@ from fastapi.routing import APIRoute
 # l'organisation ciblée (ou qu'une garde de module/permission l'impose).
 PREFIXES_APPARTENANCE = (
     "require_permission",
+    "require_any_permission",
     "require_module_permission",
     "require_module_active",
     "require_organization_member",
     "get_current_organization_id",
 )
 # Gardes de permission : exigent un code de permission précis.
-PREFIXES_PERMISSION = ("require_permission", "require_module_permission")
+PREFIXES_PERMISSION = ("require_permission", "require_any_permission", "require_module_permission")
 # Préfixe des routes d'un module métier (CLAUDE.md : un dossier par module).
 PREFIXES_MODULE = ("/api/v1/zylo-liquid", "/api/v1/zylo-tanker")
 
@@ -35,28 +36,32 @@ PREFIXES_MODULE = ("/api/v1/zylo-liquid", "/api/v1/zylo-tanker")
 # Chaque entrée est justifiée et datée (2026-10-09). Toute route nouvelle sans
 # garde doit être ajoutée ici après revue, avec sa justification.
 ROUTES_PUBLIQUES: dict[str, str] = {
+    # --- Publiques par nature (aucune donnée d'organisation) ---
     "GET /": "Racine d'accueil, aucune donnée. 2026-10-09.",
     "GET /api/v1/health": "Sonde de santé. 2026-10-09.",
     "GET /api/v1/health/error-demo": "Démonstration du format d'erreur, sans donnée. A retirer en production. 2026-10-09.",
-    "POST /api/v1/auth/register": "Inscription : public par nature, limitée par T-012/T-013. 2026-10-09.",
+    "POST /api/v1/auth/register": "Inscription : public par nature, limitée par T-012. 2026-10-09.",
     "POST /api/v1/auth/login": "Connexion : public par nature, limitée par T-012. 2026-10-09.",
+    "POST /api/v1/auth/activate": "Activation d'un compte par jeton à usage unique reçu hors API (T-021) : jeton vérifié et consommé dans le service, limitée par T-012. 2026-10-09.",
     "POST /api/v1/auth/refresh": "Rafraîchissement par jeton de session, sans organisation. 2026-10-09.",
     "POST /api/v1/auth/logout": "Révocation par jeton de session, sans organisation. 2026-10-09.",
-    "GET /api/v1/auth/me": "Profil de l'utilisateur connecté (portée utilisateur). 2026-10-09.",
-    "POST /api/v1/auth/activate": "Activation d'un compte créé par une organisation : jeton à usage unique (256 bits, haché, expiration 72 h), seule preuve. Pas de limitation de débit dédiée : à traiter. 2026-10-09 (T-021).",
-    "POST /api/v1/auth/change-password": "Changement de mot de passe de l'utilisateur connecté (portée utilisateur). 2026-10-09.",
+    "GET /api/v1/auth/me": "Profil de l'utilisateur connecté (portée utilisateur uniquement). 2026-10-09.",
+    "POST /api/v1/auth/change-password": "Changement de mot de passe de l'utilisateur connecté (portée utilisateur uniquement). 2026-10-09.",
+    # --- Portée utilisateur : contrôle dans le service ---
     "GET /api/v1/organizations": "Liste des organisations de l'utilisateur connecté (portée utilisateur). 2026-10-09.",
-    "POST /api/v1/organizations": "Création d'organisation par un utilisateur connecté ; quota à traiter par T-019 (valeur client). 2026-10-09.",
-    "PATCH /api/v1/users/{user_id}": "Profil de l'utilisateur connecté, contrôle d'identité dans le service. A vérifier. 2026-10-09.",
-    "GET /api/v1/modules": "Catalogue des modules. Passe authentifié si la décision catalogues-publics est confirmée (IAM-020). 2026-10-09.",
-    "GET /api/v1/billing/plans": "Catalogue de plans. Passe authentifié si la décision catalogues-publics est confirmée (IAM-020). 2026-10-09.",
-    "POST /api/v1/billing/plans": "DETTE CONNUE : tout utilisateur connecté peut créer un plan. Retrait de la route à faire par T-019. 2026-10-09.",
-    "POST /api/v1/zylo-liquid/gps/ingest": "Webhook GPS : authentifié par le secret d'ingestion de l'organisation (en-tête). 2026-10-09.",
-    "POST /api/v1/zylo-tanker/gps/ingest": "Webhook GPS : authentifié par le secret d'ingestion de l'organisation (en-tête). 2026-10-09.",
-    "POST /api/v1/export/xlsx": "Conversion de tableau fourni par l'appelant, sans donnée d'organisation. A vérifier. 2026-10-09.",
-    "POST /api/v1/export/docx": "Conversion de tableau fourni par l'appelant, sans donnée d'organisation. A vérifier. 2026-10-09.",
-    "POST /api/v1/import/xlsx": "Lecture d'un fichier fourni par l'appelant, sans donnée d'organisation. A vérifier. 2026-10-09.",
+    "POST /api/v1/organizations": "Création d'organisation par tout utilisateur connecté. Quota ORG_CREATION_QUOTA à fixer par le client (T-019, décision en attente). 2026-10-09.",
+    "PATCH /api/v1/users/{user_id}": "Photo de profil : soi-même, ou owner d'une organisation dont la cible est membre. Contrôle dans le service (update_user_profile). 2026-10-09.",
     "GET /api/v1/storage/local/{storage_reference}": "Téléchargement par URL signée (signature vérifiée dans le service). 2026-10-09.",
+    # --- Catalogues : lecture seule, publics en attendant la décision IAM-020 ---
+    "GET /api/v1/modules": "Catalogue des modules (aucune donnée d'organisation). Passera authentifié si la décision catalogues-publics est confirmée (IAM-020). 2026-10-09.",
+    "GET /api/v1/billing/plans": "Catalogue de plans, lecture seule (création par API retirée par T-019, option A de T-050). Passera authentifié si IAM-020 est confirmée. 2026-10-09.",
+    # --- Utilitaires authentifiés, sans lecture ni écriture en base ---
+    "POST /api/v1/export/xlsx": "Conversion d'un tableau fourni par l'appelant, authentifiée (get_current_user), sans accès à la base. 2026-10-09.",
+    "POST /api/v1/export/docx": "Conversion d'un tableau fourni par l'appelant, authentifiée (get_current_user), sans accès à la base. 2026-10-09.",
+    "POST /api/v1/import/xlsx": "Lecture d'un fichier fourni par l'appelant, authentifiée (get_current_user), sans accès à la base. 2026-10-09.",
+    # --- Webhooks GPS : pas de JWT, secret d'ingestion propre à l'organisation ---
+    "POST /api/v1/zylo-liquid/gps/ingest": "Webhook GPS : secret d'ingestion de l'organisation (en-tête X-GPS-Ingest-Secret) vérifié dans le service (invalid_ingest_secret, 401). 2026-10-09.",
+    "POST /api/v1/zylo-tanker/gps/ingest": "Webhook GPS : secret d'ingestion de l'organisation (en-tête X-GPS-Ingest-Secret) vérifié dans le service (invalid_ingest_secret, 401). 2026-10-09.",
 }
 
 
@@ -103,9 +108,12 @@ def inventaire(app) -> list[RouteInfo]:
             if call is None:
                 continue
             if getattr(call, "__qualname__", "").split(".")[0].startswith(PREFIXES_PERMISSION):
-                if "permission_code" in call.__code__.co_freevars:
-                    index = call.__code__.co_freevars.index("permission_code")
-                    permissions.append(call.__closure__[index].cell_contents)
+                # `permission_code` (une permission) ou `permission_codes` (l'une d'elles).
+                for variable in ("permission_code", "permission_codes"):
+                    if variable in call.__code__.co_freevars:
+                        index = call.__code__.co_freevars.index(variable)
+                        valeur = call.__closure__[index].cell_contents
+                        permissions.extend([valeur] if isinstance(valeur, str) else list(valeur))
         for methode in sorted(route.methods):
             infos.append(
                 RouteInfo(

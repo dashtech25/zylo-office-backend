@@ -240,6 +240,10 @@ async def _price_station_scope(db: AsyncSession, organization_id: uuid.UUID, pat
     return "station", price.stationId
 
 
+# T-019 : gardes de permission des routes
+from app.modules.zylo_liquid.permissions import CARRIER_MANAGE, CARRIER_READ, COMMERCIAL_ACCOUNT_MANAGE, COMMERCIAL_ACCOUNT_READ, DECLARATION_LOCK, DELIVERY_DECLARATION_CREATE, DELIVERY_DECLARATION_READ, EQUIPMENT_MANAGE, EQUIPMENT_READ, INCIDENT_DECLARATION_CREATE, INCIDENT_DECLARATION_READ, INTERVENTION_ASSIGN, INTERVENTION_CLOSE, INTERVENTION_CREATE, INTERVENTION_READ, LEAK_TEST_DECLARATION_CREATE, LEAK_TEST_DECLARATION_READ, MANUAL_GAUGING_DECLARATION_CREATE, MANUAL_GAUGING_DECLARATION_READ, PAYMENT_CREATE, PAYMENT_READ, PRICING_POLICY_MANAGE, PRICING_POLICY_READ, PRODUCT_SALE_CANCEL, PRODUCT_SALE_CREATE, PRODUCT_SALE_READ, PURCHASE_ORDER_MANAGE, PURCHASE_ORDER_READ, QUALITY_CHECK_DECLARATION_CREATE, QUALITY_CHECK_DECLARATION_READ, RECEIVABLE_READ, RECONCILIATION_READ, RECONCILIATION_SETTINGS_MANAGE, REGULATORY_DECLARATION_READ, REGULATORY_DOCUMENT_CREATE, REGULATORY_DOCUMENT_MANAGE, REGULATORY_DOCUMENT_READ, SALE_CREATE, SALE_READ, SECURITY_EQUIPMENT_MANAGE, SECURITY_EQUIPMENT_READ, SELLABLE_PRODUCT_MANAGE, SELLABLE_PRODUCT_READ, SHIFT_CASH_DECLARATION_CREATE, SHIFT_CASH_DECLARATION_READ, STATION_FINANCIAL_MANAGE, STATION_FINANCIAL_READ, STATION_SERVICE_MANAGE, STATION_SERVICE_READ, STATION_STAFF_MANAGE, STATION_STAFF_READ, STATION_SUPPLIER_MANAGE, STATION_SUPPLIER_READ, SUPPLIER_MANAGE, SUPPLIER_READ, TECHNICIAN_MANAGE, TECHNICIAN_READ, TRUCK_MANAGE, TRUCK_ORDER_ASSIGNMENT_MANAGE, TRUCK_READ
+from app.rbac.service import require_permission_any_scope
+
 router = APIRouter(dependencies=[Depends(require_module_active("zylo_liquid"))])
 
 
@@ -357,7 +361,7 @@ async def update_station_fuel_product(
 # administratif (SecurityEquipment, StationSupplier...).
 
 
-@router.patch("/station-fuel-products/{association_id}/thresholds", response_model=StationFuelProductResponse)
+@router.patch("/station-fuel-products/{association_id}/thresholds", response_model=StationFuelProductResponse, dependencies=[Depends(require_permission_any_scope(STATION_FUEL_PRODUCT_MANAGE))])
 async def update_station_fuel_product_thresholds(
     association_id: uuid.UUID,
     data: UpdateStationFuelProductThresholdsRequest,
@@ -373,6 +377,7 @@ async def update_station_fuel_product_thresholds(
     response_model=list[StationFuelProductOverviewResponse],
     summary="Vue d'ensemble des produits vendus par une station",
     description="Pour chaque produit rattaché à la station : prix courant, cuves associées et volume disponible agrégé. Pensé pour alimenter un écran de synthèse station sans agréger côté client.",
+    dependencies=[Depends(require_permission_any_scope(STATION_FUEL_PRODUCT_READ))],
 )
 async def list_station_fuel_products_overview(
     station_id: uuid.UUID,
@@ -383,7 +388,7 @@ async def list_station_fuel_products_overview(
     return await service.list_station_fuel_products_overview(db, organization_id, current_user.id, station_id)
 
 
-@router.post("/station-services", response_model=StationServiceResponse, status_code=201)
+@router.post("/station-services", response_model=StationServiceResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(STATION_SERVICE_MANAGE))])
 async def create_station_service(
     data: CreateStationServiceRequest,
     current_user: User = Depends(get_current_user),
@@ -393,7 +398,7 @@ async def create_station_service(
     return await service.create_station_service(db, organization_id, current_user.id, data)
 
 
-@router.patch("/station-services/{service_id}", response_model=StationServiceResponse)
+@router.patch("/station-services/{service_id}", response_model=StationServiceResponse, dependencies=[Depends(require_permission_any_scope(STATION_SERVICE_MANAGE))])
 async def update_station_service(
     service_id: uuid.UUID,
     data: UpdateStationServiceRequest,
@@ -404,7 +409,7 @@ async def update_station_service(
     return await service.update_station_service(db, organization_id, current_user.id, service_id, data)
 
 
-@router.get("/station-services", response_model=list[StationServiceResponse])
+@router.get("/station-services", response_model=list[StationServiceResponse], dependencies=[Depends(require_permission_any_scope(STATION_SERVICE_READ))])
 async def list_station_services(
     stationId: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -414,7 +419,7 @@ async def list_station_services(
     return await service.list_station_services(db, organization_id, current_user.id, stationId)
 
 
-@router.get("/station-product-pricing-policy", response_model=PricingPolicyResponse | None)
+@router.get("/station-product-pricing-policy", response_model=PricingPolicyResponse | None, dependencies=[Depends(require_permission_any_scope(PRICING_POLICY_READ))])
 async def get_pricing_policy(
     stationId: uuid.UUID,
     fuelProductId: uuid.UUID,
@@ -425,7 +430,7 @@ async def get_pricing_policy(
     return await service.get_pricing_policy(db, organization_id, current_user.id, stationId, fuelProductId)
 
 
-@router.patch("/station-product-pricing-policy", response_model=PricingPolicyResponse)
+@router.patch("/station-product-pricing-policy", response_model=PricingPolicyResponse, dependencies=[Depends(require_permission_any_scope(PRICING_POLICY_MANAGE))])
 async def update_pricing_policy(
     stationId: uuid.UUID,
     fuelProductId: uuid.UUID,
@@ -467,6 +472,7 @@ async def create_station(
         "(un utilisateur scopé à une station ne voit que la sienne) est appliqué directement dans "
         "`service.list_stations`, pas via une dépendance de permission globale."
     ),
+    dependencies=[Depends(require_permission_any_scope(STATION_READ))],
 )
 async def list_stations(
     pagination: PaginationParams = Depends(),
@@ -573,6 +579,7 @@ async def create_tank(
     response_model=Page[TankResponse],
     summary="Lister les cuves",
     description="Liste paginée des cuves, filtrable par station, par produit et par statut actif/inactif.",
+    dependencies=[Depends(require_permission_any_scope(TANK_READ))],
 )
 async def list_tanks(
     pagination: PaginationParams = Depends(),
@@ -644,6 +651,7 @@ async def create_pump(
     response_model=Page[PumpResponse],
     summary="Lister les pompes",
     description="Liste paginée des pompes, filtrable par station et par statut actif/inactif.",
+    dependencies=[Depends(require_permission_any_scope(PUMP_READ))],
 )
 async def list_pumps(
     pagination: PaginationParams = Depends(),
@@ -857,6 +865,7 @@ async def get_network_snapshot(
         "par station, cuve et plage de dates. Il s'agit de livraisons *détectées*, pas des déclarations "
         "manuelles du chauffeur — voir `/delivery-declarations` pour ces dernières."
     ),
+    dependencies=[Depends(require_permission_any_scope(DELIVERY_READ))],
 )
 async def list_deliveries(
     pagination: PaginationParams = Depends(),
@@ -912,6 +921,7 @@ async def list_deliveries_in_progress(
 @router.get(
     "/leak-events",
     response_model=Page[LeakEventResponse],
+    dependencies=[Depends(require_permission_any_scope(LEAK_EVENT_READ))],
 )
 async def list_leak_events(
     pagination: PaginationParams = Depends(),
@@ -952,6 +962,7 @@ async def get_leak_event(
     "/prices",
     response_model=PriceHistoryResponse,
     status_code=201,
+    dependencies=[Depends(require_permission_any_scope(PRICE_HISTORY_CREATE))],
 )
 async def create_price_history(
     data: CreatePriceHistoryRequest,
@@ -965,6 +976,7 @@ async def create_price_history(
 @router.get(
     "/prices",
     response_model=Page[PriceHistoryResponse],
+    dependencies=[Depends(require_permission_any_scope(PRICE_HISTORY_READ))],
 )
 async def list_price_history(
     pagination: PaginationParams = Depends(),
@@ -1107,7 +1119,7 @@ async def get_tank_cash(
 # ================================================================
 
 
-@router.post("/delivery-declarations", response_model=DeliveryDeclarationResponse, status_code=201)
+@router.post("/delivery-declarations", response_model=DeliveryDeclarationResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(DELIVERY_DECLARATION_CREATE))])
 async def create_delivery_declaration(
     data: CreateDeliveryDeclarationRequest,
     current_user: User = Depends(get_current_user),
@@ -1117,7 +1129,7 @@ async def create_delivery_declaration(
     return await service.create_delivery_declaration(db, organization_id, current_user.id, data)
 
 
-@router.get("/delivery-declarations", response_model=Page[DeliveryDeclarationResponse])
+@router.get("/delivery-declarations", response_model=Page[DeliveryDeclarationResponse], dependencies=[Depends(require_permission_any_scope(DELIVERY_DECLARATION_READ))])
 async def list_delivery_declarations(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
@@ -1128,7 +1140,7 @@ async def list_delivery_declarations(
     return await service.list_delivery_declarations(db, organization_id, current_user.id, pagination, stationId)
 
 
-@router.patch("/delivery-declarations/{declaration_id}", response_model=DeliveryDeclarationResponse)
+@router.patch("/delivery-declarations/{declaration_id}", response_model=DeliveryDeclarationResponse, dependencies=[Depends(require_permission_any_scope(DELIVERY_DECLARATION_CREATE))])
 async def update_delivery_declaration(
     declaration_id: uuid.UUID,
     data: UpdateDeliveryDeclarationRequest,
@@ -1139,7 +1151,7 @@ async def update_delivery_declaration(
     return await service.update_delivery_declaration(db, organization_id, current_user.id, declaration_id, data)
 
 
-@router.post("/delivery-declarations/{declaration_id}/lock", response_model=DeliveryDeclarationResponse)
+@router.post("/delivery-declarations/{declaration_id}/lock", response_model=DeliveryDeclarationResponse, dependencies=[Depends(require_permission_any_scope(DECLARATION_LOCK))])
 async def lock_delivery_declaration(
     declaration_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -1149,7 +1161,7 @@ async def lock_delivery_declaration(
     return await service.lock_delivery_declaration(db, organization_id, current_user.id, declaration_id)
 
 
-@router.post("/delivery-declarations/correct-lines", response_model=DeliveryDeclarationResponse, status_code=201)
+@router.post("/delivery-declarations/correct-lines", response_model=DeliveryDeclarationResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(DELIVERY_DECLARATION_CREATE))])
 async def correct_delivery_declaration_lines(
     data: CorrectDeliveryDeclarationLinesRequest,
     current_user: User = Depends(get_current_user),
@@ -1168,7 +1180,7 @@ async def correct_delivery_declaration_lines(
 # ================================================================
 
 
-@router.post("/suppliers", response_model=SupplierResponse, status_code=201)
+@router.post("/suppliers", response_model=SupplierResponse, status_code=201, dependencies=[Depends(require_permission(SUPPLIER_MANAGE))])
 async def create_supplier(
     data: CreateSupplierRequest,
     current_user: User = Depends(get_current_user),
@@ -1178,7 +1190,7 @@ async def create_supplier(
     return await service.create_supplier(db, organization_id, current_user.id, data)
 
 
-@router.get("/suppliers", response_model=Page[SupplierResponse])
+@router.get("/suppliers", response_model=Page[SupplierResponse], dependencies=[Depends(require_permission(SUPPLIER_READ))])
 async def list_suppliers(
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_user),
@@ -1188,7 +1200,7 @@ async def list_suppliers(
     return await service.list_suppliers(db, organization_id, current_user.id, pagination)
 
 
-@router.patch("/suppliers/{supplier_id}", response_model=SupplierResponse)
+@router.patch("/suppliers/{supplier_id}", response_model=SupplierResponse, dependencies=[Depends(require_permission(SUPPLIER_MANAGE))])
 async def update_supplier(
     supplier_id: uuid.UUID,
     data: UpdateSupplierRequest,
@@ -1205,6 +1217,7 @@ async def update_supplier(
     status_code=201,
     summary="Créer un transporteur",
     description="Enregistre un transporteur (société propriétaire ou affréteur des camions de livraison) pour l'organisation.",
+    dependencies=[Depends(require_permission(CARRIER_MANAGE))],
 )
 async def create_carrier(
     data: CreateCarrierRequest,
@@ -1220,6 +1233,7 @@ async def create_carrier(
     response_model=Page[CarrierResponse],
     summary="Lister les transporteurs",
     description="Liste paginée des transporteurs de l'organisation.",
+    dependencies=[Depends(require_permission(CARRIER_READ))],
 )
 async def list_carriers(
     pagination: PaginationParams = Depends(),
@@ -1235,6 +1249,7 @@ async def list_carriers(
     response_model=CarrierResponse,
     summary="Modifier un transporteur",
     description="Met à jour partiellement les informations d'un transporteur.",
+    dependencies=[Depends(require_permission(CARRIER_MANAGE))],
 )
 async def update_carrier(
     carrier_id: uuid.UUID,
@@ -1252,6 +1267,7 @@ async def update_carrier(
     status_code=201,
     summary="Créer un camion",
     description="Enregistre un camion-citerne rattaché à un transporteur. Le suivi GPS (boîtier, positions) se paramètre séparément via les endpoints `/gps-devices` et `/tracking-*`.",
+    dependencies=[Depends(require_permission(TRUCK_MANAGE))],
 )
 async def create_truck(
     data: CreateTruckRequest,
@@ -1267,6 +1283,7 @@ async def create_truck(
     response_model=Page[TruckResponse],
     summary="Lister les camions",
     description="Liste paginée des camions de l'organisation, filtrable par transporteur.",
+    dependencies=[Depends(require_permission(TRUCK_READ))],
 )
 async def list_trucks(
     pagination: PaginationParams = Depends(),
@@ -1283,6 +1300,7 @@ async def list_trucks(
     response_model=TruckResponse,
     summary="Modifier un camion",
     description="Met à jour partiellement les informations d'un camion (immatriculation, transporteur, capacité...).",
+    dependencies=[Depends(require_permission(TRUCK_MANAGE))],
 )
 async def update_truck(
     truck_id: uuid.UUID,
@@ -1305,7 +1323,7 @@ async def update_truck(
 
 
 
-@router.post("/purchase-orders/{purchase_order_id}/trucks", response_model=TruckOrderAssignmentResponse, status_code=201)
+@router.post("/purchase-orders/{purchase_order_id}/trucks", response_model=TruckOrderAssignmentResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(TRUCK_ORDER_ASSIGNMENT_MANAGE))])
 async def assign_truck_to_purchase_order(
     purchase_order_id: uuid.UUID,
     data: TruckOrderAssignmentRequest,
@@ -1316,7 +1334,7 @@ async def assign_truck_to_purchase_order(
     return await service.assign_truck_to_purchase_order(db, organization_id, current_user.id, purchase_order_id, data)
 
 
-@router.delete("/purchase-orders/{purchase_order_id}/trucks/{truck_id}", status_code=204)
+@router.delete("/purchase-orders/{purchase_order_id}/trucks/{truck_id}", status_code=204, dependencies=[Depends(require_permission_any_scope(TRUCK_ORDER_ASSIGNMENT_MANAGE))])
 async def unassign_truck_from_purchase_order(
     purchase_order_id: uuid.UUID,
     truck_id: uuid.UUID,
@@ -1327,7 +1345,7 @@ async def unassign_truck_from_purchase_order(
     await service.unassign_truck_from_purchase_order(db, organization_id, current_user.id, purchase_order_id, truck_id)
 
 
-@router.get("/purchase-orders/{purchase_order_id}/trucks", response_model=list[TruckOrderAssignmentResponse])
+@router.get("/purchase-orders/{purchase_order_id}/trucks", response_model=list[TruckOrderAssignmentResponse], dependencies=[Depends(require_permission_any_scope(PURCHASE_ORDER_READ))])
 async def list_trucks_for_purchase_order(
     purchase_order_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -1342,6 +1360,7 @@ async def list_trucks_for_purchase_order(
     response_model=list[TruckOrderAssignmentResponse],
     summary="Bons de commande assignés à un camion",
     description="Liste les bons de commande (purchase orders) actuellement assignés à ce camion pour livraison.",
+    dependencies=[Depends(require_permission(TRUCK_READ))],
 )
 async def list_orders_for_truck(
     truck_id: uuid.UUID,
@@ -1353,7 +1372,7 @@ async def list_orders_for_truck(
 
 
 
-@router.post("/purchase-orders", response_model=PurchaseOrderResponse, status_code=201)
+@router.post("/purchase-orders", response_model=PurchaseOrderResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(PURCHASE_ORDER_MANAGE))])
 async def create_purchase_order(
     data: CreatePurchaseOrderRequest,
     current_user: User = Depends(get_current_user),
@@ -1363,7 +1382,7 @@ async def create_purchase_order(
     return await service.create_purchase_order(db, organization_id, current_user.id, data)
 
 
-@router.get("/purchase-orders", response_model=Page[PurchaseOrderResponse])
+@router.get("/purchase-orders", response_model=Page[PurchaseOrderResponse], dependencies=[Depends(require_permission_any_scope(PURCHASE_ORDER_READ))])
 async def list_purchase_orders(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
@@ -1374,7 +1393,7 @@ async def list_purchase_orders(
     return await service.list_purchase_orders(db, organization_id, current_user.id, pagination, stationId)
 
 
-@router.get("/purchase-orders/{purchase_order_id}", response_model=PurchaseOrderResponse)
+@router.get("/purchase-orders/{purchase_order_id}", response_model=PurchaseOrderResponse, dependencies=[Depends(require_permission_any_scope(PURCHASE_ORDER_READ))])
 async def get_purchase_order(
     purchase_order_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -1384,7 +1403,7 @@ async def get_purchase_order(
     return await service.get_purchase_order(db, organization_id, current_user.id, purchase_order_id)
 
 
-@router.post("/purchase-orders/{purchase_order_id}/generate-document", response_model=DocumentResponse, status_code=201)
+@router.post("/purchase-orders/{purchase_order_id}/generate-document", response_model=DocumentResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(PURCHASE_ORDER_MANAGE))])
 async def generate_purchase_order_document(
     purchase_order_id: uuid.UUID,
     data: GeneratePurchaseOrderDocumentRequest,
@@ -1395,7 +1414,7 @@ async def generate_purchase_order_document(
     return await service.generate_purchase_order_document(db, organization_id, current_user.id, purchase_order_id, data)
 
 
-@router.post("/shift-cash-declarations", response_model=ShiftCashDeclarationResponse, status_code=201)
+@router.post("/shift-cash-declarations", response_model=ShiftCashDeclarationResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(SHIFT_CASH_DECLARATION_CREATE))])
 async def create_shift_cash_declaration(
     data: CreateShiftCashDeclarationRequest,
     current_user: User = Depends(get_current_user),
@@ -1405,7 +1424,7 @@ async def create_shift_cash_declaration(
     return await service.create_shift_cash_declaration(db, organization_id, current_user.id, data)
 
 
-@router.get("/shift-cash-declarations", response_model=Page[ShiftCashDeclarationResponse])
+@router.get("/shift-cash-declarations", response_model=Page[ShiftCashDeclarationResponse], dependencies=[Depends(require_permission_any_scope(SHIFT_CASH_DECLARATION_READ))])
 async def list_shift_cash_declarations(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
@@ -1416,7 +1435,7 @@ async def list_shift_cash_declarations(
     return await service.list_shift_cash_declarations(db, organization_id, current_user.id, pagination, stationId)
 
 
-@router.patch("/shift-cash-declarations/{declaration_id}", response_model=ShiftCashDeclarationResponse)
+@router.patch("/shift-cash-declarations/{declaration_id}", response_model=ShiftCashDeclarationResponse, dependencies=[Depends(require_permission_any_scope(SHIFT_CASH_DECLARATION_CREATE))])
 async def update_shift_cash_declaration(
     declaration_id: uuid.UUID,
     data: UpdateShiftCashDeclarationRequest,
@@ -1427,7 +1446,7 @@ async def update_shift_cash_declaration(
     return await service.update_shift_cash_declaration(db, organization_id, current_user.id, declaration_id, data)
 
 
-@router.post("/shift-cash-declarations/{declaration_id}/lock", response_model=ShiftCashDeclarationResponse)
+@router.post("/shift-cash-declarations/{declaration_id}/lock", response_model=ShiftCashDeclarationResponse, dependencies=[Depends(require_permission_any_scope(DECLARATION_LOCK))])
 async def lock_shift_cash_declaration(
     declaration_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -1437,7 +1456,7 @@ async def lock_shift_cash_declaration(
     return await service.lock_shift_cash_declaration(db, organization_id, current_user.id, declaration_id)
 
 
-@router.post("/manual-gauging-declarations", response_model=ManualGaugingDeclarationResponse, status_code=201)
+@router.post("/manual-gauging-declarations", response_model=ManualGaugingDeclarationResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(MANUAL_GAUGING_DECLARATION_CREATE))])
 async def create_manual_gauging_declaration(
     data: CreateManualGaugingDeclarationRequest,
     current_user: User = Depends(get_current_user),
@@ -1447,7 +1466,7 @@ async def create_manual_gauging_declaration(
     return await service.create_manual_gauging_declaration(db, organization_id, current_user.id, data)
 
 
-@router.get("/manual-gauging-declarations", response_model=Page[ManualGaugingDeclarationResponse])
+@router.get("/manual-gauging-declarations", response_model=Page[ManualGaugingDeclarationResponse], dependencies=[Depends(require_permission_any_scope(MANUAL_GAUGING_DECLARATION_READ))])
 async def list_manual_gauging_declarations(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
@@ -1458,7 +1477,7 @@ async def list_manual_gauging_declarations(
     return await service.list_manual_gauging_declarations(db, organization_id, current_user.id, pagination, stationId)
 
 
-@router.patch("/manual-gauging-declarations/{declaration_id}", response_model=ManualGaugingDeclarationResponse)
+@router.patch("/manual-gauging-declarations/{declaration_id}", response_model=ManualGaugingDeclarationResponse, dependencies=[Depends(require_permission_any_scope(MANUAL_GAUGING_DECLARATION_CREATE))])
 async def update_manual_gauging_declaration(
     declaration_id: uuid.UUID,
     data: UpdateManualGaugingDeclarationRequest,
@@ -1469,7 +1488,7 @@ async def update_manual_gauging_declaration(
     return await service.update_manual_gauging_declaration(db, organization_id, current_user.id, declaration_id, data)
 
 
-@router.post("/manual-gauging-declarations/{declaration_id}/lock", response_model=ManualGaugingDeclarationResponse)
+@router.post("/manual-gauging-declarations/{declaration_id}/lock", response_model=ManualGaugingDeclarationResponse, dependencies=[Depends(require_permission_any_scope(DECLARATION_LOCK))])
 async def lock_manual_gauging_declaration(
     declaration_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -1479,7 +1498,7 @@ async def lock_manual_gauging_declaration(
     return await service.lock_manual_gauging_declaration(db, organization_id, current_user.id, declaration_id)
 
 
-@router.post("/quality-check-declarations", response_model=QualityCheckDeclarationResponse, status_code=201)
+@router.post("/quality-check-declarations", response_model=QualityCheckDeclarationResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(QUALITY_CHECK_DECLARATION_CREATE))])
 async def create_quality_check_declaration(
     data: CreateQualityCheckDeclarationRequest,
     current_user: User = Depends(get_current_user),
@@ -1489,7 +1508,7 @@ async def create_quality_check_declaration(
     return await service.create_quality_check_declaration(db, organization_id, current_user.id, data)
 
 
-@router.get("/quality-check-declarations", response_model=Page[QualityCheckDeclarationResponse])
+@router.get("/quality-check-declarations", response_model=Page[QualityCheckDeclarationResponse], dependencies=[Depends(require_permission_any_scope(QUALITY_CHECK_DECLARATION_READ))])
 async def list_quality_check_declarations(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
@@ -1500,7 +1519,7 @@ async def list_quality_check_declarations(
     return await service.list_quality_check_declarations(db, organization_id, current_user.id, pagination, stationId)
 
 
-@router.patch("/quality-check-declarations/{declaration_id}", response_model=QualityCheckDeclarationResponse)
+@router.patch("/quality-check-declarations/{declaration_id}", response_model=QualityCheckDeclarationResponse, dependencies=[Depends(require_permission_any_scope(QUALITY_CHECK_DECLARATION_CREATE))])
 async def update_quality_check_declaration(
     declaration_id: uuid.UUID,
     data: UpdateQualityCheckDeclarationRequest,
@@ -1511,7 +1530,7 @@ async def update_quality_check_declaration(
     return await service.update_quality_check_declaration(db, organization_id, current_user.id, declaration_id, data)
 
 
-@router.post("/quality-check-declarations/{declaration_id}/lock", response_model=QualityCheckDeclarationResponse)
+@router.post("/quality-check-declarations/{declaration_id}/lock", response_model=QualityCheckDeclarationResponse, dependencies=[Depends(require_permission_any_scope(DECLARATION_LOCK))])
 async def lock_quality_check_declaration(
     declaration_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -1521,7 +1540,7 @@ async def lock_quality_check_declaration(
     return await service.lock_quality_check_declaration(db, organization_id, current_user.id, declaration_id)
 
 
-@router.post("/leak-test-declarations", response_model=LeakTestDeclarationResponse, status_code=201)
+@router.post("/leak-test-declarations", response_model=LeakTestDeclarationResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(LEAK_TEST_DECLARATION_CREATE))])
 async def create_leak_test_declaration(
     data: CreateLeakTestDeclarationRequest,
     current_user: User = Depends(get_current_user),
@@ -1531,7 +1550,7 @@ async def create_leak_test_declaration(
     return await service.create_leak_test_declaration(db, organization_id, current_user.id, data)
 
 
-@router.get("/leak-test-declarations", response_model=Page[LeakTestDeclarationResponse])
+@router.get("/leak-test-declarations", response_model=Page[LeakTestDeclarationResponse], dependencies=[Depends(require_permission_any_scope(LEAK_TEST_DECLARATION_READ))])
 async def list_leak_test_declarations(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
@@ -1542,7 +1561,7 @@ async def list_leak_test_declarations(
     return await service.list_leak_test_declarations(db, organization_id, current_user.id, pagination, stationId)
 
 
-@router.patch("/leak-test-declarations/{declaration_id}", response_model=LeakTestDeclarationResponse)
+@router.patch("/leak-test-declarations/{declaration_id}", response_model=LeakTestDeclarationResponse, dependencies=[Depends(require_permission_any_scope(LEAK_TEST_DECLARATION_CREATE))])
 async def update_leak_test_declaration(
     declaration_id: uuid.UUID,
     data: UpdateLeakTestDeclarationRequest,
@@ -1553,7 +1572,7 @@ async def update_leak_test_declaration(
     return await service.update_leak_test_declaration(db, organization_id, current_user.id, declaration_id, data)
 
 
-@router.post("/leak-test-declarations/{declaration_id}/lock", response_model=LeakTestDeclarationResponse)
+@router.post("/leak-test-declarations/{declaration_id}/lock", response_model=LeakTestDeclarationResponse, dependencies=[Depends(require_permission_any_scope(DECLARATION_LOCK))])
 async def lock_leak_test_declaration(
     declaration_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -1563,7 +1582,7 @@ async def lock_leak_test_declaration(
     return await service.lock_leak_test_declaration(db, organization_id, current_user.id, declaration_id)
 
 
-@router.post("/incident-declarations", response_model=IncidentDeclarationResponse, status_code=201)
+@router.post("/incident-declarations", response_model=IncidentDeclarationResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(INCIDENT_DECLARATION_CREATE))])
 async def create_incident_declaration(
     data: CreateIncidentDeclarationRequest,
     current_user: User = Depends(get_current_user),
@@ -1573,7 +1592,7 @@ async def create_incident_declaration(
     return await service.create_incident_declaration(db, organization_id, current_user.id, data)
 
 
-@router.get("/incident-declarations", response_model=Page[IncidentDeclarationResponse])
+@router.get("/incident-declarations", response_model=Page[IncidentDeclarationResponse], dependencies=[Depends(require_permission_any_scope(INCIDENT_DECLARATION_READ))])
 async def list_incident_declarations(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
@@ -1584,7 +1603,7 @@ async def list_incident_declarations(
     return await service.list_incident_declarations(db, organization_id, current_user.id, pagination, stationId)
 
 
-@router.patch("/incident-declarations/{declaration_id}", response_model=IncidentDeclarationResponse)
+@router.patch("/incident-declarations/{declaration_id}", response_model=IncidentDeclarationResponse, dependencies=[Depends(require_permission_any_scope(INCIDENT_DECLARATION_CREATE))])
 async def update_incident_declaration(
     declaration_id: uuid.UUID,
     data: UpdateIncidentDeclarationRequest,
@@ -1595,7 +1614,7 @@ async def update_incident_declaration(
     return await service.update_incident_declaration(db, organization_id, current_user.id, declaration_id, data)
 
 
-@router.post("/incident-declarations/{declaration_id}/lock", response_model=IncidentDeclarationResponse)
+@router.post("/incident-declarations/{declaration_id}/lock", response_model=IncidentDeclarationResponse, dependencies=[Depends(require_permission_any_scope(DECLARATION_LOCK))])
 async def lock_incident_declaration(
     declaration_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -1613,7 +1632,7 @@ async def lock_incident_declaration(
 # ================================================================
 
 
-@router.post("/commercial-accounts", response_model=CommercialAccountResponse, status_code=201)
+@router.post("/commercial-accounts", response_model=CommercialAccountResponse, status_code=201, dependencies=[Depends(require_permission(COMMERCIAL_ACCOUNT_MANAGE))])
 async def create_commercial_account(
     data: CreateCommercialAccountRequest,
     current_user: User = Depends(get_current_user),
@@ -1623,7 +1642,7 @@ async def create_commercial_account(
     return await service.create_commercial_account(db, organization_id, current_user.id, data)
 
 
-@router.get("/commercial-accounts", response_model=Page[CommercialAccountResponse])
+@router.get("/commercial-accounts", response_model=Page[CommercialAccountResponse], dependencies=[Depends(require_permission(COMMERCIAL_ACCOUNT_READ))])
 async def list_commercial_accounts(
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_user),
@@ -1633,7 +1652,7 @@ async def list_commercial_accounts(
     return await service.list_commercial_accounts(db, organization_id, current_user.id, pagination)
 
 
-@router.patch("/commercial-accounts/{account_id}", response_model=CommercialAccountResponse)
+@router.patch("/commercial-accounts/{account_id}", response_model=CommercialAccountResponse, dependencies=[Depends(require_permission(COMMERCIAL_ACCOUNT_MANAGE))])
 async def update_commercial_account(
     account_id: uuid.UUID,
     data: UpdateCommercialAccountRequest,
@@ -1644,7 +1663,7 @@ async def update_commercial_account(
     return await service.update_commercial_account(db, organization_id, current_user.id, account_id, data)
 
 
-@router.post("/vehicles", response_model=VehicleResponse, status_code=201)
+@router.post("/vehicles", response_model=VehicleResponse, status_code=201, dependencies=[Depends(require_permission(COMMERCIAL_ACCOUNT_MANAGE))])
 async def create_vehicle(
     data: CreateVehicleRequest,
     current_user: User = Depends(get_current_user),
@@ -1654,7 +1673,7 @@ async def create_vehicle(
     return await service.create_vehicle(db, organization_id, current_user.id, data)
 
 
-@router.post("/drivers", response_model=DriverResponse, status_code=201)
+@router.post("/drivers", response_model=DriverResponse, status_code=201, dependencies=[Depends(require_permission(COMMERCIAL_ACCOUNT_MANAGE))])
 async def create_driver(
     data: CreateDriverRequest,
     current_user: User = Depends(get_current_user),
@@ -1664,7 +1683,7 @@ async def create_driver(
     return await service.create_driver(db, organization_id, current_user.id, data)
 
 
-@router.post("/authorizations", response_model=AuthorizationResponse, status_code=201)
+@router.post("/authorizations", response_model=AuthorizationResponse, status_code=201, dependencies=[Depends(require_permission(COMMERCIAL_ACCOUNT_MANAGE))])
 async def create_authorization(
     data: CreateAuthorizationRequest,
     current_user: User = Depends(get_current_user),
@@ -1674,7 +1693,7 @@ async def create_authorization(
     return await service.create_authorization(db, organization_id, current_user.id, data)
 
 
-@router.post("/sales", response_model=SaleResponse, status_code=201)
+@router.post("/sales", response_model=SaleResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(SALE_CREATE))])
 async def create_sale(
     data: CreateSaleRequest,
     current_user: User = Depends(get_current_user),
@@ -1684,7 +1703,7 @@ async def create_sale(
     return await service.create_sale(db, organization_id, current_user.id, data)
 
 
-@router.get("/sales", response_model=Page[SaleResponse])
+@router.get("/sales", response_model=Page[SaleResponse], dependencies=[Depends(require_permission_any_scope(SALE_READ))])
 async def list_sales(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
@@ -1695,7 +1714,7 @@ async def list_sales(
     return await service.list_sales(db, organization_id, current_user.id, pagination, stationId)
 
 
-@router.post("/sales/bulk-import", response_model=BulkImportSalesResponse)
+@router.post("/sales/bulk-import", response_model=BulkImportSalesResponse, dependencies=[Depends(require_permission_any_scope(SALE_CREATE))])
 async def bulk_import_sales(
     data: BulkImportSalesRequest,
     current_user: User = Depends(get_current_user),
@@ -1705,7 +1724,7 @@ async def bulk_import_sales(
     return await service.bulk_import_sales(db, organization_id, current_user.id, data)
 
 
-@router.get("/receivables", response_model=Page[ReceivableResponse])
+@router.get("/receivables", response_model=Page[ReceivableResponse], dependencies=[Depends(require_permission(RECEIVABLE_READ))])
 async def list_receivables(
     pagination: PaginationParams = Depends(),
     commercialAccountId: uuid.UUID | None = None,
@@ -1716,7 +1735,7 @@ async def list_receivables(
     return await service.list_receivables(db, organization_id, current_user.id, pagination, commercialAccountId)
 
 
-@router.post("/payments", response_model=PaymentResponse, status_code=201)
+@router.post("/payments", response_model=PaymentResponse, status_code=201, dependencies=[Depends(require_permission(PAYMENT_CREATE))])
 async def create_payment(
     data: CreatePaymentRequest,
     current_user: User = Depends(get_current_user),
@@ -1726,7 +1745,7 @@ async def create_payment(
     return await service.create_payment(db, organization_id, current_user.id, data)
 
 
-@router.get("/payments", response_model=Page[PaymentResponse])
+@router.get("/payments", response_model=Page[PaymentResponse], dependencies=[Depends(require_permission(PAYMENT_READ))])
 async def list_payments(
     pagination: PaginationParams = Depends(),
     receivableId: uuid.UUID | None = None,
@@ -1743,7 +1762,7 @@ async def list_payments(
 # ================================================================
 
 
-@router.post("/sellable-products", response_model=SellableProductResponse, status_code=201)
+@router.post("/sellable-products", response_model=SellableProductResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(SELLABLE_PRODUCT_MANAGE))])
 async def create_sellable_product(
     data: CreateSellableProductRequest,
     current_user: User = Depends(get_current_user),
@@ -1753,7 +1772,7 @@ async def create_sellable_product(
     return await service.create_sellable_product(db, organization_id, current_user.id, data)
 
 
-@router.patch("/sellable-products/{product_id}", response_model=SellableProductResponse)
+@router.patch("/sellable-products/{product_id}", response_model=SellableProductResponse, dependencies=[Depends(require_permission_any_scope(SELLABLE_PRODUCT_MANAGE))])
 async def update_sellable_product(
     product_id: uuid.UUID,
     data: UpdateSellableProductRequest,
@@ -1764,7 +1783,7 @@ async def update_sellable_product(
     return await service.update_sellable_product(db, organization_id, current_user.id, product_id, data)
 
 
-@router.get("/sellable-products", response_model=Page[SellableProductResponse])
+@router.get("/sellable-products", response_model=Page[SellableProductResponse], dependencies=[Depends(require_permission_any_scope(SELLABLE_PRODUCT_READ))])
 async def list_sellable_products(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
@@ -1776,7 +1795,7 @@ async def list_sellable_products(
     return await service.list_sellable_products(db, organization_id, current_user.id, pagination, stationId, search)
 
 
-@router.post("/sellable-products/{product_id}/prices", response_model=SellableProductPriceResponse, status_code=201)
+@router.post("/sellable-products/{product_id}/prices", response_model=SellableProductPriceResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(SELLABLE_PRODUCT_MANAGE))])
 async def create_sellable_product_price(
     product_id: uuid.UUID,
     data: CreateSellableProductPriceRequest,
@@ -1787,7 +1806,7 @@ async def create_sellable_product_price(
     return await service.create_sellable_product_price(db, organization_id, current_user.id, product_id, data)
 
 
-@router.patch("/sellable-product-prices/{price_id}", response_model=SellableProductPriceResponse)
+@router.patch("/sellable-product-prices/{price_id}", response_model=SellableProductPriceResponse, dependencies=[Depends(require_permission_any_scope(SELLABLE_PRODUCT_MANAGE))])
 async def update_sellable_product_price(
     price_id: uuid.UUID,
     data: UpdateSellableProductPriceRequest,
@@ -1798,7 +1817,7 @@ async def update_sellable_product_price(
     return await service.update_sellable_product_price(db, organization_id, current_user.id, price_id, data)
 
 
-@router.get("/sellable-products/{product_id}/prices", response_model=list[SellableProductPriceResponse])
+@router.get("/sellable-products/{product_id}/prices", response_model=list[SellableProductPriceResponse], dependencies=[Depends(require_permission_any_scope(SELLABLE_PRODUCT_READ))])
 async def list_sellable_product_prices(
     product_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -1808,7 +1827,7 @@ async def list_sellable_product_prices(
     return await service.list_sellable_product_prices(db, organization_id, current_user.id, product_id)
 
 
-@router.post("/sellable-products/bulk-import", response_model=BulkImportSellableProductsResponse)
+@router.post("/sellable-products/bulk-import", response_model=BulkImportSellableProductsResponse, dependencies=[Depends(require_permission_any_scope(SELLABLE_PRODUCT_MANAGE))])
 async def bulk_import_sellable_products(
     data: BulkImportSellableProductsRequest,
     current_user: User = Depends(get_current_user),
@@ -1824,7 +1843,7 @@ async def bulk_import_sellable_products(
 # ================================================================
 
 
-@router.post("/product-sales", response_model=ProductSaleTransactionResponse, status_code=201)
+@router.post("/product-sales", response_model=ProductSaleTransactionResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(PRODUCT_SALE_CREATE))])
 async def create_product_sale_transaction(
     data: CreateProductSaleTransactionRequest,
     current_user: User = Depends(get_current_user),
@@ -1834,7 +1853,7 @@ async def create_product_sale_transaction(
     return await service.create_product_sale_transaction(db, organization_id, current_user.id, data)
 
 
-@router.post("/product-sales/{transaction_id}/cancel", response_model=ProductSaleTransactionResponse)
+@router.post("/product-sales/{transaction_id}/cancel", response_model=ProductSaleTransactionResponse, dependencies=[Depends(require_permission_any_scope(PRODUCT_SALE_CANCEL))])
 async def cancel_product_sale_transaction(
     transaction_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -1844,7 +1863,7 @@ async def cancel_product_sale_transaction(
     return await service.cancel_product_sale_transaction(db, organization_id, current_user.id, transaction_id)
 
 
-@router.get("/product-sales", response_model=Page[ProductSaleTransactionResponse])
+@router.get("/product-sales", response_model=Page[ProductSaleTransactionResponse], dependencies=[Depends(require_permission_any_scope(PRODUCT_SALE_READ))])
 async def list_product_sale_transactions(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
@@ -1860,7 +1879,7 @@ async def list_product_sale_transactions(
 # ================================================================
 
 
-@router.post("/technicians", response_model=TechnicianResponse, status_code=201)
+@router.post("/technicians", response_model=TechnicianResponse, status_code=201, dependencies=[Depends(require_permission(TECHNICIAN_MANAGE))])
 async def create_technician(
     data: CreateTechnicianRequest,
     current_user: User = Depends(get_current_user),
@@ -1870,7 +1889,7 @@ async def create_technician(
     return await service.create_technician(db, organization_id, current_user.id, data)
 
 
-@router.get("/technicians", response_model=Page[TechnicianResponse])
+@router.get("/technicians", response_model=Page[TechnicianResponse], dependencies=[Depends(require_permission(TECHNICIAN_READ))])
 async def list_technicians(
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_user),
@@ -1880,7 +1899,7 @@ async def list_technicians(
     return await service.list_technicians(db, organization_id, current_user.id, pagination)
 
 
-@router.post("/equipment", response_model=EquipmentResponse, status_code=201)
+@router.post("/equipment", response_model=EquipmentResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(EQUIPMENT_MANAGE))])
 async def create_equipment(
     data: CreateEquipmentRequest,
     current_user: User = Depends(get_current_user),
@@ -1890,7 +1909,7 @@ async def create_equipment(
     return await service.create_equipment(db, organization_id, current_user.id, data)
 
 
-@router.patch("/equipment/{equipment_id}", response_model=EquipmentResponse)
+@router.patch("/equipment/{equipment_id}", response_model=EquipmentResponse, dependencies=[Depends(require_permission_any_scope(EQUIPMENT_MANAGE))])
 async def update_equipment(
     equipment_id: uuid.UUID,
     data: UpdateEquipmentRequest,
@@ -1901,7 +1920,7 @@ async def update_equipment(
     return await service.update_equipment(db, organization_id, current_user.id, equipment_id, data)
 
 
-@router.get("/equipment", response_model=Page[EquipmentResponse])
+@router.get("/equipment", response_model=Page[EquipmentResponse], dependencies=[Depends(require_permission_any_scope(EQUIPMENT_READ))])
 async def list_equipment(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
@@ -1916,7 +1935,7 @@ async def list_equipment(
 # (SecurityEquipment), Fournisseurs par station (StationSupplier), Finances.
 
 
-@router.post("/security-equipment", response_model=SecurityEquipmentResponse, status_code=201)
+@router.post("/security-equipment", response_model=SecurityEquipmentResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(SECURITY_EQUIPMENT_MANAGE))])
 async def create_security_equipment(
     data: CreateSecurityEquipmentRequest,
     current_user: User = Depends(get_current_user),
@@ -1926,7 +1945,7 @@ async def create_security_equipment(
     return await service.create_security_equipment(db, organization_id, current_user.id, data)
 
 
-@router.patch("/security-equipment/{security_equipment_id}", response_model=SecurityEquipmentResponse)
+@router.patch("/security-equipment/{security_equipment_id}", response_model=SecurityEquipmentResponse, dependencies=[Depends(require_permission_any_scope(SECURITY_EQUIPMENT_MANAGE))])
 async def update_security_equipment(
     security_equipment_id: uuid.UUID,
     data: UpdateSecurityEquipmentRequest,
@@ -1937,7 +1956,7 @@ async def update_security_equipment(
     return await service.update_security_equipment(db, organization_id, current_user.id, security_equipment_id, data)
 
 
-@router.get("/security-equipment", response_model=Page[SecurityEquipmentResponse])
+@router.get("/security-equipment", response_model=Page[SecurityEquipmentResponse], dependencies=[Depends(require_permission_any_scope(SECURITY_EQUIPMENT_READ))])
 async def list_security_equipment(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
@@ -1948,7 +1967,7 @@ async def list_security_equipment(
     return await service.list_security_equipment(db, organization_id, current_user.id, pagination, stationId)
 
 
-@router.post("/station-suppliers", response_model=StationSupplierResponse, status_code=201)
+@router.post("/station-suppliers", response_model=StationSupplierResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(STATION_SUPPLIER_MANAGE))])
 async def create_station_supplier(
     data: CreateStationSupplierRequest,
     current_user: User = Depends(get_current_user),
@@ -1958,7 +1977,7 @@ async def create_station_supplier(
     return await service.create_station_supplier(db, organization_id, current_user.id, data)
 
 
-@router.patch("/station-suppliers/{station_supplier_id}", response_model=StationSupplierResponse)
+@router.patch("/station-suppliers/{station_supplier_id}", response_model=StationSupplierResponse, dependencies=[Depends(require_permission_any_scope(STATION_SUPPLIER_MANAGE))])
 async def update_station_supplier(
     station_supplier_id: uuid.UUID,
     data: UpdateStationSupplierRequest,
@@ -1969,7 +1988,7 @@ async def update_station_supplier(
     return await service.update_station_supplier(db, organization_id, current_user.id, station_supplier_id, data)
 
 
-@router.get("/station-suppliers", response_model=Page[StationSupplierResponse])
+@router.get("/station-suppliers", response_model=Page[StationSupplierResponse], dependencies=[Depends(require_permission_any_scope(STATION_SUPPLIER_READ))])
 async def list_station_suppliers(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
@@ -1985,6 +2004,7 @@ async def list_station_suppliers(
     response_model=StationFinancialResponse,
     summary="Paramètres financiers d'une station",
     description="Retourne les paramètres financiers/comptables rattachés à la station (comptes, conditions de facturation...), distincts des données d'exploitation carburant.",
+    dependencies=[Depends(require_permission_any_scope(STATION_FINANCIAL_READ))],
 )
 async def get_station_financial(
     station_id: uuid.UUID,
@@ -2000,6 +2020,7 @@ async def get_station_financial(
     response_model=StationFinancialResponse,
     summary="Modifier les paramètres financiers d'une station",
     description="Met à jour partiellement les paramètres financiers d'une station.",
+    dependencies=[Depends(require_permission_any_scope(STATION_FINANCIAL_MANAGE))],
 )
 async def update_station_financial(
     station_id: uuid.UUID,
@@ -2011,7 +2032,7 @@ async def update_station_financial(
     return await service.update_station_financial(db, organization_id, current_user.id, station_id, data)
 
 
-@router.post("/station-staff", response_model=CreateStationStaffResponse, status_code=201)
+@router.post("/station-staff", response_model=CreateStationStaffResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(STATION_STAFF_MANAGE))])
 async def create_station_staff_member(
     data: CreateStationStaffRequest,
     current_user: User = Depends(get_current_user),
@@ -2021,7 +2042,7 @@ async def create_station_staff_member(
     return await service.create_station_staff_member(db, organization_id, current_user.id, data)
 
 
-@router.patch("/station-staff/{user_id}", response_model=StationStaffResponse)
+@router.patch("/station-staff/{user_id}", response_model=StationStaffResponse, dependencies=[Depends(require_permission_any_scope(STATION_STAFF_MANAGE))])
 async def update_station_staff_member(
     user_id: uuid.UUID,
     data: UpdateStationStaffRequest,
@@ -2032,7 +2053,7 @@ async def update_station_staff_member(
     return await service.update_station_staff_profile(db, organization_id, current_user.id, user_id, data)
 
 
-@router.post("/station-staff/{user_id}/deactivate", response_model=StationStaffResponse)
+@router.post("/station-staff/{user_id}/deactivate", response_model=StationStaffResponse, dependencies=[Depends(require_permission_any_scope(STATION_STAFF_MANAGE))])
 async def deactivate_station_staff_member(
     user_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -2042,7 +2063,7 @@ async def deactivate_station_staff_member(
     return await service.deactivate_station_staff_access(db, organization_id, current_user.id, user_id)
 
 
-@router.put("/station-staff/{user_id}/role", response_model=StationStaffResponse)
+@router.put("/station-staff/{user_id}/role", response_model=StationStaffResponse, dependencies=[Depends(require_permission_any_scope(STATION_STAFF_MANAGE))])
 async def change_station_staff_member_role(
     user_id: uuid.UUID,
     data: ChangeStationStaffRoleRequest,
@@ -2053,7 +2074,7 @@ async def change_station_staff_member_role(
     return await service.change_station_staff_role(db, organization_id, current_user.id, user_id, data)
 
 
-@router.post("/station-staff/{user_id}/reset-password", response_model=ResetStationStaffPasswordResponse)
+@router.post("/station-staff/{user_id}/reset-password", response_model=ResetStationStaffPasswordResponse, dependencies=[Depends(require_permission_any_scope(STATION_STAFF_MANAGE))])
 async def reset_station_staff_member_password(
     user_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -2064,7 +2085,7 @@ async def reset_station_staff_member_password(
     return ResetStationStaffPasswordResponse(temporaryPassword=temporary_password)
 
 
-@router.get("/station-staff", response_model=list[StationStaffResponse])
+@router.get("/station-staff", response_model=list[StationStaffResponse], dependencies=[Depends(require_permission_any_scope(STATION_STAFF_READ))])
 async def list_station_staff_members(
     stationId: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -2074,7 +2095,7 @@ async def list_station_staff_members(
     return await service.list_station_staff_profiles(db, organization_id, current_user.id, stationId)
 
 
-@router.post("/interventions", response_model=InterventionResponse, status_code=201)
+@router.post("/interventions", response_model=InterventionResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(INTERVENTION_CREATE))])
 async def create_intervention(
     data: CreateInterventionRequest,
     current_user: User = Depends(get_current_user),
@@ -2084,7 +2105,7 @@ async def create_intervention(
     return await service.create_intervention(db, organization_id, current_user.id, data)
 
 
-@router.post("/interventions/{intervention_id}/assign", response_model=InterventionResponse)
+@router.post("/interventions/{intervention_id}/assign", response_model=InterventionResponse, dependencies=[Depends(require_permission_any_scope(INTERVENTION_ASSIGN))])
 async def assign_intervention(
     intervention_id: uuid.UUID,
     data: AssignInterventionRequest,
@@ -2095,7 +2116,7 @@ async def assign_intervention(
     return await service.assign_intervention(db, organization_id, current_user.id, intervention_id, data)
 
 
-@router.post("/interventions/{intervention_id}/close", response_model=InterventionResponse)
+@router.post("/interventions/{intervention_id}/close", response_model=InterventionResponse, dependencies=[Depends(require_permission_any_scope(INTERVENTION_CLOSE))])
 async def close_intervention(
     intervention_id: uuid.UUID,
     data: CloseInterventionRequest,
@@ -2106,7 +2127,7 @@ async def close_intervention(
     return await service.close_intervention(db, organization_id, current_user.id, intervention_id, data)
 
 
-@router.get("/interventions", response_model=Page[InterventionResponse])
+@router.get("/interventions", response_model=Page[InterventionResponse], dependencies=[Depends(require_permission_any_scope(INTERVENTION_READ))])
 async def list_interventions(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
@@ -2122,7 +2143,7 @@ async def list_interventions(
 # ================================================================
 
 
-@router.post("/regulatory-documents", response_model=RegulatoryDocumentResponse, status_code=201)
+@router.post("/regulatory-documents", response_model=RegulatoryDocumentResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(REGULATORY_DOCUMENT_CREATE))])
 async def create_regulatory_document(
     data: CreateRegulatoryDocumentRequest,
     current_user: User = Depends(get_current_user),
@@ -2132,7 +2153,7 @@ async def create_regulatory_document(
     return await service.create_regulatory_document(db, organization_id, current_user.id, data)
 
 
-@router.post("/regulatory-documents/{document_id}/renew", response_model=RegulatoryDocumentResponse)
+@router.post("/regulatory-documents/{document_id}/renew", response_model=RegulatoryDocumentResponse, dependencies=[Depends(require_permission_any_scope(REGULATORY_DOCUMENT_MANAGE))])
 async def renew_regulatory_document(
     document_id: uuid.UUID,
     data: CreateRegulatoryDocumentRequest,
@@ -2143,7 +2164,7 @@ async def renew_regulatory_document(
     return await service.renew_regulatory_document(db, organization_id, current_user.id, document_id, data)
 
 
-@router.patch("/regulatory-documents/{document_id}", response_model=RegulatoryDocumentResponse)
+@router.patch("/regulatory-documents/{document_id}", response_model=RegulatoryDocumentResponse, dependencies=[Depends(require_permission_any_scope(REGULATORY_DOCUMENT_MANAGE))])
 async def update_regulatory_document(
     document_id: uuid.UUID,
     data: UpdateRegulatoryDocumentRequest,
@@ -2154,7 +2175,7 @@ async def update_regulatory_document(
     return await service.update_regulatory_document(db, organization_id, current_user.id, document_id, data)
 
 
-@router.get("/regulatory-documents", response_model=Page[RegulatoryDocumentResponse])
+@router.get("/regulatory-documents", response_model=Page[RegulatoryDocumentResponse], dependencies=[Depends(require_permission_any_scope(REGULATORY_DOCUMENT_READ))])
 async def list_regulatory_documents(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
@@ -2166,7 +2187,7 @@ async def list_regulatory_documents(
     return await service.list_regulatory_documents(db, organization_id, current_user.id, pagination, stationId, needsActionOnly)
 
 
-@router.post("/regulatory-declarations", response_model=RegulatoryDeclarationResponse, status_code=201)
+@router.post("/regulatory-declarations", response_model=RegulatoryDeclarationResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(REGULATORY_DOCUMENT_CREATE))])
 async def create_regulatory_declaration(
     data: CreateRegulatoryDeclarationRequest,
     current_user: User = Depends(get_current_user),
@@ -2176,7 +2197,7 @@ async def create_regulatory_declaration(
     return await service.create_regulatory_declaration(db, organization_id, current_user.id, data)
 
 
-@router.get("/regulatory-declarations", response_model=Page[RegulatoryDeclarationResponse])
+@router.get("/regulatory-declarations", response_model=Page[RegulatoryDeclarationResponse], dependencies=[Depends(require_permission_any_scope(REGULATORY_DECLARATION_READ))])
 async def list_regulatory_declarations(
     pagination: PaginationParams = Depends(),
     stationId: uuid.UUID | None = None,
@@ -2198,6 +2219,7 @@ async def list_regulatory_declarations(
     response_model=StationReconciliationSettingsResponse | None,
     summary="Paramètres de réconciliation de stock d'une station",
     description="Retourne la dérogation de réconciliation configurée pour cette station (seuils de tolérance, etc.), ou `null` si la station utilise la configuration par défaut de l'organisation.",
+    dependencies=[Depends(require_permission_any_scope(RECONCILIATION_SETTINGS_MANAGE))],
 )
 async def get_station_reconciliation_settings(
     station_id: uuid.UUID,
@@ -2213,6 +2235,7 @@ async def get_station_reconciliation_settings(
     response_model=StationReconciliationSettingsResponse,
     summary="Créer ou remplacer les paramètres de réconciliation d'une station",
     description="Crée ou remplace intégralement la dérogation de réconciliation de la station. Un seul enregistrement par station : cette configuration est un état courant, pas un historique — un appel répété écrase le précédent au lieu d'en empiler un nouveau.",
+    dependencies=[Depends(require_permission_any_scope(RECONCILIATION_SETTINGS_MANAGE))],
 )
 async def upsert_station_reconciliation_settings(
     station_id: uuid.UUID,
@@ -2224,7 +2247,7 @@ async def upsert_station_reconciliation_settings(
     return await service.upsert_station_reconciliation_settings(db, organization_id, current_user.id, station_id, data)
 
 
-@router.get("/reconciliation-records", response_model=Page[ReconciliationRecordResponse])
+@router.get("/reconciliation-records", response_model=Page[ReconciliationRecordResponse], dependencies=[Depends(require_permission(RECONCILIATION_READ))])
 async def list_reconciliation_records(
     pagination: PaginationParams = Depends(),
     subjectType: str | None = None,
@@ -2242,7 +2265,7 @@ async def list_reconciliation_records(
 # ================================================================
 
 
-@router.post("/delivery-declarations/{declaration_id}/reconcile", response_model=list[ReconciliationRecordResponse])
+@router.post("/delivery-declarations/{declaration_id}/reconcile", response_model=list[ReconciliationRecordResponse], dependencies=[Depends(require_permission_any_scope(RECONCILIATION_READ))])
 async def reconcile_delivery_declaration(
     declaration_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -2252,7 +2275,7 @@ async def reconcile_delivery_declaration(
     return await service.evaluate_delivery_declaration_reconciliation(db, organization_id, current_user.id, declaration_id)
 
 
-@router.get("/delivery-declaration-lines/{line_id}/reconciliation-candidates", response_model=list[DeliveryReconciliationCandidateResponse])
+@router.get("/delivery-declaration-lines/{line_id}/reconciliation-candidates", response_model=list[DeliveryReconciliationCandidateResponse], dependencies=[Depends(require_permission_any_scope(RECONCILIATION_READ))])
 async def list_delivery_declaration_line_reconciliation_candidates(
     line_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -2262,7 +2285,7 @@ async def list_delivery_declaration_line_reconciliation_candidates(
     return await service.list_delivery_declaration_line_reconciliation_candidates(db, organization_id, current_user.id, line_id)
 
 
-@router.post("/delivery-declaration-lines/{line_id}/reconcile-manual", response_model=ReconciliationRecordResponse)
+@router.post("/delivery-declaration-lines/{line_id}/reconcile-manual", response_model=ReconciliationRecordResponse, dependencies=[Depends(require_permission_any_scope(RECONCILIATION_READ))])
 async def manually_reconcile_delivery_declaration_line(
     line_id: uuid.UUID,
     data: ManualReconcileDeliveryDeclarationLineRequest,
@@ -2273,7 +2296,7 @@ async def manually_reconcile_delivery_declaration_line(
     return await service.manually_reconcile_delivery_declaration_line(db, organization_id, current_user.id, line_id, data)
 
 
-@router.post("/manual-gauging-declarations/{declaration_id}/reconcile", response_model=ReconciliationRecordResponse)
+@router.post("/manual-gauging-declarations/{declaration_id}/reconcile", response_model=ReconciliationRecordResponse, dependencies=[Depends(require_permission_any_scope(RECONCILIATION_READ))])
 async def reconcile_manual_gauging_declaration(
     declaration_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -2283,7 +2306,7 @@ async def reconcile_manual_gauging_declaration(
     return await service.evaluate_manual_gauging_declaration_reconciliation(db, organization_id, current_user.id, declaration_id)
 
 
-@router.post("/quality-check-declarations/{declaration_id}/reconcile", response_model=ReconciliationRecordResponse)
+@router.post("/quality-check-declarations/{declaration_id}/reconcile", response_model=ReconciliationRecordResponse, dependencies=[Depends(require_permission_any_scope(RECONCILIATION_READ))])
 async def reconcile_quality_check_declaration(
     declaration_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -2304,6 +2327,7 @@ async def reconcile_quality_check_declaration(
         "rejouer cet endpoint pour le même jour est sans effet de bord destructif mais régénère "
         "l'enregistrement."
     ),
+    dependencies=[Depends(require_permission_any_scope(RECONCILIATION_READ))],
 )
 async def reconcile_stock(
     tank_id: uuid.UUID,

@@ -115,11 +115,11 @@ async def test_declaration_creation_triggers_discrepancy_alert(client: AsyncClie
 
     res = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
-        json={"stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": "2026-03-01T08:00:00", "declaredVolumeLiters": 5000},
+        json={"stationId": station_id, "eventAt": "2026-03-01T08:00:00", "lines": [{"tankId": tank_id, "volumeLiters": 5000}]},
         headers=headers,
     )
     assert res.status_code == 201, res.text
-    assert res.json()["reconciledWithId"] is not None
+    assert res.json()["lines"][0]["reconciledWithId"] is not None
 
     alerts = await _active_alerts(tank_id)
     assert any(a.type == "delivery_discrepancy" for a in alerts), alerts
@@ -139,11 +139,11 @@ async def test_detection_creation_resolves_pending_declaration(client: AsyncClie
 
     declaration_res = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
-        json={"stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": base.isoformat(), "declaredVolumeLiters": 10875},
+        json={"stationId": station_id, "eventAt": base.isoformat(), "lines": [{"tankId": tank_id, "volumeLiters": 10875}]},
         headers=headers,
     )
     declaration_id = declaration_res.json()["id"]
-    assert declaration_res.json()["reconciledWithId"] is not None  # pending, aucune détection pour l'instant
+    assert declaration_res.json()["lines"][0]["reconciledWithId"] is not None  # pending, aucune détection pour l'instant
 
     await _insert_delivery_measurement_series(sensor_id, base)
     async with AsyncSessionLocal() as db:
@@ -152,8 +152,11 @@ async def test_detection_creation_resolves_pending_declaration(client: AsyncClie
 
     list_res = await client.get(f"/api/v1/zylo-liquid/delivery-declarations?stationId={station_id}", headers=headers)
     declaration_row = next(r for r in list_res.json()["data"] if r["id"] == declaration_id)
-    reconciliation_res = await client.get(f"/api/v1/zylo-liquid/reconciliation-records?subjectId={declaration_id}", headers=headers)
-    latest = next(r for r in reconciliation_res.json()["data"] if r["id"] == declaration_row["reconciledWithId"])
+    # Le rapprochement se porte sur la LIGNE de livraison (sujet
+    # DeliveryDeclarationLine, une cuve par ligne), pas sur l'en-tête.
+    line_id = declaration_row["lines"][0]["id"]
+    reconciliation_res = await client.get(f"/api/v1/zylo-liquid/reconciliation-records?subjectId={line_id}", headers=headers)
+    latest = next(r for r in reconciliation_res.json()["data"] if r["id"] == declaration_row["lines"][0]["reconciledWithId"])
     assert latest["status"] == "matched", latest
 
     # Aucune alerte "livraison sauvage" : la détection a bien trouvé sa déclaration.
@@ -193,7 +196,7 @@ async def test_stale_pending_declaration_creates_lighter_alert(client: AsyncClie
     old_event_at = (datetime.utcnow() - timedelta(hours=30)).isoformat()
     res = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
-        json={"stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": old_event_at, "declaredVolumeLiters": 5000},
+        json={"stationId": station_id, "eventAt": old_event_at, "lines": [{"tankId": tank_id, "volumeLiters": 5000}]},
         headers=headers,
     )
     assert res.status_code == 201, res.text
@@ -221,7 +224,7 @@ async def test_matched_delivery_creates_no_alert(client: AsyncClient, registered
 
     res = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
-        json={"stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": "2026-03-15T08:00:00", "declaredVolumeLiters": 5000},
+        json={"stationId": station_id, "eventAt": "2026-03-15T08:00:00", "lines": [{"tankId": tank_id, "volumeLiters": 5000}]},
         headers=headers,
     )
     assert res.status_code == 201, res.text

@@ -48,58 +48,65 @@ async def test_create_delivery_declaration(client: AsyncClient, registered_user:
     headers = _headers(registered_user, zylo_liquid_organization)
     suffix = uuid.uuid4().hex[:8]
     station_id, fuel_product_id = await _setup_station_and_product(client, headers, suffix)
+    tank_id = await _setup_tank(client, headers, station_id, fuel_product_id, suffix)
 
     res = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
         json={
             "stationId": station_id,
-            "fuelProductId": fuel_product_id,
             "eventAt": "2026-02-01T08:00:00",
-            "declaredVolumeLiters": 5000,
             "supplierName": "Fournisseur Test",
             "deliveryNoteReference": "BL-2026-001",
+            "lines": [{"tankId": tank_id, "volumeLiters": 5000}],
         },
         headers=headers,
     )
     assert res.status_code == 201, res.text
     body = res.json()
     assert body["lifecycleStatus"] == "declared"
-    assert body["declaredVolumeLiters"] == 5000
+    assert body["lines"][0]["volumeLiters"] == 5000
     # Rapprochement automatique déclenché dès la création (mission « flux de
     # livraison station ») — aucune DeliveryDetected n'existe encore pour
     # cette cuve, donc le résultat est "pending", jamais None (avant cette
     # mission, la déclaration restait non évaluée tant que personne
-    # n'appelait /reconcile manuellement).
-    assert body["reconciledWithId"] is not None
+    # n'appelait /reconcile manuellement). Le rapprochement se porte sur la
+    # ligne (une cuve par ligne, refonte 2026-09-17).
+    assert body["lines"][0]["reconciledWithId"] is not None
 
 
 async def test_delivery_declaration_can_be_updated_by_author_while_declared(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
     headers = _headers(registered_user, zylo_liquid_organization)
     suffix = uuid.uuid4().hex[:8]
     station_id, fuel_product_id = await _setup_station_and_product(client, headers, suffix)
+    tank_id = await _setup_tank(client, headers, station_id, fuel_product_id, suffix)
     create_res = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
-        json={"stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": "2026-02-01T08:00:00", "declaredVolumeLiters": 5000},
+        json={"stationId": station_id, "eventAt": "2026-02-01T08:00:00", "lines": [{"tankId": tank_id, "volumeLiters": 5000}]},
         headers=headers,
     )
     declaration_id = create_res.json()["id"]
 
+    # L'en-tête reste modifiable par l'auteur tant que la déclaration est 'declared' ;
+    # les lignes (cuve, volume) ne se modifient jamais en place (refonte 2026-09-17,
+    # voir UpdateDeliveryDeclarationRequest) : le volume doit donc rester 5000.
     update_res = await client.patch(
         f"/api/v1/zylo-liquid/delivery-declarations/{declaration_id}",
-        json={"declaredVolumeLiters": 5200, "changeReason": "Correction du volume relevé"},
+        json={"deliveryNoteReference": "BL-2026-042", "changeReason": "Correction du bon de livraison"},
         headers=headers,
     )
     assert update_res.status_code == 200, update_res.text
-    assert update_res.json()["declaredVolumeLiters"] == 5200
+    assert update_res.json()["deliveryNoteReference"] == "BL-2026-042"
+    assert update_res.json()["lines"][0]["volumeLiters"] == 5000
 
 
 async def test_delivery_declaration_lock_is_irreversible_and_blocks_further_update(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
     headers = _headers(registered_user, zylo_liquid_organization)
     suffix = uuid.uuid4().hex[:8]
     station_id, fuel_product_id = await _setup_station_and_product(client, headers, suffix)
+    tank_id = await _setup_tank(client, headers, station_id, fuel_product_id, suffix)
     create_res = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
-        json={"stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": "2026-02-01T08:00:00", "declaredVolumeLiters": 5000},
+        json={"stationId": station_id, "eventAt": "2026-02-01T08:00:00", "lines": [{"tankId": tank_id, "volumeLiters": 5000}]},
         headers=headers,
     )
     declaration_id = create_res.json()["id"]
@@ -113,7 +120,7 @@ async def test_delivery_declaration_lock_is_irreversible_and_blocks_further_upda
     assert second_lock.json()["error"]["code"] == "declaration_already_locked"
 
     update_after_lock = await client.patch(
-        f"/api/v1/zylo-liquid/delivery-declarations/{declaration_id}", json={"declaredVolumeLiters": 9999}, headers=headers
+        f"/api/v1/zylo-liquid/delivery-declarations/{declaration_id}", json={"deliveryNoteReference": "BL-TARDIF"}, headers=headers
     )
     assert update_after_lock.status_code == 409
     assert update_after_lock.json()["error"]["code"] == "declaration_locked"
@@ -123,9 +130,10 @@ async def test_delivery_declaration_correction_references_original_via_correctsD
     headers = _headers(registered_user, zylo_liquid_organization)
     suffix = uuid.uuid4().hex[:8]
     station_id, fuel_product_id = await _setup_station_and_product(client, headers, suffix)
+    tank_id = await _setup_tank(client, headers, station_id, fuel_product_id, suffix)
     original_res = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
-        json={"stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": "2026-02-01T08:00:00", "declaredVolumeLiters": 5000},
+        json={"stationId": station_id, "eventAt": "2026-02-01T08:00:00", "lines": [{"tankId": tank_id, "volumeLiters": 5000}]},
         headers=headers,
     )
     original_id = original_res.json()["id"]
@@ -135,11 +143,10 @@ async def test_delivery_declaration_correction_references_original_via_correctsD
         "/api/v1/zylo-liquid/delivery-declarations",
         json={
             "stationId": station_id,
-            "fuelProductId": fuel_product_id,
             "eventAt": "2026-02-01T08:00:00",
-            "declaredVolumeLiters": 5200,
             "correctsDeclarationId": original_id,
             "changeReason": "Correction après vérification du bon de livraison papier",
+            "lines": [{"tankId": tank_id, "volumeLiters": 5200}],
         },
         headers=headers,
     )
@@ -148,7 +155,7 @@ async def test_delivery_declaration_correction_references_original_via_correctsD
     # L'originale reste inchangée — jamais réécrite (Phase 5 §3).
     list_res = await client.get(f"/api/v1/zylo-liquid/delivery-declarations?stationId={station_id}", headers=headers)
     original_row = next(r for r in list_res.json()["data"] if r["id"] == original_id)
-    assert original_row["declaredVolumeLiters"] == 5000
+    assert original_row["lines"][0]["volumeLiters"] == 5000
     assert original_row["lifecycleStatus"] == "locked"
 
 
@@ -156,9 +163,10 @@ async def test_delivery_declaration_update_by_non_author_is_denied(client: Async
     headers = _headers(registered_user, zylo_liquid_organization)
     suffix = uuid.uuid4().hex[:8]
     station_id, fuel_product_id = await _setup_station_and_product(client, headers, suffix)
+    tank_id = await _setup_tank(client, headers, station_id, fuel_product_id, suffix)
     create_res = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
-        json={"stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": "2026-02-01T08:00:00", "declaredVolumeLiters": 5000},
+        json={"stationId": station_id, "eventAt": "2026-02-01T08:00:00", "lines": [{"tankId": tank_id, "volumeLiters": 5000}]},
         headers=headers,
     )
     declaration_id = create_res.json()["id"]
@@ -179,7 +187,7 @@ async def test_delivery_declaration_update_by_non_author_is_denied(client: Async
 
     other_headers = {"Authorization": f"Bearer {other_token}", "X-Organization-Id": zylo_liquid_organization["id"]}
     update_res = await client.patch(
-        f"/api/v1/zylo-liquid/delivery-declarations/{declaration_id}", json={"declaredVolumeLiters": 1}, headers=other_headers
+        f"/api/v1/zylo-liquid/delivery-declarations/{declaration_id}", json={"deliveryNoteReference": "BL-INTRUS"}, headers=other_headers
     )
     assert update_res.status_code == 403
 
@@ -188,24 +196,26 @@ async def test_list_delivery_declarations_filtered_by_station(client: AsyncClien
     headers = _headers(registered_user, zylo_liquid_organization)
     suffix = uuid.uuid4().hex[:8]
     station_a_id, fuel_product_id = await _setup_station_and_product(client, headers, suffix)
+    tank_a_id = await _setup_tank(client, headers, station_a_id, fuel_product_id, suffix)
     station_b_res = await client.post("/api/v1/zylo-liquid/stations", json={"name": f"Station B {suffix}", "code": f"STB{suffix}"}, headers=headers)
     station_b_id = station_b_res.json()["id"]
+    tank_b_id = await _setup_tank(client, headers, station_b_id, fuel_product_id, f"{suffix}b")
 
     await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
-        json={"stationId": station_a_id, "fuelProductId": fuel_product_id, "eventAt": "2026-02-01T08:00:00", "declaredVolumeLiters": 100},
+        json={"stationId": station_a_id, "eventAt": "2026-02-01T08:00:00", "lines": [{"tankId": tank_a_id, "volumeLiters": 100}]},
         headers=headers,
     )
     await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
-        json={"stationId": station_b_id, "fuelProductId": fuel_product_id, "eventAt": "2026-02-01T08:00:00", "declaredVolumeLiters": 200},
+        json={"stationId": station_b_id, "eventAt": "2026-02-01T08:00:00", "lines": [{"tankId": tank_b_id, "volumeLiters": 200}]},
         headers=headers,
     )
 
     res = await client.get(f"/api/v1/zylo-liquid/delivery-declarations?stationId={station_a_id}", headers=headers)
     assert res.status_code == 200
     assert res.json()["meta"]["total"] == 1
-    assert res.json()["data"][0]["declaredVolumeLiters"] == 100
+    assert res.json()["data"][0]["lines"][0]["volumeLiters"] == 100
 
 
 async def test_station_scoped_pump_attendant_can_declare_and_is_blocked_outside_scope(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):

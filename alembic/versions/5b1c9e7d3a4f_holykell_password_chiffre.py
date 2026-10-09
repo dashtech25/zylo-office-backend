@@ -1,7 +1,7 @@
 """chiffrement du mot de passe Holykell : colonne chiffrée, colonne en clair rendue nullable (T-027)
 
 Revision ID: 5b1c9e7d3a4f
-Revises: e2f3a4b5c6d7
+Revises: a9b8c7d6e5f4
 Create Date: 2026-10-09
 
 Intention : migration purement additive pour la transition.
@@ -21,7 +21,7 @@ from app.core.field_crypto import dechiffrer
 
 # revision identifiers, used by Alembic.
 revision = "5b1c9e7d3a4f"
-down_revision = "e2f3a4b5c6d7"
+down_revision = "a9b8c7d6e5f4"
 branch_labels = None
 depends_on = None
 

@@ -11,6 +11,7 @@ from app.core.errors import AppError
 from app.core.security import get_current_user
 from app.identity.models import Organization, OrganizationUser, User
 from app.rbac.models import Permission, Role, RolePermission, UserPermissionGrant, UserRole
+from app.rbac.module_policy import assert_permissions_match_module
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +366,8 @@ async def update_role_permissions(
     if role.code == "owner":
         raise AppError(code="owner_role_immutable", message="Le rôle Propriétaire ne peut pas être modifié.", status_code=409)
 
+    # T-018 : un rôle de module ne reçoit pas une permission d'un autre module.
+    await assert_permissions_match_module(db, role.moduleCode, permission_codes)
     await _assert_no_privilege_escalation(db, organization_id, editor_user_id, permission_codes)
 
     existing = await db.execute(select(RolePermission).where(RolePermission.roleId == role_id))
@@ -447,6 +450,7 @@ async def assign_role(
     # IAM-004 : on n'attribue un rôle qu'à un membre de l'organisation.
     await assert_target_is_member(db, organization_id, target_user_id)
     role_codes = await get_role_permission_codes(db, role.id)
+    await assert_permissions_match_module(db, role.moduleCode, role_codes)
     await _assert_no_privilege_escalation(db, organization_id, granter_user_id, role_codes, resource_type, resource_id)
 
     existing = await db.execute(

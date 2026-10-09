@@ -1,6 +1,6 @@
 # T-018 : Rôles et permissions par module, un seul mécanisme (Role.moduleCode nullable)
 
-- **Statut** : Planifiée, en attente de validation client · **Priorité** : P1 · **Vague** : 2 · **Taille** : L · **Dépôt(s)** : backend · **Domaine** : iam · **Type** : feature
+- **Statut** : À vérifier (fusionnée dans `remy` le 2026-10-09, appliquée provisoirement ; validation client en attente) · **Priorité** : P1 · **Vague** : 2 · **Taille** : L · **Dépôt(s)** : backend · **Domaine** : iam · **Type** : feature
 - **Branche suggérée** : `feat/T-018-roles-par-module` · **Base de test** : `zylo_t018_test` · **Ports** : back 3118
 - **Dépendances** : T-007, T-010, T-019, T-036
 - **Décisions requises** : `rbac/roles-multi-modules.md` (recommandation appliquée, validation client requise avant fusion)

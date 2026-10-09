@@ -12,6 +12,7 @@ from app.core.logging import setup_logging
 from app.core.middleware import RequestIdMiddleware, TimingMiddleware
 from app.audit.seed import seed_known_permissions as seed_audit_permissions
 from app.core.database import AsyncSessionLocal
+from app.identity.seed import seed_known_permissions as seed_identity_permissions
 from app.identity.service import backfill_owner_default_permissions
 from app.modules.zylo_liquid.seed import seed_known_permissions
 from app.modules.zylo_liquid.telemetry_sync import structural_sweep_loop, sync_loop as holykell_sync_loop
@@ -76,6 +77,7 @@ subscribe("TruckStopUnqualified", handle_truck_stop_unqualified)
 async def on_startup() -> None:
     await seed_known_modules()
     await seed_rbac_permissions()
+    await seed_identity_permissions()
     await seed_audit_permissions()
     await seed_known_permissions()
     await seed_zylo_tanker_permissions()

@@ -45,8 +45,12 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
+# Intention (T-012) : disable_existing_loggers=False. Par défaut, fileConfig met
+# `disabled=True` sur tous les loggers déjà créés, dont zylo_office.security
+# (journal de sécurité de l'authentification) : une migration lancée dans le même
+# processus (tests, démarrage) le ferait taire silencieusement.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # URL de connexion pilotée par la config applicative (.env), jamais codée en
 # dur dans alembic.ini — la même variable DATABASE_URL sert en local et une

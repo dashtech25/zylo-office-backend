@@ -1,6 +1,6 @@
 # T-023 : Matrice d'autorisation et inventaire des routes protégées
 
-- **Statut** : Planifiée · **Priorité** : P2 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : iam · **Type** : test
+- **Statut** : À vérifier · **Priorité** : P2 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : iam · **Type** : test
 - **Branche suggérée** : `test/T-023-matrice-autorisation` · **Base de test** : `zylo_t023_test` · **Ports** : back 3123
 - **Dépendances** : T-010, T-019
 - **Décisions requises** : `securite/catalogues-publics.md` (recommandation : authentifiés)
@@ -43,3 +43,7 @@ Faible pour le code. Le test d'inventaire peut échouer massivement au début : 
 
 ## Parallélisable avec
 T-017, T-018, T-020, T-021 (tests seulement).
+
+## Réalisation (branche fix/T-019-gardes-routes, 2026-10-09)
+- Inventaire et matrice régénérés ; liste d'exceptions justifiée dans `docs/architecture/securite/routes-publiques.md`.
+- Statut : À vérifier.

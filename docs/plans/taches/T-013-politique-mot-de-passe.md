@@ -1,6 +1,6 @@
 # T-013 : Politique de mot de passe et réponses neutres, sans annoncer d'envoi inexistant
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend et frontend · **Domaine** : security · **Type** : security
+- **Statut** : À vérifier · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend et frontend · **Domaine** : security · **Type** : security
 - **Branche suggérée** : `feat/T-013-mot-de-passe` · **Base de test** : `zylo_t013_test` · **Ports** : back 3113, front dev 3213, front prod 3313
 - **Dépendances** : T-012
 - **Décisions requises** : `securite/politique-mot-de-passe.md` (recommandation : 12 caractères)

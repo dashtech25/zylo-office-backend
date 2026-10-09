@@ -1,6 +1,6 @@
 # T-019 : Garde-fous IAM (dernier propriétaire, appartenance, deny, plans, soft-delete)
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : iam · **Type** : security
+- **Statut** : À vérifier · **Priorité** : P1 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : iam · **Type** : security
 - **Branche suggérée** : `fix/T-019-garde-fous-iam` · **Base de test** : `zylo_t019_test` · **Ports** : back 3119
 - **Dépendances** : T-010
 - **Décisions requises** : `rbac/creation-organisation.md` (en attente, valeur du quota)
@@ -49,3 +49,10 @@ Moyen : un garde-fou trop strict bloque l'administration légitime (transfert de
 
 ## Parallélisable avec
 T-020, T-023 (fichiers distincts) ; séquencer avec T-018 sur `rbac/service.py`.
+
+## Réalisation (branche fix/T-019-gardes-routes, 2026-10-09)
+- Gardes de permission sur les 198 routes de module qui n'en avaient pas ; 4 restent sans permission, justifiées (`tests/route_baseline_sans_permission.txt`).
+- `POST /billing/plans` retiré (option A de T-050) ; conflit de prix 409 `plan_conflict`.
+- Garde-fous : dernier propriétaire (409), compte supprimé (401). Non traités : deny sur propriétaire (la règle §5.4 et ses tests l'autorisent : à trancher), quota d'organisation (valeur client), dernier grant `ORGANIZATION_MANAGE`.
+- Suite complète (base zylo_t019_test, commit HEAD de fix/T-019-gardes-routes) : 519 passed, 2 failed. Les 2 échecs (tests/test_zylo_liquid_dev_seed.py) préexistent au commit de départ fc1f83e (MultipleResultsFound dans service.py:_measurement_height_at), hors périmètre.
+- Statut : À vérifier.

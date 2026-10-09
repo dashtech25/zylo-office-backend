@@ -6,7 +6,9 @@ from app.auth.schemas import ChangePasswordRequest, LoginRequest, RefreshRequest
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.security import get_current_user
+from app.identity import invitations
 from app.identity.models import User
+from app.identity.schemas import AccountActivatedResponse, ActivateAccountRequest
 
 router = APIRouter()
 
@@ -79,3 +81,12 @@ async def change_password(
     data: ChangePasswordRequest, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ) -> User:
     return await service.change_password(db, current_user, data.currentPassword, data.newPassword)
+
+
+@router.post("/activate", response_model=AccountActivatedResponse, summary="Activer un compte créé par une organisation (lien à usage unique)")
+async def activate(data: ActivateAccountRequest, db: AsyncSession = Depends(get_db)) -> AccountActivatedResponse:
+    """T-049 : le titulaire choisit son mot de passe avec le jeton reçu hors API.
+    Sans authentification : le jeton est la seule preuve. Toute erreur répond 400
+    `invitation_invalid`, sans distinguer inconnu, expiré ou déjà utilisé."""
+    user = await invitations.activate_account(db, data.token, data.password)
+    return AccountActivatedResponse(id=user.id, email=user.email, status=user.status)

@@ -1,6 +1,6 @@
 # T-021 : Création d'utilisateurs par le propriétaire (API), compte en attente sans mot de passe connu du créateur
 
-- **Statut** : Planifiée, en attente de validation client · **Priorité** : P1 · **Vague** : 2 · **Taille** : L · **Dépôt(s)** : backend · **Domaine** : iam · **Type** : feature
+- **Statut** : À vérifier (implémentée sur `feat/T-021-creation-utilisateurs`, validation client avant fusion) · **Priorité** : P1 · **Vague** : 2 · **Taille** : L · **Dépôt(s)** : backend · **Domaine** : iam · **Type** : feature
 - **Branche suggérée** : `feat/T-021-creation-utilisateurs` · **Base de test** : `zylo_t021_test` · **Ports** : back 3121
 - **Dépendances** : T-010, T-013, T-018, T-019
 - **Décisions requises** : `rbac/activation-compte.md` (recommandation : compte en attente, activation par lien à usage unique, validation client avant fusion)
@@ -49,3 +49,10 @@ T-010 (isolation), T-013 (règle de mot de passe), T-018 (rôles par module), T-
 
 ## Parallélisable avec
 T-017, T-020, T-023 (fichiers distincts) ; séquencer avec T-020 sur `auth/`.
+
+## Réalisation (T-021, lot 3, 2026-10-09) : À vérifier
+- Routes : `POST /organizations/{id}/users` (201, `pending`, sans secret), `POST …/users/{userId}/invitation` (réémission), `PATCH …/users/{userId}` (suspension et réactivation), `POST /auth/activate` (T-049 minimal). Détail : `docs/architecture/securite/creation-utilisateurs.md`.
+- Tests : `tests/test_creation_utilisateurs.py` (36 cas). Non-régression : voir le rapport de lot.
+- Décision recommandée appliquée (`rbac/activation-compte.md`, option A) ; création désactivée tant que `EMAIL_BACKEND=none` (503). Fournisseur d'e-mail non choisi.
+- Migration `e7f8a9b0c1d2` : table `userInvitation` (jeton haché, usage unique, index partiel) et permission accordée aux propriétaires existants (rejouable).
+- Écarts à valider : énumération par les administrateurs (409 `email_already_used`) ; personnel de station non migré (mot de passe temporaire inchangé, IAM-007 ouvert) ; politique de mot de passe 8 caractères en attendant T-013.

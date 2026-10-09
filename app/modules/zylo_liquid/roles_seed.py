@@ -418,7 +418,7 @@ async def seed_default_roles(db: AsyncSession, organization_id: uuid.UUID) -> No
         if existing.scalar_one_or_none() is not None:
             continue
 
-        role = Role(organizationId=organization_id, code=code, name=name)
+        role = Role(organizationId=organization_id, code=code, name=name, moduleCode="zylo_liquid")
         db.add(role)
         await db.flush()
 

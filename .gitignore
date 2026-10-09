@@ -26,6 +26,22 @@ htmlcov/
 backups/
 var/
 
+# Dumps de base et sauvegardes SQL : jamais versionnés (T-001). Le contrôle
+# scripts/dev/controle_fichiers_sensibles.sh vérifie aussi l'index (hook et tests).
+*.sql
+*.sql.gz
+*.sql.bz2
+*.sql.xz
+*.dump
+*.pgdump
+
+# Clés privées et certificats : jamais versionnés (T-001).
+*.pem
+*.key
+*.p12
+id_rsa
+id_ed25519
+
 # Dossier de travail interne à la racine uniquement (cahiers terrain).
 # Ancré (/taches/) : les fiches docs/plans/taches/ sont versionnées (T-004).
 /taches/

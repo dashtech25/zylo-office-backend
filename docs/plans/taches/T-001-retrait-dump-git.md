@@ -1,6 +1,6 @@
 # T-001 : Retirer le dump de l'index git et verrouiller les dumps
 
-- **Statut** : Planifiée · **Priorité** : P0 · **Vague** : 0 · **Taille** : S · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
+- **Statut** : À vérifier · **Priorité** : P0 · **Vague** : 0 · **Taille** : S · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
 - **Branche suggérée** : `fix/T-001-retrait-dump-index` · **Base de test** : aucune · **Ports** : aucun
 - **Dépendances** : T-004
 - **Décisions requises** : `securite/purge-historique-dump.md`, `securite/rotation-credentials.md`, `process/visibilite-depot-requirements.md`
@@ -50,3 +50,10 @@ Faible pour le code. Risque opérationnel : tout clone existant garde le fichier
 
 ## Parallélisable avec
 T-002, T-003, T-005, T-041.
+
+## Exécution (2026-10-08, branche `fix/T-001-retrait-dump-index`)
+
+- Commits : `8f2a72b` (retrait du dump de l'index), `2b743b4` (`.gitignore`, contrôle `controle_fichiers_sensibles.sh`, hook délégué, test), puis le commit de documentation.
+- Vérifications : `git ls-files backups/` vide ; `git check-ignore` ok ; test pytest `tests/test_controle_fichiers_sensibles.py` (4 passés) ; hook refusant dump et `.env` sur dépôt jetable.
+- Constat : dépôt `origin` **public** (`gh repo view`, 2026-10-08). Traité comme fuite dans `purge-historique-dump.md`.
+- Reste à faire (hors agent) : réponses écrites du commanditaire (visibilité, purge), propriétaires et dates de rotation, attestation de rotation. La fiche reste « À vérifier » tant que la rotation n'est pas attestée.

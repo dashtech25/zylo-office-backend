@@ -24,8 +24,18 @@ Sauvegarde préalable (hors dépôts, dossier `office/sauvegarde-T004-2026-10-08
 ## 3. Ce qui n'est pas versionné
 
 - Fichiers d'environnement : `.env*` sauf `.env.example` (`.gitignore` et hook).
-- Dumps : `*.sql`, `*.sql.gz`, `*.dump` (hook).
+- Dumps : `*.sql`, `*.sql.gz`, `*.sql.bz2`, `*.sql.xz`, `*.dump`, `*.pgdump` ; dossier `backups/` (`.gitignore`).
+- Clés privées et certificats : `*.pem`, `*.key`, `*.p12`, `id_rsa`, `id_ed25519` (`.gitignore`).
 - Frontend : `e2e/.auth/`, `storybook-static/`, `test-results/`, `.next/`.
+
+### Contrôle automatisé (T-001)
+
+- Règles dans un seul endroit : `scripts/dev/controle_fichiers_sensibles.sh`.
+  - `--index` : fichiers suivis (`git ls-files`). Utilisé par `tests/test_controle_fichiers_sensibles.py`, donc par la suite pytest (et la CI quand T-038a la branchera). Ce test ne dépend pas de l'activation du hook.
+  - `--staged` : fichiers à committer. Utilisé par `.githooks/pre-commit`.
+- Activation du hook, une fois par clone : `git config core.hooksPath .githooks`. Sans cette commande, seul le test d'index protège le dépôt.
+- Si le contrôle signale un fichier déjà suivi : `git rm --cached <fichier>` (le fichier reste sur disque), puis commit. Ne pas réécrire l'historique sans accord écrit (voir `docs/questions/securite/purge-historique-dump.md`).
+- Limite : contrôle par nom de fichier, pas par contenu. Un secret placé dans un fichier au nom anodin n'est pas détecté.
 
 ## 4. Worktrees
 

@@ -19,6 +19,9 @@ from app.modules.zylo_liquid.seed import seed_known_permissions
 from app.modules.zylo_liquid.telemetry_sync import structural_sweep_loop, sync_loop as holykell_sync_loop
 from app.modules.zylo_tanker.seed import seed_known_permissions as seed_zylo_tanker_permissions
 from app.modules_registry.seed import seed_known_modules
+from app.modules.zylo_liquid.roles_seed import seed_default_roles as seed_roles_zylo_liquid
+from app.modules.zylo_tanker.roles_seed import seed_default_roles as seed_roles_zylo_tanker
+from app.modules_registry.service import enregistre_hook_activation
 from app.modules_registry.service import backfill_active_module_permissions_for_owners
 from app.rbac.seed import seed_known_permissions as seed_rbac_permissions
 from app.shared.events import subscribe
@@ -45,6 +48,10 @@ app = FastAPI(
     openapi_tags=TAGS_METADATA,
     **options_documentation(settings.ENVIRONMENT),
 )
+
+# Seeds de rôles par défaut, branchés à l'activation (composition root : le socle ne connaît pas les modules).
+enregistre_hook_activation("zylo_liquid", seed_roles_zylo_liquid)
+enregistre_hook_activation("zylo_tanker", seed_roles_zylo_tanker)
 
 # Ordre important : TimingMiddleware doit être ajouté avant RequestIdMiddleware
 # pour s'exécuter à l'intérieur de celui-ci (Starlette empile les middlewares

@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 from fastapi import Depends
@@ -12,6 +13,17 @@ from app.modules_registry.models import Module, OrganizationModule
 from app.modules_registry.schemas import InstalledModuleResponse
 from app.rbac.models import Permission, Role, RolePermission
 from app.rbac.service import get_current_organization_id
+
+
+# Hooks d'activation par module (seed des rôles par défaut). Le socle n'importe jamais un module métier :
+# l'application (composition root, app/main.py) les enregistre. Sans cela, rbac -> module_assignment ->
+# modules_registry -> modules.zylo_liquid rendait `Files ne dépend jamais de zylo_liquid` violé (import-linter).
+HookActivation = Callable[[AsyncSession, uuid.UUID], Awaitable[None]]
+_hooks_activation: dict[str, HookActivation] = {}
+
+
+def enregistre_hook_activation(module_code: str, hook: HookActivation) -> None:
+    _hooks_activation[module_code] = hook
 
 
 async def grant_module_permissions_to_owner(db: AsyncSession, organization_id: uuid.UUID, module_code: str) -> None:
@@ -129,14 +141,9 @@ async def activate_module(
     # généraliser (registre de callables par module_code) le jour où un 2e
     # module a besoin de rôles par défaut (§20 du document d'architecture,
     # « rôle et permissions... .md »).
-    if module_code == "zylo_liquid":
-        from app.modules.zylo_liquid.roles_seed import seed_default_roles
-
-        await seed_default_roles(db, organization_id)
-    elif module_code == "zylo_tanker":
-        from app.modules.zylo_tanker.roles_seed import seed_default_roles
-
-        await seed_default_roles(db, organization_id)
+    hook = _hooks_activation.get(module_code)
+    if hook is not None:
+        await hook(db, organization_id)
 
     await grant_module_permissions_to_owner(db, organization_id, module_code)
 

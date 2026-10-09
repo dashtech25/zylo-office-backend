@@ -7,4 +7,4 @@
   - A. PostgreSQL existant : aucune infrastructure ajoutée, lecture et écriture transactionnelles, latence acceptable pour l'authentification.
   - B. Redis : plus rapide, mais un service de plus à exploiter, sauvegarder et surveiller.
 - **Recommandation vérifiée** : option A, avec une limite par IP à l'échelle du proxy. Vérification : absence de Redis dans les fichiers de dépendances et de déploiement (contrôle ci-dessus). Revoir si la charge d'authentification le justifie (mesure à consigner).
-- **État** : En attente de réponse (avance sur la recommandation, réversible)
+- **État** : Appliquée (T-012, branche `feat/T-012-rate-limit-auth`) : option A. Compteurs dans `loginAttempt` (PostgreSQL), limite par IP lue via `AUTH_RATE_LIMIT_TRUSTED_PROXIES`. Réversible par `AUTH_RATE_LIMIT_ENABLED=false`. Mesure de charge d'authentification : à consigner si elle devient un sujet.

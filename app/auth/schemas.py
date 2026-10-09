@@ -24,13 +24,17 @@ class LoginRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refreshToken: str
+    # Optionnel depuis T-037a : le navigateur envoie le cookie `zylo_refresh`. Le corps
+    # n'est lu que pendant la transition, pour les clients existants.
+    refreshToken: str | None = None
 
 
 class TokenResponse(BaseModel):
-    accessToken: str
-    refreshToken: str
-    tokenType: str = "bearer"
+    # Renseignés pendant la transition (T-037a) ; absents du JSON après la date de fin
+    # (la réponse est alors servie avec response_model_exclude_none).
+    accessToken: str | None = None
+    refreshToken: str | None = None
+    tokenType: str | None = "bearer"
 
 
 class UserResponse(BaseModel):

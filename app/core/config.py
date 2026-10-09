@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import model_validator
@@ -126,6 +128,46 @@ class Settings(BaseSettings):
     # Adresses des proxys de confiance (reverse proxy). X-Forwarded-For n'est lu
     # que si l'adresse du pair direct figure dans cette liste. Vide = aucun proxy.
     AUTH_RATE_LIMIT_TRUSTED_PROXIES: list[str] = []
+
+    # Sessions par cookies (T-037a, docs/architecture/securite/sessions.md).
+    # Les jetons d'accès et de rafraîchissement sont posés en cookies HttpOnly ;
+    # l'interface ne les lit jamais. `AUTH_COOKIE_SECURE` vaut None par défaut :
+    # Secure est alors vrai hors `development`. Un `false` explicite n'est admis
+    # qu'en development (voir le validateur). `lax` par défaut : les liens
+    # d'entrée depuis l'extérieur restent utilisables, les envois inter-sites
+    # non-GET sont coupés. `none` est refusé (il exigerait Secure partout).
+    AUTH_COOKIE_SECURE: bool | None = None
+    AUTH_COOKIE_SAMESITE: Literal["lax", "strict"] = "lax"
+    # Domaine du cookie. None = hôte exact (recommandé : interface et API sur le
+    # même site, sans Domain, donc sans partage avec les sous-domaines).
+    AUTH_COOKIE_DOMAIN: str | None = None
+    # Fin de la transition (T-037a). Jusqu'à cette date : l'en-tête Authorization
+    # est accepté et les jetons restent dans le JSON des réponses d'authentification,
+    # pour les clients existants. Après : cookies seuls, aucun jeton dans le corps.
+    # Date proposée, à confirmer avant le déploiement (docs/architecture/securite/sessions.md §4).
+    AUTH_HEADER_ACCEPTED_UNTIL: datetime = datetime(2026, 11, 30, tzinfo=timezone.utc)
+
+    @property
+    def cookies_secure(self) -> bool:
+        if self.AUTH_COOKIE_SECURE is not None:
+            return self.AUTH_COOKIE_SECURE
+        return self.ENVIRONMENT != ENVIRONMENT_DEVELOPPEMENT
+
+    @model_validator(mode="after")
+    def _valide_sessions_et_cors(self) -> "Settings":
+        # Intention : un cookie d'accès non Secure ne doit jamais sortir d'un
+        # environnement réel, et CORS avec identifiants ne doit jamais accepter
+        # un joker (n'importe quelle origine pourrait alors lire les réponses
+        # authentifiées). Les messages nomment la variable, jamais sa valeur.
+        if self.AUTH_COOKIE_SECURE is False and self.ENVIRONMENT != ENVIRONMENT_DEVELOPPEMENT:
+            raise ConfigurationSecretError(
+                "AUTH_COOKIE_SECURE=false n'est admis qu'avec ENVIRONMENT=development (variable : AUTH_COOKIE_SECURE)."
+            )
+        if self.AUTH_HEADER_ACCEPTED_UNTIL.tzinfo is None:
+            raise ConfigurationSecretError("AUTH_HEADER_ACCEPTED_UNTIL doit être une date avec fuseau horaire.")
+        if any(origine.strip() == "*" for origine in self.CORS_ORIGINS):
+            raise ConfigurationSecretError("CORS_ORIGINS ne doit jamais contenir « * » : CORS est utilisé avec identifiants (variable : CORS_ORIGINS).")
+        return self
 
     @model_validator(mode="after")
     def _valide_envoi_des_messages(self) -> "Settings":

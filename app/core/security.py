@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 # PyJWT (T-015) remplace python-jose : format HS256 identique, donc les jetons
 # déjà émis restent valides. Voir docs/architecture/securite/surface-api.md.
@@ -13,6 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.errors import AppError
+from app.core.session_http import (
+    METHODES_SURES,
+    NOM_COOKIE_ACCES,
+    transition_active,
+    verifie_csrf_et_origine,
+)
 from app.identity.models import User
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -63,10 +69,30 @@ def decode_token(token: str, expected_type: str) -> uuid.UUID:
     return uuid.UUID(payload["sub"])
 
 
-async def _utilisateur_actif_du_jeton(credentials: HTTPAuthorizationCredentials | None, db: AsyncSession) -> User:
-    if credentials is None:
+def _jeton_d_acces(request: Request, credentials: HTTPAuthorizationCredentials | None) -> tuple[str | None, bool]:
+    """Jeton d'accès de la requête et son origine (en-tête ou cookie).
+
+    Intention (T-037a) : pendant la transition, l'en-tête `Authorization` reste
+    prioritaire pour les clients existants. Après la date de fin, il est ignoré :
+    seul le cookie `zylo_access` authentifie. Le booléen indique si le jeton vient
+    d'un cookie, ce qui déclenche le contrôle CSRF (un en-tête n'est jamais envoyé
+    automatiquement par un navigateur, donc il n'expose pas à CSRF).
+    """
+    if credentials is not None and transition_active():
+        return credentials.credentials, False
+    cookie = request.cookies.get(NOM_COOKIE_ACCES)
+    if cookie:
+        return cookie, True
+    return None, False
+
+
+async def _utilisateur_actif_du_jeton(request: Request, credentials: HTTPAuthorizationCredentials | None, db: AsyncSession) -> User:
+    jeton, par_cookie = _jeton_d_acces(request, credentials)
+    if jeton is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentification requise.")
-    user_id = decode_token(credentials.credentials, expected_type="access")
+    if par_cookie and request.method not in METHODES_SURES:
+        verifie_csrf_et_origine(request)
+    user_id = decode_token(jeton, expected_type="access")
     result = await db.execute(select(User).where(User.id == user_id, User.status == "active", User.deletedAt.is_(None)))
     user = result.scalar_one_or_none()
     if user is None:
@@ -75,6 +101,7 @@ async def _utilisateur_actif_du_jeton(credentials: HTTPAuthorizationCredentials 
 
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -82,7 +109,7 @@ async def get_current_user(
     `mustChangePassword` est vrai (mot de passe temporaire), le jeton ne donne
     accès à rien d'autre que le profil et le changement de mot de passe. La
     restriction est appliquée ici, côté backend, et non dans l'interface seule."""
-    user = await _utilisateur_actif_du_jeton(credentials, db)
+    user = await _utilisateur_actif_du_jeton(request, credentials, db)
     if user.mustChangePassword:
         raise AppError(
             code="password_change_required",
@@ -93,9 +120,10 @@ async def get_current_user(
 
 
 async def get_current_user_pour_changement_mot_de_passe(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """Réservée à GET /auth/me et POST /auth/change-password : seuls endpoints
     accessibles tant que `mustChangePassword` est vrai. Ne pas l'utiliser ailleurs."""
-    return await _utilisateur_actif_du_jeton(credentials, db)
+    return await _utilisateur_actif_du_jeton(request, credentials, db)

@@ -15,6 +15,12 @@ class RefreshToken(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     userId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False, index=True)
     tokenHash: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    # Famille de rotation (T-020) : tous les refresh tokens issus d'une même
+    # connexion partagent cet identifiant. Présenter un jeton déjà révoqué révoque
+    # toute la famille (détection de réutilisation). Un nouveau login crée une famille.
+    familyId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, index=True, comment="Famille de rotation : révoquée entière en cas de réutilisation."
+    )
     expiresAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revokedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

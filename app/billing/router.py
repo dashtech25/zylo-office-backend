@@ -7,24 +7,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.billing import service
 from app.billing.models import Plan, Subscription
 from app.billing.permissions import SUBSCRIPTION_MANAGE
-from app.billing.schemas import CreatePlanRequest, CreateSubscriptionRequest, PlanResponse, SubscriptionResponse
+from app.billing.schemas import CreateSubscriptionRequest, PlanResponse, SubscriptionResponse
 from app.core.database import get_db
-from app.core.security import get_current_user
-from app.identity.models import User
 from app.rbac.service import require_permission
 
 router = APIRouter()
 
 
-@router.post("/plans", response_model=PlanResponse, status_code=201)
-async def create_plan(
-    data: CreatePlanRequest,
-    _: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> Plan:
-    return await service.get_or_create_plan(
-        db, data.moduleCode, data.code, data.name, data.priceCents, data.currency, data.periodDays
-    )
+# T-019 / T-050 (option A, recommandation vérifiée) : pas de création de plan par API.
+# Le catalogue de plans est seedé par une commande explicite (service.get_or_create_plan) ;
+# une création par un utilisateur authentifié n'est plus possible (POST /plans n'existe plus).
 
 
 @router.get("/plans", response_model=list[PlanResponse])

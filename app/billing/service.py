@@ -11,9 +11,14 @@ from app.core.errors import AppError
 async def get_or_create_plan(
     db: AsyncSession, module_code: str, code: str, name: str, price_cents: int, currency: str, period_days: int
 ) -> Plan:
+    """Catalogue : un plan existant est renvoyé tel quel. Un plan de même code
+    avec un prix ou une devise différents est refusé (409) : un prix ne se
+    réécrit jamais en silence (T-019)."""
     result = await db.execute(select(Plan).where(Plan.code == code))
     plan = result.scalar_one_or_none()
     if plan:
+        if plan.priceCents != price_cents or plan.currency != currency:
+            raise AppError(code="plan_conflict", message=f"Le plan {code} existe déjà avec un autre prix ou une autre devise.", status_code=409)
         return plan
     plan = Plan(moduleCode=module_code, code=code, name=name, priceCents=price_cents, currency=currency, periodDays=period_days)
     db.add(plan)

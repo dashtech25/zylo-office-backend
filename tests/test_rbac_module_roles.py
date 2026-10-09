@@ -253,8 +253,10 @@ async def test_cross_organization_role_and_member_are_refused(client: AsyncClien
         json={"userId": member["id"], "roleId": role_b["id"]},
         headers=_h(other["token"], org_b),
     )
-    assert res.status_code == 403
-    assert res.json()["error"]["code"] == "organization_mismatch"
+    # Depuis T-010 (404 uniforme, code-http-acces-interdit) : un chemin et un
+    # en-tête incohérents répondent comme une organisation inexistante.
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == "organization_not_found"
 
     # Une affectation faite dans A n'ouvre aucun droit dans B.
     role_a = await _module_role(client, owner_a, org_a, "crm", "crm_a", [CRM_READ])

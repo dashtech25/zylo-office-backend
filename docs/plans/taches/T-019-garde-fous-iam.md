@@ -12,7 +12,7 @@ Corriger les défauts d'autorisation qui ne relèvent pas de l'isolation : retra
 - IAM-002 (P1), IAM-004 (P1), IAM-012 (P2), IAM-017 (P2), IAM-022 (P3), IAM-023 (P3), IAM-003 (partie : création de plans par API), REV-A-08 (permission plateforme supposée)
 
 ## Dépendances : justification
-T-010 (isolation). Bloque T-018 et T-021 (création d'utilisateurs suppose l'appartenance).
+- T-010 : gardes d'isolation par organisation que T-019 étend.
 
 ## Fichiers / modules concernés
 - `app/rbac/service.py` (retrait du dernier propriétaire, `deny`, délégation)

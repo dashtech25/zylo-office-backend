@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend et frontend · **Domaine** : ci · **Type** : ci
 - **Branche suggérée** : `ci/T-038a-ci-minimale` · **Base de test** : `zylo_t038a_test` · **Ports** : back 3138, front prod 3338
-- **Dépendances** : T-001, T-003, T-005, T-042
+- **Dépendances** : aucune
 - **Décisions requises** : `tests/environnement-recette.md`
 
 ## Objectif
@@ -12,18 +12,18 @@ Une CI bloquante existe dès la vague 1, avant les changements IAM et sécurité
 - DOC-001 (CI désactivée), REV-A-09 (CI livrée trop tard), REV-S-18, REV-D-27
 
 ## Dépendances : justification
-T-001 (garde dumps), T-003 (script de ports), T-005 (base dédiée par job), T-042 (tests unitaires).
+- Retirées (confort ou CI, pas de prérequis technique) : T-001 (CI indépendante : `check_no_dumps.sh` est créé ici) ; T-003 (CI indépendante : le job ports est ajouté quand `check_ports.sh` existe) ; T-005 (CI indépendante : base de test par job dans le workflow) ; T-042 (CI indépendante : `test:unit` ajouté quand T-042 est fusionnée).
 
 ## Fichiers / modules concernés
-- Backend : `.github/workflows/ci.yml` (réactivé, remplace `ci.yml.disabled`), service PostgreSQL 16, base `zylo_t038_test`
+- Backend : `.github/workflows/ci.yml` (réactivé, remplace `ci.yml.disabled`), service PostgreSQL 16, base `zylo_t038a_test`
 - Frontend : `.github/workflows/frontend.yml` (créé dans le dépôt frontend)
 - `tests/known_failures.txt` (créé) : liste versionnée et datée des échecs connus
-- `scripts/check_no_dumps.sh` (créé), `scripts/check_ports.sh` (T-003)
+- `scripts/check_no_dumps.sh` (créé ici), `scripts/check_ports.sh` (créé par T-003 ; le job ports est ajouté par T-038a s'il existe, sinon par T-003)
 
 ## Stratégie
 1. Job backend : venv, `pytest` en **mode régression** : le job échoue si un test hors de `known_failures.txt` échoue, et aussi si un test listé passe (la liste doit être mise à jour). La liste diminue à chaque tâche de correction (T-006, T-007, T-009, T-010).
 2. Job backend : `scripts/check_no_dumps.sh` et `scripts/check_ports.sh`.
-3. Job frontend : `npm ci`, `npx tsc --noEmit`, `npm run build`, `npm run test:unit`.
+3. Job frontend : `npm ci`, `npx tsc --noEmit`, `npm run build` ; l'étape `npm run test:unit` est ajoutée dès que T-042 est fusionnée.
 4. Secrets : aucun littéral dans le fichier de workflow ; les valeurs passent par les secrets GitHub (REV-S-03).
 5. Versions : Node et Python fixés explicitement dans les workflows.
 6. Passage à « pytest complet bloquant » : quand `known_failures.txt` est vide (fin de T-006, T-007, T-009, T-010).

@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P2 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
 - **Branche suggérée** : `fix/T-020-sessions` · **Base de test** : `zylo_t020_test` · **Ports** : back 3120
-- **Dépendances** : T-012, T-013
+- **Dépendances** : aucune
 - **Décisions requises** : aucune
 
 ## Objectif
@@ -12,7 +12,7 @@ Une session volée ne survit pas à un changement ou une réinitialisation de mo
 - IAM-010 (P2), IAM-021 (P3), BCK-015 (partie backend ; le stockage côté client est traité par T-037a et T-037b), REV-A-06 (révocation à la désactivation)
 
 ## Dépendances : justification
-T-012 et T-013 (même zone `app/auth/`, séquentiel). Bloque T-037a, T-048, T-049.
+- Retirées (confort ou CI, pas de prérequis technique) : T-012 (même zone `app/auth/` : ordre de fusion seulement) ; T-013 (même zone `app/auth/` : ordre de fusion seulement).
 
 ## Fichiers / modules concernés
 - `app/auth/service.py`, `app/auth/models.py` (`refreshToken`, champ de famille, migration additive)

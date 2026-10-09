@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée, en attente de validation client · **Priorité** : P1 · **Vague** : 2 · **Taille** : L · **Dépôt(s)** : backend · **Domaine** : iam · **Type** : feature
 - **Branche suggérée** : `feat/T-018-roles-par-module` · **Base de test** : `zylo_t018_test` · **Ports** : back 3118
-- **Dépendances** : T-007, T-010, T-019, T-036
+- **Dépendances** : T-007, T-019, T-036
 - **Décisions requises** : `rbac/roles-multi-modules.md` (recommandation appliquée, validation client requise avant fusion)
 
 ## Objectif
@@ -12,7 +12,10 @@ Donner au RBAC la notion de module : `Role.moduleCode` nullable, un rôle appart
 - IAM-005 (P1), étapes 4 et 5 de la priorité n°1, ARC-016 (partie), REV-A-03 (quatre conditions), REV-A-12 (unicité NULL), REV-S-13 (rôles existants non rattachés), REV-S-24 (retour arrière)
 
 ## Dépendances : justification
-T-007 (décision sur le rôle manager, sans quoi les rôles par défaut ne sont pas stables), T-010 (isolation), T-019 (garde-fous, dont le retrait du dernier propriétaire), T-036 (registre de seeders, sans quoi `modules_registry/service.py` reçoit du code de seed).
+- T-007 : décision sur le rôle manager, sans quoi les rôles par défaut ne sont pas stables.
+- T-019 : garde-fous (retrait du dernier propriétaire) appelés par le modèle.
+- T-036 : registre de seeders dans `modules_registry/service.py`.
+- Retirées (confort ou CI, pas de prérequis technique) : T-010 (transitive via T-019).
 
 ## Décision de modèle (les quatre conditions)
 1. **Un seul mécanisme** : `Role.moduleCode`. La portée module de `userRole` (`resourceType = 'module'`) n'est pas adoptée : `UserRole.resourceId` est un UUID, `Module.code` est une chaîne.

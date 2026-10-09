@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : frontend et backend · **Domaine** : iam · **Type** : test
 - **Branche suggérée** : `test/T-047-acces-interdit` · **Base de test** : `zylo_t047_test` · **Ports** : back 3147, front prod 3347
-- **Dépendances** : T-046, T-010, T-022
+- **Dépendances** : T-010, T-022, T-046
 - **Décisions requises** : `rbac/code-http-acces-interdit.md`
 
 ## Objectif
@@ -12,7 +12,9 @@ Prouver, sur build de production, que l'accès interdit et l'isolation entre org
 - REV-D-19 (aucun test d'accès interdit ni inter-organisations), coordination (e) : tests d'accès interdit et inter-organisations
 
 ## Dépendances : justification
-T-046 (données isolées), T-010 (isolation en place), T-022 (affectations à tester).
+- T-010 : isolation testée.
+- T-022 : affectations testées.
+- T-046 : fixtures e2e isolées.
 
 ## Fichiers / modules concernés
 - `e2e/acces-interdit.spec.ts` (créé) : cas navigateur

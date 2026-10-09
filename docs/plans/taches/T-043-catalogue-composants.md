@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 0 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : docs · **Type** : docs
 - **Branche suggérée** : `docs/T-043-catalogue-composants` · **Base de test** : aucune · **Ports** : aucun
-- **Dépendances** : T-041
+- **Dépendances** : aucune
 - **Décisions requises** : aucune
 
 ## Objectif
@@ -12,7 +12,7 @@ Remplacer le catalogue perdu avec Storybook : une arborescence `docs/architectur
 - REV-D-02 (aucune documentation des composants après le retrait), FRT-014 (remplacé)
 
 ## Dépendances : justification
-T-041 retire les stories : le catalogue devient la seule documentation des composants partagés.
+- Retirées (confort ou CI, pas de prérequis technique) : T-041 (le catalogue ne lit pas les stories : pas d'artefact consommé).
 
 ## Fichiers / modules concernés
 - `docs/architecture/frontend/catalogue-composants/README.md` (index généré)

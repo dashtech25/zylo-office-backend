@@ -2,7 +2,7 @@
 
 - **Statut** : À vérifier · **Priorité** : P0 · **Vague** : 0 · **Taille** : S · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
 - **Branche suggérée** : `fix/T-002-secrets-demarrage` · **Base de test** : `zylo_t002_test` · **Ports** : back 3102
-- **Dépendances** : T-004
+- **Dépendances** : aucune
 - **Décisions requises** : `architecture/environnement-par-defaut.md` (appliquée, à confirmer)
 
 ## Objectif
@@ -12,7 +12,7 @@ Un démarrage hors environnement explicitement `development` ou `test` est refus
 - BCK-002 (P0), ARC-001 (P0), IAM-009 (P0), REV-S-02 (Critique), REV-S-03 (défaut `changeme` de `DATABASE_URL`)
 
 ## Dépendances : justification
-T-004 (base). T-027 utilise la clé de chiffrement déclarée ici. T-003 et T-005 modifient `config.py` et `conftest.py` : T-002 passe avant elles dans l'ordre des fichiers chauds.
+- Retirées (confort ou CI, pas de prérequis technique) : T-004 (base de départ : `remy` à jour, aucun artefact T-004 consommé).
 
 ## Fichiers / modules concernés
 - `app/core/config.py` : `ENVIRONMENT` par défaut `production` (aujourd'hui `development`, ligne 8) ; validateur `model_validator` ; variable `APP_FIELD_ENCRYPTION_KEY` (obligatoire hors `development`/`test`, longueur minimale)

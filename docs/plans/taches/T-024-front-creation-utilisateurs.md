@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : iam · **Type** : feature
 - **Branche suggérée** : `feat/T-024-front-creation-utilisateurs` · **Base de test** : `zylo_t024_test` · **Ports** : back 3124, front dev 3224, front prod 3324
-- **Dépendances** : T-008, T-012, T-013, T-021, T-030, T-042
+- **Dépendances** : T-013, T-021, T-030
 - **Décisions requises** : aucune (dépend de la validation client de T-021)
 
 ## Objectif
@@ -12,7 +12,10 @@ Un formulaire de création (e-mail, nom, rôle de l'organisation) dans l'écran 
 - IAM-006 (côté interface), IAM-014 (boutons affichés sans portée), FRT-013 (validation partagée, T-013)
 
 ## Dépendances : justification
-T-021 (contrat d'API), T-012 et T-013 (règles de mot de passe et d'e-mail), T-030 (coquille unique : `users/page.tsx` est modifié par T-011 puis par T-030, puis par cette tâche), T-042 (tests unitaires de la validation), T-008 (Playwright prod).
+- T-013 : règles de mot de passe affichées au formulaire.
+- T-021 : contrat de l'API de création.
+- T-030 : coquille unique qui porte la page `users`.
+- Retirées (confort ou CI, pas de prérequis technique) : T-012 (pas d'artefact front) ; T-042 (confort : tests unitaires non requis) ; T-008 (confort).
 
 ## Fichiers / modules concernés
 - `src/app/(app)/users/page.tsx` (une ligne, délègue à l'écran)

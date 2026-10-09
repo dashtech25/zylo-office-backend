@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 0 · **Taille** : M · **Dépôt(s)** : backend et frontend · **Domaine** : ci · **Type** : chore
 - **Branche suggérée** : `chore/T-005-env-taches` · **Base de test** : `zylo_t005_test` · **Ports** : back 3105, front dev 3205, front prod 3305
-- **Dépendances** : T-004
+- **Dépendances** : aucune
 - **Décisions requises** : aucune
 
 ## Objectif
@@ -12,7 +12,7 @@ Une commande crée l'environnement d'une tâche : venv, base PostgreSQL dédiée
 - ARC-015 (`.venv` cassé, `lint-imports` absent), baseline section 0 (wipe global, seed manuel), DOC-025 (partie environnements), REV-S-15 (base partagée par défaut), REV-D-18 (base partagée avec pytest)
 
 ## Dépendances : justification
-T-004. Prérequis de T-006, T-008, T-010, T-028, T-034 et de toute tâche qui touche la base.
+- Retirées (confort ou CI, pas de prérequis technique) : T-004 (base de départ : `remy` à jour).
 
 ## Fichiers / modules concernés
 - `tests/conftest.py` : garde commune (pytest) ; `TEST_DATABASE_URL` **sans valeur par défaut** (échec si absente)

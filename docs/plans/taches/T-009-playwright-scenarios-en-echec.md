@@ -13,7 +13,7 @@ Trier les 10 échecs de la baseline (9 scénarios gérant et P7 Holykell) : pour
 - REV-S-17, REV-S-25 (identifiants externes), REV-D-22 (P7 et tag inexistant), REV-D-24 (sélecteurs couplés)
 
 ## Dépendances : justification
-T-046 (données isolées) : corriger les échecs sur des données partagées produit de faux verts et de faux rouges.
+- T-046 : fixtures e2e isolées importées par les scénarios corrigés.
 
 ## Fichiers / modules concernés
 - `e2e/` : specs gérant et P7

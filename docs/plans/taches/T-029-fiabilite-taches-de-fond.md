@@ -12,7 +12,8 @@ Les boucles de fond (sondage Holykell, balayage structurel) tournent une seule f
 - BCK-016 (boucles dupliquées par processus), BCK-017 (exceptions avalées), REV-S-21 (secrets dans les journaux)
 
 ## Dépendances : justification
-T-028 (seeds sortis du démarrage), T-034 (les `except` de `zylo_liquid/service.py` sont traités après découpe du lot 1, pour ne pas déplacer le même code deux fois).
+- T-028 : seeds sortis du démarrage (code absent avant T-028).
+- T-034 : les `except` visés sont dans les modules extraits par T-034.
 
 ## Fichiers / modules concernés
 - `app/main.py` (démarrage des boucles, lignes 116 et 126)

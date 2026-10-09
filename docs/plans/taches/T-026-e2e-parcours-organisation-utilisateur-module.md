@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : frontend et backend · **Domaine** : iam · **Type** : test
 - **Branche suggérée** : `test/T-026-e2e-parcours-socle` · **Base de test** : `zylo_t026_test` · **Ports** : back 3126, front prod 3326
-- **Dépendances** : T-008, T-046, T-024, T-025, T-047
+- **Dépendances** : T-024, T-025, T-046
 - **Décisions requises** : aucune
 
 ## Objectif
@@ -12,7 +12,10 @@ Un parcours métier complet, sur build de production : créer une organisation, 
 - Lacune « aucun E2E sur utilisateurs ni rôles » (DOC-021), REV-D-19 (partie UI : refus visible, URL directe)
 
 ## Dépendances : justification
-T-008 (configuration prod), T-046 (données isolées), T-024 et T-025 (écrans), T-047 (cas d'accès interdit déjà couverts par l'API et la navigation).
+- T-024 : écran de création testé.
+- T-025 : écran d'affectation testé.
+- T-046 : fixtures e2e isolées.
+- Retirées (confort ou CI, pas de prérequis technique) : T-008 (confort) ; T-047 (confort : cas déjà couverts par T-047 et l'API).
 
 ## Fichiers / modules concernés
 - `e2e/proprietaire-socle-utilisateurs-modules.spec.ts` (créé)

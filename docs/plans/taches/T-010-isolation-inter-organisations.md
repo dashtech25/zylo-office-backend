@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P0 · **Vague** : 1 · **Taille** : L · **Dépôt(s)** : backend · **Domaine** : iam · **Type** : security
 - **Branche suggérée** : `fix/T-010-isolation-organisations` · **Base de test** : `zylo_t010_test` · **Ports** : back 3110, front prod 3310
-- **Dépendances** : T-005, T-038a, T-008
+- **Dépendances** : aucune
 - **Décisions requises** : `rbac/code-http-acces-interdit.md` (recommandation appliquée : 404 uniforme)
 
 ## Objectif
@@ -12,7 +12,7 @@ L'autorisation se fait sur l'en-tête `X-Organization-Id`, l'action sur l'`organ
 - BCK-001 (P0), IAM-001 (P0), IAM-018, ARC-009 (partie), IAM-013 (partie), REV-S-04 (périmètre limité aux 13 routes), REV-D-19 (partie)
 
 ## Dépendances : justification
-T-005 (base dédiée), T-038a (CI bloquante avant une modification sensible), T-008 (parcours prod pour `proprietaire-02` et `-04`). Bloque T-018, T-019, T-021, T-022, T-023, T-036, T-047.
+- Retirées (confort ou CI, pas de prérequis technique) : T-005 (confort) ; T-038a (CI indépendante, ne bloque pas) ; T-008 (confort : parcours validé en local).
 
 ## Fichiers / modules concernés
 - `app/rbac/dependencies.py` : `get_organization_context` (écrit directement ici, pour que T-036 n'ait pas à le déplacer)

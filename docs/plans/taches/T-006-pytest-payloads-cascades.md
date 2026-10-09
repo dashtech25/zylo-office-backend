@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : zylo-liquid · **Type** : test
 - **Branche suggérée** : `fix/T-006-pytest-payloads` · **Base de test** : `zylo_t006_test` · **Ports** : back 3106
-- **Dépendances** : T-005
+- **Dépendances** : aucune
 - **Décisions requises** : `zylo-liquid/ordre-validation-fournisseur.md`
 
 ## Objectif
@@ -12,7 +12,7 @@ Faire passer les groupes A (12 tests, HTTP 422 `body.lines` requis) et B (9 test
 - Baseline `baseline-tests.md` section 1.1, groupes A et B.
 
 ## Dépendances : justification
-T-005 (base dédiée). Ne dépend pas de T-002 (la configuration de test est déjà posée par T-005).
+- Retirées (confort ou CI, pas de prérequis technique) : T-005 (confort : tests exécutés en local sur `zylo_t006_test`).
 
 ## Fichiers / modules concernés
 - `tests/test_zylo_liquid_approvisionnement.py`, `test_zylo_liquid_declarations.py`, `test_zylo_liquid_delivery_flow.py`, `test_zylo_liquid_purchase_order_document.py`, `test_zylo_liquid_tracking_business_flows.py`, `test_zylo_liquid_reconciliation_engine.py`

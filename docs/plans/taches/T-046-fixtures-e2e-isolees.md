@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : frontend · **Type** : test
 - **Branche suggérée** : `test/T-046-fixtures-isolees` · **Base de test** : `zylo_t046_test` · **Ports** : back 3146, front prod 3346
-- **Dépendances** : T-008
+- **Dépendances** : aucune
 - **Décisions requises** : aucune
 
 ## Objectif
@@ -12,7 +12,7 @@ Aujourd'hui `global-setup.ts` crée une seule organisation, une station et une c
 - REV-D-18 (isolation absente), REV-D-23 (durées de test masquant des blocages, partiellement), REV-A-11 (ordre des fichiers chauds `e2e`)
 
 ## Dépendances : justification
-T-008 (configuration prod, base de test). Sans T-008, l'isolation n'est pas mesurable sur build de production.
+- Retirées (confort ou CI, pas de prérequis technique) : T-008 (confort : isolation mesurable en local).
 
 ## Fichiers / modules concernés
 - `e2e/fixtures/` (créé) : fabrique d'organisation, de station et de cuve par test

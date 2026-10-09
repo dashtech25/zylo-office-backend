@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P3 · **Vague** : 1 · **Taille** : S · **Dépôt(s)** : frontend · **Domaine** : frontend · **Type** : chore
 - **Branche suggérée** : `chore/T-011-hygiene-frontend` · **Base de test** : aucune · **Ports** : front prod 3311
-- **Dépendances** : T-041, T-008
+- **Dépendances** : aucune
 - **Décisions requises** : aucune
 
 ## Objectif
@@ -12,7 +12,7 @@ Supprimer ce qui ne sert pas au produit : `test.txt` suivi, route `ui-preview` e
 - FRT-010 (partie CSS du gabarit), FRT-017, FRT-018, FRT-023 (partie restante), ARC-019 (fichiers parasites), ARC-020 (route `ui-preview` et doublon `utilisateurs`)
 
 ## Dépendances : justification
-T-041 (gabarit retiré : le travail restant est réduit). T-008 (parcours de navigation de base sur build de production).
+- Retirées (confort ou CI, pas de prérequis technique) : T-041 (confort : réduit le travail, sans artefact consommé) ; T-008 (confort).
 
 ## Fichiers / modules concernés
 - `test.txt` (racine, `git rm`)

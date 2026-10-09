@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : socle · **Type** : refactor
 - **Branche suggérée** : `refactor/T-036-contrats` · **Base de test** : `zylo_t036_test` · **Ports** : back 3136
-- **Dépendances** : T-005, T-010
+- **Dépendances** : aucune
 - **Décisions requises** : `architecture/contrats-importlinter.md` (appliquée)
 
 ## Objectif
@@ -12,7 +12,7 @@ Ajouter les contrats manquants : cycle `alerts` ↔ `zylo_liquid` (ARC-005, P1),
 - ARC-005 (P1), ARC-006, ARC-007, ARC-008, ARC-009, ARC-010, ARC-017, ARC-018, REV-A-16, REV-A-11 (ordre avec T-018)
 
 ## Dépendances : justification
-T-010 (dépendances d'identité stabilisées), T-005 (base). Bloque T-018 : le registre de seeders est introduit ici avant que T-018 n'ajoute du code de seed dans `modules_registry/service.py`.
+- Retirées (confort ou CI, pas de prérequis technique) : T-005 (confort) ; T-010 (registre indépendant du code d'identité).
 
 ## Fichiers / modules concernés
 - `.importlinter` : contrats `forbidden` par paire (pour l'acyclicité), contrats pour zylo_tanker et notifications. Le type `acyclic_siblings` ne vaut que pour des paquets frères : `app.alerts` et `app.modules.zylo_liquid` ne le sont pas.

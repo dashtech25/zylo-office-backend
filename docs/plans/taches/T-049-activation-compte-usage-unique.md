@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée, en attente de validation client · **Priorité** : P1 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : backend et frontend · **Domaine** : iam · **Type** : security
 - **Branche suggérée** : `feat/T-049-activation` · **Base de test** : `zylo_t049_test` · **Ports** : back 3149, front dev 3249, front prod 3349
-- **Dépendances** : T-021, T-013, T-020
+- **Dépendances** : T-013, T-020, T-021
 - **Décisions requises** : `rbac/activation-compte.md`
 
 ## Objectif
@@ -12,7 +12,9 @@ Le titulaire d'un compte `pending` choisit son mot de passe lui-même, via un je
 - REV-S-06 (solution complète), IAM-007 (partie), REV-A-07 (correction)
 
 ## Dépendances : justification
-T-021 (compte `pending`), T-013 (règle de mot de passe), T-020 (révocation des sessions à l'activation).
+- T-013 : règle de mot de passe au moment de l'activation.
+- T-020 : révocation des sessions à l'activation.
+- T-021 : compte `pending`.
 
 ## Fichiers / modules concernés
 - Backend : `app/auth/router.py` (`POST /auth/activate`), `app/auth/service.py`, table des jetons d'activation (migration additive, jeton haché, expiration, `usedAt`)

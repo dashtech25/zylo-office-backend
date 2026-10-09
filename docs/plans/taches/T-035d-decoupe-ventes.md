@@ -12,7 +12,7 @@ Extraire les ventes et les produits dans `sales/`, sans changement de comporteme
 - ARC-004 (P1), suite de la découpe
 
 ## Dépendances : justification
-T-035c (lot précédent fusionné).
+- T-035c : lot précédent : modules extraits à découper ensuite.
 
 ## Fichiers / modules concernés
 - `app/modules/zylo_liquid/service.py`, `app/modules/zylo_liquid/sales/` (créé)

@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P2 · **Vague** : 2 · **Taille** : L · **Dépôt(s)** : backend · **Domaine** : zylo-liquid · **Type** : refactor
 - **Branche suggérée** : `refactor/T-035a-zl-caisse` · **Base de test** : `zylo_t035a_test` · **Ports** : back 3135
-- **Dépendances** : T-034, T-027, T-029
+- **Dépendances** : T-034, T-027
 - **Décisions requises** : aucune
 
 ## Objectif
@@ -12,7 +12,9 @@ Extraire la caisse et les shifts dans `cash/`, sans changer de comportement. Pre
 - ARC-004 (P1), suite du lot 1 ; ARC-016 (partie : seuils de caisse regroupés dans un module de constantes)
 
 ## Dépendances : justification
-T-034 (lot 1 fusionné), T-027 (colonne chiffrée si la télémétrie est touchée), T-029 (exceptions des zones touchées traitées).
+- T-034 : modules extraits du lot 1 que ce lot découpe.
+- T-027 : colonne chiffrée touchée si la télémétrie l'est.
+- Retirées (confort ou CI, pas de prérequis technique) : T-029 (ordre sur `service.py` seulement).
 
 ## Fichiers / modules concernés
 - `app/modules/zylo_liquid/service.py` (façade transitoire)

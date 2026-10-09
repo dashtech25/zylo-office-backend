@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P2 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : frontend · **Type** : refactor
 - **Branche suggérée** : `refactor/T-033c-a11y` · **Base de test** : `zylo_t033c_test` · **Ports** : back 3133, front dev 3233, front prod 3333
-- **Dépendances** : T-033b
+- **Dépendances** : aucune
 - **Décisions requises** : aucune
 
 ## Objectif
@@ -12,7 +12,7 @@ Les éléments interactifs sont utilisables au clavier, les overlays gèrent le 
 - FRT-012 (P2, accessibilité), FRT-022 (P3, overlays)
 
 ## Dépendances : justification
-T-033b (réseau et états stabilisés avant de toucher aux interactions).
+- Retirées (confort ou CI, pas de prérequis technique) : T-033b (ordre de fusion : pas d'artefact consommé).
 
 ## Fichiers / modules concernés
 - `src/shared/ui/Modal.tsx`, `Tabs.tsx`

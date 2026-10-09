@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : frontend (backend pour le démarrage) · **Domaine** : frontend · **Type** : test
 - **Branche suggérée** : `test/T-008-playwright-prod` · **Base de test** : `zylo_t008_test` · **Ports** : back 3108, front prod 3308
-- **Dépendances** : T-003, T-005, T-041
+- **Dépendances** : aucune
 - **Décisions requises** : `tests/retention-traces-video.md`
 
 ## Objectif
@@ -12,7 +12,7 @@ Toute exécution Playwright se fait sur le build de production (`next build` pui
 - Baseline section 3 (`npm run dev`, seed manuel), DOC-002 (partie e2e), REV-D-07 (jetons en clair dans `e2e/.auth/`), REV-D-17 (suite non versionnée), REV-D-21 (configuration non reproductible), REV-S-17 (rétention des vidéos)
 
 ## Dépendances : justification
-T-003 (ports), T-005 (garde de base), T-041 (configuration prod de référence). Les specs sont versionnées par T-004 (lot 1).
+- Retirées (confort ou CI, pas de prérequis technique) : T-003 (confort : la formule de port est appliquée directement) ; T-005 (confort) ; T-041 (confort : build local de référence).
 
 ## Fichiers / modules concernés
 - `playwright.config.ts` : `webServer` = `next start -p 3308` après build ; `baseURL` lu depuis l'environnement ; pas de `dev`

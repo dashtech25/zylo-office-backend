@@ -12,7 +12,7 @@ Fusionner dans `remy` le retrait de Storybook déjà réalisé, après vérifica
 - DOC-017 (gabarit Storybook), FRT-009 et FRT-023 (partie), REV-A-04, REV-D-01, REV-D-04, REV-D-05
 
 ## Dépendances : justification
-T-004 : la branche doit être recalée sur le tag `base-T004` par merge (pas de réécriture), sinon elle recommit ce que T-004 a déjà posé.
+- T-004 : recalage sur le tag `base-T004` par merge.
 
 ## Contenu de la branche (à vérifier, pas à réécrire)
 Attention : la branche déplace `.storybook/mockApi.ts` vers `e2e/mockApi.ts` (rename détecté par `git show --stat`) ; ce fichier est donc un chemin `e2e/` à conserver après la fusion.

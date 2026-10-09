@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend et frontend · **Domaine** : ci · **Type** : ci
 - **Branche suggérée** : `ci/T-038b-ci-complete` · **Base de test** : `zylo_t038b_test` · **Ports** : back 3138, front prod 3338
-- **Dépendances** : T-038a, T-036, T-009
+- **Dépendances** : T-038a, T-036
 - **Décisions requises** : aucune
 
 ## Objectif
@@ -12,7 +12,9 @@ Ajouter à la CI minimale les jobs qui exigent les contrats et le lint : `lint-i
 - DOC-001 (partie complète), ARC-002 (contrats non exécutés), baseline section 2 (lint en échec), REV-A-09 (découpe), REV-D-27 (workflow frontend)
 
 ## Dépendances : justification
-T-038a (CI minimale), T-036 (contrats), T-009 (suite e2e verte, hors `@external`).
+- T-038a : fichiers de workflow à compléter.
+- T-036 : contrats `.importlinter` exécutés par `lint-imports`.
+- Retirées (confort ou CI, pas de prérequis technique) : T-009 (CI indépendante : job Playwright avec exclusion `@external` et `known_failures`).
 
 ## Fichiers / modules concernés
 - Backend : `.github/workflows/ci.yml` (job `lint-imports`)

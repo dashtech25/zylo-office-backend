@@ -12,7 +12,7 @@ Réintroduire un runner de tests unitaires minimal, sans Storybook, pour la logi
 - REV-D-03 (suppression de Vitest sans remplacement), REV-A-04 (T-024, T-025, T-033 sans moyen de test unitaire)
 
 ## Dépendances : justification
-T-041 retire Vitest : cette tâche le réintroduit proprement, sans la configuration Storybook.
+- T-041 : Storybook retiré : Vitest est réintroduit sur une base sans sa configuration.
 
 ## Fichiers / modules concernés
 - `vitest.config.ts` (créé), `package.json` (`vitest` en dev, script `test:unit`)

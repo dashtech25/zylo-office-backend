@@ -35,7 +35,7 @@ Au 2026-10-08 : 54 fichiers modifiés côté backend, 229 côté frontend, 25 fi
 3. Chaque worktree part du tag `base-T004` (ou d'un commit postérieur fusionné).
 
 ## Dépendances : justification
-Aucune. Bloque toutes les tâches : T-001, T-002, T-003, T-005, T-041, T-016 et les suivantes démarrent de ce tag.
+- Aucune dépendance technique conservée.
 
 ## Tests et vérifications
 - `git status --porcelain` vide dans les deux dépôts après le lot 1 (les `wip/` restent hors de `remy`).

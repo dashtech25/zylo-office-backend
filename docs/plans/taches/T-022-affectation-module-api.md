@@ -12,7 +12,9 @@ Dans une organisation, l'administrateur choisit un utilisateur de l'organisation
 - Étapes 3, 4 et 5 de la priorité n°1, IAM-004 (cible d'attribution)
 
 ## Dépendances : justification
-T-018 (rôles par module), T-019 (appartenance), T-021 (création d'utilisateurs). Ce modèle est le seul mécanisme : `userRole` n'a pas de portée module.
+- T-018 : modèle unique d'affectation (`Role.moduleCode`).
+- T-019 : contrôle d'appartenance active.
+- T-021 : utilisateurs à affecter (création et statut `pending`/`active`).
 
 ## Fichiers / modules concernés
 - `app/rbac/router.py` (`PUT /organizations/{id}/modules/{code}/users/{userId}/roles`)

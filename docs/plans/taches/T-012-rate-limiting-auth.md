@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
 - **Branche suggérée** : `feat/T-012-rate-limit-auth` · **Base de test** : `zylo_t012_test` · **Ports** : back 3112
-- **Dépendances** : T-002, T-005
+- **Dépendances** : aucune
 - **Décisions requises** : `securite/limitation-authentification.md` (recommandation appliquée)
 
 ## Objectif
@@ -12,7 +12,7 @@ Limiter les tentatives sur `POST /auth/login`, `/auth/register` et `/auth/refres
 - BCK-004 (P1), IAM-008 (P1), REV-S-07 (verrou par compte utilisable comme déni de service)
 
 ## Dépendances : justification
-T-002 (configuration validée), T-005 (base de test). Bloque T-013 et T-020 (même zone `app/auth/`).
+- Retirées (confort ou CI, pas de prérequis technique) : T-002 (confort : même zone, ordre de fusion seulement) ; T-005 (confort).
 
 ## Fichiers / modules concernés
 - `app/auth/router.py`, `app/auth/service.py`

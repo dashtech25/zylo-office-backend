@@ -12,7 +12,9 @@ Un départ d'employé se traite dans l'application : désactivation d'un utilisa
 - REV-A-06 (cycle de vie absent du chemin critique), IAM-008 (partie : sessions d'un compte désactivé)
 
 ## Dépendances : justification
-T-020 (révocation de sessions), T-021 (statut `pending`/`active`), T-022 (affectations à retirer).
+- T-020 : API de révocation de sessions.
+- T-021 : statut `pending`/`active`.
+- T-022 : affectations à retirer.
 
 ## Fichiers / modules concernés
 - `app/identity/router.py` : `PATCH /organizations/{id}/users/{userId}` (statut : `active`, `suspended`)

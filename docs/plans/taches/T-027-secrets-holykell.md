@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : L · **Dépôt(s)** : backend · **Domaine** : zylo-liquid · **Type** : security
 - **Branche suggérée** : `fix/T-027-secrets-holykell` · **Base de test** : `zylo_t027_test` · **Ports** : back 3127
-- **Dépendances** : T-001, T-002, T-005
+- **Dépendances** : T-002
 - **Décisions requises** : `securite/chiffrement-cle-holykell.md` (recommandation : variable dédiée, procédure de sauvegarde de clé hors dépôt)
 
 ## Objectif
@@ -12,7 +12,8 @@ Le mot de passe du compte externe Holykell est stocké en clair (`holykellPasswo
 - BCK-007 (P1), REV-S-09 (colonne laissée en clair), REV-S-21 (valeur dans les journaux), REV-A-18 (procédure de perte de clé)
 
 ## Dépendances : justification
-T-001 (rotation), T-002 (clé obligatoire hors développement), T-005 (base). Séquencé avec T-034, puis T-035a à T-035e, sur `zylo_liquid/service.py`.
+- T-002 : clé de chiffrement obligatoire déclarée par T-002 et utilisée ici.
+- Retirées (confort ou CI, pas de prérequis technique) : T-001 (rotation de credentials : processus, pas de code) ; T-005 (confort).
 
 ## Fichiers / modules concernés
 - `app/modules/zylo_liquid/models.py` (ligne 74), `schemas.py` (requête)

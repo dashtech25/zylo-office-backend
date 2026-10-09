@@ -12,7 +12,8 @@ Le plan de remise sur pied supposait une « permission plateforme » qui n'exist
 - REV-A-08 (permission plateforme supposée), IAM-003 (partie administration des plans)
 
 ## Dépendances : justification
-T-010 (isolation des routes d'organisation), T-019 (suppression de la création de plan par API).
+- T-010 : isolation des routes d'organisation.
+- T-019 : suppression de la création de plan par API.
 
 ## Fichiers / modules concernés
 - `app/identity/permissions.py` : `identity.platform.manage` (créée **seulement si** la décision le demande)

@@ -12,7 +12,9 @@ Dans chaque module, l'administrateur choisit un utilisateur et lui attribue des 
 - IAM-014 (`can()` ignore la portée et le `deny`), FRT-015 (tanker sans contrôle de permission)
 
 ## Dépendances : justification
-T-022 (contrat d'API), T-024 (même `PermissionContext`, séquentiel), T-030 (coquille tanker avec providers).
+- T-022 : contrat de l'API d'affectation.
+- T-024 : `PermissionContext` créé par T-024 et étendu ici.
+- T-030 : coquille avec providers.
 
 ## Fichiers / modules concernés
 - `src/core/rbac/PermissionContext.tsx`, `src/core/api/rbac.ts`

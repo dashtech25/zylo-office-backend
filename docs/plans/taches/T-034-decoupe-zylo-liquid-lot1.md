@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : L · **Dépôt(s)** : backend · **Domaine** : zylo-liquid · **Type** : refactor
 - **Branche suggérée** : `refactor/T-034-zl-service-lot1` · **Base de test** : `zylo_t034_test` · **Ports** : back 3134
-- **Dépendances** : T-005, T-006
+- **Dépendances** : aucune
 - **Décisions requises** : aucune
 
 ## Objectif
@@ -12,7 +12,7 @@
 - ARC-004 (P1), partie lot 1 seulement
 
 ## Dépendances : justification
-T-006 (tests de payload verts, sinon le filet est incomplet), T-005 (base). Pas de dépendance à T-036 : les contrats existants (10) suffisent, et `lint-imports` est lancé à chaque extraction.
+- Retirées (confort ou CI, pas de prérequis technique) : T-005 (confort) ; T-006 (confort : filet de tests local).
 
 ## Fichiers / modules concernés
 - `app/modules/zylo_liquid/service.py` (extraction, façade de réexport)

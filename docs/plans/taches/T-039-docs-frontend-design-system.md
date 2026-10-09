@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P2 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : docs · **Type** : docs
 - **Branche suggérée** : `docs/T-039-frontend-arborescence` · **Base de test** : aucune · **Ports** : aucun
-- **Dépendances** : T-011, T-030, T-032, T-043
+- **Dépendances** : T-030, T-032, T-043
 - **Décisions requises** : aucune
 
 ## Objectif
@@ -12,7 +12,10 @@ Régénérer l'arborescence réelle de `src/` dans la documentation (et non à l
 - DOC-007 (arborescence de `CLAUDE.md` obsolète), DOC-016 (deux sources de design system), DOC-009 et DOC-013 (partie frontend), DOC-014 (références `grande_phases.md`), REV-D-02 (partie), REV-D-29 (audit non à jour)
 
 ## Dépendances : justification
-T-011 (hygiène), T-030 (coquille), T-032 (tokens), T-043 (catalogue). T-040 s'appuie sur ce résultat.
+- T-030 : coquille décrite par la doc.
+- T-032 : tokens décrits par la doc.
+- T-043 : catalogue de composants cité par la doc.
+- Retirées (confort ou CI, pas de prérequis technique) : T-011 (confort).
 
 ## Fichiers / modules concernés
 - `docs/process/frontend-structure.md` (créé, généré)

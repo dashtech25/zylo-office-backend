@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : chore
 - **Branche suggérée** : `chore/T-051-conteneur` · **Base de test** : `zylo_t051_test` · **Ports** : back 3151
-- **Dépendances** : T-015, T-010, T-028
+- **Dépendances** : T-010
 - **Décisions requises** : aucune
 
 ## Objectif
@@ -12,7 +12,8 @@ Durcir le déploiement : utilisateur non privilégié dans l'image, routeur de l
 - BCK-013 (P2, conteneur root), BCK-019 (P3, routes de démo), BCK-021 (P3, routeur monté deux fois), REV-A-17 (découpe de T-015)
 
 ## Dépendances : justification
-T-015 (surface API et CVE, même zone), T-010 (routes démo protégées puis supprimées : l'ordre évite de tester des routes qui n'existent plus), T-028 (`Dockerfile` modifié par T-028 : séquencer).
+- T-010 : routes démo protégées par les gardes avant suppression.
+- Retirées (confort ou CI, pas de prérequis technique) : T-015 (même zone (surface API) : pas d'artefact consommé) ; T-028 (`Dockerfile` : ordre de fusion seulement).
 
 ## Fichiers / modules concernés
 - `Dockerfile` (`USER`, répertoires en lecture seule quand possible)

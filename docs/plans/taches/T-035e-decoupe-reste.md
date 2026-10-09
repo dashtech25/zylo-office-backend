@@ -12,7 +12,7 @@ Extraire le reste des fonctions. Fermer la découpe : `service.py` ne contient p
 - ARC-004 (P1), fin de la découpe
 
 ## Dépendances : justification
-T-035d (lot précédent fusionné).
+- T-035d : lot précédent : modules extraits à découper ensuite.
 
 ## Fichiers / modules concernés
 - `app/modules/zylo_liquid/service.py`, sous-paquets existants, éventuellement `common/`

@@ -12,7 +12,7 @@ Extraire la réglementation et les déclarations dans `regulation/`. Calculs ré
 - ARC-004 (P1), suite de la découpe
 
 ## Dépendances : justification
-T-035b (lot précédent fusionné).
+- T-035b : lot précédent : modules extraits à découper ensuite.
 
 ## Fichiers / modules concernés
 - `app/modules/zylo_liquid/service.py`, `app/modules/zylo_liquid/regulation/` (créé)

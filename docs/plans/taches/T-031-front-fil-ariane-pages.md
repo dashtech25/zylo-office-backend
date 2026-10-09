@@ -12,7 +12,7 @@ Un seul fil d'Ariane, celui de `PageHeader`. La topbar n'affiche plus de libell�
 - FRT-003 (P1), ARC-013 (P2), DOC-008 (P2), REV-D-10 (double fil d'Ariane, sélecteur instable), REV-D-14 (périmètre des 53 pages)
 
 ## Dépendances : justification
-T-030 (coquille unique, sinon deux topbars à modifier).
+- T-030 : coquille unique dans laquelle la topbar est fusionnée.
 
 ## Fichiers / modules concernés
 - `src/modules/zylo-liquid/components/ZyloLiquidShell.tsx` (libellé de topbar, lignes 182 à 186 et 247 à 256)

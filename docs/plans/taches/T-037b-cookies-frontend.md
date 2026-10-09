@@ -12,7 +12,9 @@ Le frontend ne lit ni n'écrit plus aucun jeton. `localStorage` ne garde que l'i
 - FRT-001 (P1, jetons dans `localStorage`), REV-S-20 (jetons lisibles par JavaScript pendant la transition)
 
 ## Dépendances : justification
-T-037a (backend), T-030 (coquille et providers d'authentification), T-033b (client API unique, sans quoi `client.ts` serait modifié deux fois).
+- T-037a : API cookies du backend.
+- T-030 : providers d'authentification dans la coquille.
+- T-033b : client API unique modifié ici.
 
 ## Fichiers / modules concernés
 - `src/core/auth/tokens.ts` (supprimé ou réduit à rien)

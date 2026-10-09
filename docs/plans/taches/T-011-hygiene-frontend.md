@@ -1,6 +1,6 @@
 # T-011 : Hygiène frontend (ui-preview, fichiers parasites, route en doublon)
 
-- **Statut** : Planifiée · **Priorité** : P3 · **Vague** : 1 · **Taille** : S · **Dépôt(s)** : frontend · **Domaine** : frontend · **Type** : chore
+- **Statut** : À vérifier (fusionnée dans le frontend `remy` : `e8a559f` ; `ui-preview` absente (404 en production) et `test.txt` retiré ; critère non tenu : la route « utilisateurs » reste en double, `/users` et `/zylo-liquid/utilisateurs` servent deux écrans distincts, non résolu) · **Priorité** : P3 · **Vague** : 1 · **Taille** : S · **Dépôt(s)** : frontend · **Domaine** : frontend · **Type** : chore
 - **Branche suggérée** : `chore/T-011-hygiene-frontend` · **Base de test** : aucune · **Ports** : front prod 3311
 - **Dépendances** : aucune
 - **Décisions requises** : aucune

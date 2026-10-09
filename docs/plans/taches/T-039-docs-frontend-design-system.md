@@ -1,6 +1,6 @@
 # T-039 : Documentation frontend en arborescence, design system de référence unique, arbre généré
 
-- **Statut** : Planifiée · **Priorité** : P2 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : docs · **Type** : docs
+- **Statut** : Terminée (docs frontend fusionnées dans le frontend `remy` : `e8a559f` ; critères tenus : une seule référence de design system, aucun chiffre daté, `CLAUDE.md` à 142 lignes, arbre généré vérifié par `generer_arbre.sh --verifier`) · **Priorité** : P2 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : docs · **Type** : docs
 - **Branche suggérée** : `docs/T-039-frontend-arborescence` · **Base de test** : aucune · **Ports** : aucun
 - **Dépendances** : T-030, T-032, T-043
 - **Décisions requises** : aucune

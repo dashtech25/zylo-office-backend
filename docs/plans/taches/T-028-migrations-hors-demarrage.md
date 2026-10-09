@@ -18,7 +18,7 @@ Aujourd'hui le `CMD` exécute `alembic upgrade head` puis `uvicorn` à chaque d�
 - `Dockerfile` (ligne 33 : `CMD`)
 - `app/main.py` (`on_startup`, lignes 80 à 110)
 - `app/cli.py` ou `scripts/seed.py` (commandes `migrate`, `seed`, `check-revision`)
-- `docs/process/deploiement.md` (créé), `docs/process/runbook-migration.md` (créé)
+- `docs/operations/deploiement.md`, `docs/operations/migration.md`, `docs/operations/retour-arriere.md` (créés)
 
 ## Stratégie
 1. `CMD` : uvicorn seul. Au démarrage, vérification que `alembic current` est au head ; refus avec message clair sinon.
@@ -41,14 +41,22 @@ Aujourd'hui le `CMD` exécute `alembic upgrade head` puis `uvicorn` à chaque d�
 Élevé : un déploiement qui oublie la migration laisse une application incompatible avec le schéma. Retour arrière : revenir au `CMD` précédent (un commit).
 
 ## Livrable documentaire
-- `docs/process/deploiement.md`, `docs/process/runbook-migration.md`
+- `docs/operations/deploiement.md`, `docs/operations/migration.md`, `docs/operations/retour-arriere.md`
 - `docs/questions/architecture/migrations-au-demarrage.md`
 - `docs/questions/architecture/sauvegarde-avant-migration.md`
 
 ## Parallélisable avec
 T-012 à T-015 (séquencer avec T-015 et T-051 sur `app/main.py`).
 
-## Réalisation (branche `chore/T-028-T-051-migrations-conteneur`, statut À vérifier)
+## Réalisation (fusion dans `remy` : `8546b03`, statut À vérifier)
+
+Fusion `--no-ff` de `chore/T-028-T-051-migrations-conteneur` (2026-10-09). Vérifié sur `remy` fusionné : `pytest` 618 réussis / 0 échec ; `lint-imports` 13 contrats tenus ; une seule tête Alembic (`7c2e9a1f4b8d`) ; `verifier-revision` OK sur `zylo_t095_test` ; `seed` et `backfill` rejoués deux fois (second passage sans effet) ; démarrage uvicorn sans migration, `/api/v1/health` 200.
+
+Raison de « À vérifier » (non « Terminée ») :
+- tests de `downgrade -1` puis `upgrade head` sur base jetable non faits, pour les migrations des vagues 1 et 2 (critère de la tâche) ;
+- runbook de production non renseigné (révision de production à consigner par l'opérateur) ;
+- décision `architecture/sauvegarde-avant-migration.md` encore en attente.
+
 - `CMD` du `Dockerfile` : uvicorn seul. `on_startup` ne seed, ne backfill, ne migre plus ; il vérifie seulement la révision (`app/core/migrations.py`).
 - `app/cli.py` : `verifier-revision`, `migrer` (garde destructive : confirmation + fichier de sauvegarde), `seed`, `backfill` (rôle owner seulement).
 - Documentation : `docs/operations/migration.md`, `deploiement.md`, `retour-arriere.md`.

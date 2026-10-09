@@ -1,6 +1,6 @@
 # T-051 : Conteneur non root, routeur monté une fois, routes de démonstration supprimées
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : chore
+- **Statut** : À vérifier · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : chore
 - **Branche suggérée** : `chore/T-051-conteneur` · **Base de test** : `zylo_t051_test` · **Ports** : back 3151
 - **Dépendances** : T-010
 - **Décisions requises** : aucune
@@ -46,3 +46,8 @@ Moyen : un conteneur non root ne peut plus écrire dans un volume existant (vér
 
 ## Parallélisable avec
 T-016, T-017 (fichiers distincts).
+
+## Réalisation partielle (branche `chore/T-028-T-051-migrations-conteneur`, statut À vérifier)
+- Fait : image multi-étapes, utilisateur système uid/gid 10001 (`USER`), `HEALTHCHECK` conservé, `curl` retiré, `.dockerignore` complété (secrets, sauvegardes, dumps, dépôt, documents).
+- Non fait (hors mission de cette branche) : montage unique de `location_router`, suppression des routes de démonstration (`/health/error-demo`, routes démo identity/modules_registry).
+- Docker vérifié localement (hôte de développement) : build de l'image, utilisateur `10001`, `GET /api/v1/health` 200, `HEALTHCHECK` healthy, écriture refusée hors `var/storage`, aucun fichier `.env`/dump dans l'image. Base de test : Postgres 16 jetable (`zylo_t028_test`), jamais une base réelle.

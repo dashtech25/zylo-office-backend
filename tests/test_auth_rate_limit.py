@@ -252,17 +252,29 @@ async def test_limite_desactivee_par_configuration(client: AsyncClient, monkeypa
 # --- Journal de sécurité : événements sans mot de passe ---------------------------
 
 
-async def test_journal_securite_trace_echecs_et_verrou_sans_mot_de_passe(client: AsyncClient, caplog):
+async def test_journal_securite_trace_echecs_et_verrou_sans_mot_de_passe(client: AsyncClient):
     email, ip = unique_email(), ip_unique()
     await inscrire(client, email)
-    caplog.set_level(logging.WARNING, logger="zylo_office.security")
+    # Gestionnaire posé directement sur le logger : setup_logging() (appelé à l'import
+    # de app.main) remplace les gestionnaires racine, ce qui ferait perdre caplog.
+    enregistrements: list[logging.LogRecord] = []
 
-    await echouer(client, email, ip, SEUIL_COUPLE)
-    assert (await connecter(client, email, MAUVAIS_MOT_DE_PASSE, ip)).status_code == 429
+    class Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            enregistrements.append(record)
 
-    messages = [r.getMessage() for r in caplog.records if r.name == "zylo_office.security"]
+    journal = logging.getLogger("zylo_office.security")
+    capture = Capture(level=logging.WARNING)
+    journal.addHandler(capture)
+    try:
+        await echouer(client, email, ip, SEUIL_COUPLE)
+        assert (await connecter(client, email, MAUVAIS_MOT_DE_PASSE, ip)).status_code == 429
+    finally:
+        journal.removeHandler(capture)
+
+    messages = [r.getMessage() for r in enregistrements]
     assert "auth_failure" in messages
     assert "auth_rate_limited" in messages
-    texte = " ".join(r.getMessage() + str(r.__dict__) for r in caplog.records)
+    texte = " ".join(r.getMessage() + " " + str(r.__dict__) for r in enregistrements)
     assert MAUVAIS_MOT_DE_PASSE not in texte
     assert email not in texte

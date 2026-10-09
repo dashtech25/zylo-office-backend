@@ -10,6 +10,12 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = [
         "http://localhost:3001",
         "http://127.0.0.1:3001",
+        # Port dédié au serveur e2e Playwright (playwright.config.ts) —
+        # sans ça, tout test e2e qui parle à un vrai backend (au lieu du
+        # mock in-browser habituel) échoue au préflight CORS avant même
+        # d'atteindre l'endpoint testé.
+        "http://localhost:3055",
+        "http://127.0.0.1:3055",
     ]
 
     # En local, DATABASE_URL pointe vers PostgreSQL local. Une fois déployé,
@@ -48,6 +54,15 @@ class Settings(BaseSettings):
     # indépendant de Holykell, tourne toujours (contrairement au sondage
     # ci-dessus). Intervalle long : ces états ne changent pas à la seconde.
     STRUCTURAL_SWEEP_INTERVAL_SEC: int = 300
+
+    # Notifications Web Push (RFC 8030) — clé publique communiquée telle
+    # quelle au navigateur (`PushManager.subscribe`), clé privée jamais
+    # exposée hors de ce process. Vide par défaut = canal désactivé
+    # silencieusement (`notify_new_alert` no-op), jamais une erreur au
+    # démarrage en dev sans clés générées.
+    VAPID_PUBLIC_KEY: str = ""
+    VAPID_PRIVATE_KEY: str = ""
+    VAPID_CLAIMS_EMAIL: str = "contact@zylo.example"
 
 
 settings = Settings()

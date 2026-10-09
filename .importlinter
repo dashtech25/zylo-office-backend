@@ -51,11 +51,18 @@ forbidden_modules =
 
 # Phase 2 (2026-09-15) — extraction de Location. Même règle d'accès que
 # Files : zylo_liquid ne lit jamais app.location.models directement.
+#
+# T-036 (ARC-006) — couverture étendue à zylo_tanker, deuxième module métier
+# consommateur de Location. Son dev_seed (snapshot wip, pas encore dans
+# base-T004) écrivait directement dans TruckPositionPing : ce contrat le
+# détecte, la correction est consignée dans
+# docs/architecture/modules/exceptions-importlinter.md (§3).
 [importlinter:contract:zylo-liquid-location-through-service-only]
-name = zylo_liquid n'accède à Location que via son service public
+name = zylo_liquid et zylo_tanker n'accèdent à Location que via son service public
 type = forbidden
 source_modules =
     app.modules.zylo_liquid
+    app.modules.zylo_tanker
 forbidden_modules =
     app.location.models
 ignore_imports =
@@ -94,10 +101,11 @@ forbidden_modules =
 # location pour `_qualify_truck_stop`) — seulement app.alerts.service,
 # point d'entrée public (voir sa docstring).
 [importlinter:contract:zylo-liquid-location-alerts-through-service-only]
-name = zylo_liquid et location n'accèdent à Alertes que via son service public
+name = zylo_liquid, zylo_tanker et location n'accèdent à Alertes que via son service public
 type = forbidden
 source_modules =
     app.modules.zylo_liquid
+    app.modules.zylo_tanker
     app.location
 forbidden_modules =
     app.alerts.models
@@ -209,3 +217,67 @@ modules =
 ignore_imports =
     app.modules_registry.service -> app.modules.zylo_liquid.roles_seed
     app.modules_registry.service -> app.modules.zylo_tanker.roles_seed
+
+# T-036 (ARC-005) — acyclicité alerts <-> zylo_liquid / zylo_tanker. Le type
+# `acyclic_siblings` ne s'applique qu'à des paquets frères : alerts et
+# zylo_liquid ne le sont pas. On interdit donc le sens capacité -> module
+# (CLAUDE.md : « <capacité> -> modules INTERDIT »). Seule la jointure de
+# portée de list_alerts / _get_alert_and_tank (Station/Tank/Truck/Vessel, voir
+# la docstring de app/alerts/service.py) est tolérée, par ignore_imports.
+# Le sens module -> capacité (zylo_liquid appelle alerts.service, roles_seed
+# lit alerts.permissions) reste autorisé : c'est la direction normale.
+# Exceptions datées et à résorber : docs/architecture/modules/exceptions-importlinter.md.
+# Les deux lignes app.modules_registry.service -> ... ci-dessous sont des chaînes
+# transitives par le socle (ARC-008), comme dans le contrat capabilities-never-import-each-other.
+[importlinter:contract:acyclic-alerts-zylo-liquid-tanker]
+name = Alertes ne dépend pas de zylo_liquid ni zylo_tanker (acyclicité, ARC-005), hors jointures de portée documentées
+type = forbidden
+source_modules =
+    app.alerts
+forbidden_modules =
+    app.modules.zylo_liquid
+    app.modules.zylo_tanker
+ignore_imports =
+    app.alerts.service -> app.modules.zylo_liquid.models
+    app.alerts.service -> app.modules.zylo_tanker.models
+    app.modules_registry.service -> app.modules.zylo_liquid.roles_seed
+    app.modules_registry.service -> app.modules.zylo_tanker.roles_seed
+
+# T-036 (ARC-005, ARC-006) — même acyclicité pour Location : son service
+# dépend de Truck/TRUCK_READ (zylo_liquid) et de Vessel/VESSEL_READ
+# (zylo_tanker) pour les positions et arrêts par véhicule. Dépendance
+# délibérée, documentée dans app/location/service.py ; tout autre import
+# d'un module métier est interdit. Les deux lignes app.modules_registry.service
+# sont la même chaîne transitive par le socle (ARC-008) que pour Alertes.
+[importlinter:contract:acyclic-location-zylo-liquid-tanker]
+name = Location ne dépend pas de zylo_liquid ni zylo_tanker (acyclicité, ARC-005/006), hors dépendances documentées
+type = forbidden
+source_modules =
+    app.location
+forbidden_modules =
+    app.modules.zylo_liquid
+    app.modules.zylo_tanker
+ignore_imports =
+    app.location.service -> app.modules.zylo_liquid.models
+    app.location.service -> app.modules.zylo_liquid.permissions
+    app.location.service -> app.modules.zylo_tanker.models
+    app.location.service -> app.modules.zylo_tanker.permissions
+    app.modules_registry.service -> app.modules.zylo_liquid.roles_seed
+    app.modules_registry.service -> app.modules.zylo_tanker.roles_seed
+
+# T-036 (ARC-007) — contrat « Notifications ne dépend jamais de zylo_liquid »
+# NON posé ici : import-linter échoue (« Module 'app.notifications' does not
+# exist ») quand la source est absente. Le paquet app/notifications n'existe
+# pas dans base-T004 ; il vit dans le snapshot wip/2026-10-08-snapshot-backend
+# (a7329ec). Le contrat, son texte et la violation réelle constatée dans le
+# snapshot (notifications/service.py -> zylo_liquid.models) sont consignés dans
+# docs/architecture/modules/exceptions-importlinter.md : à poser dans le lot
+# Notifications de T-004b, en même temps que la correction du code.
+
+# T-036 (acyclicité entre modules métier) — zylo_liquid et zylo_tanker sont
+# des paquets frères sous app.modules : aucun ne doit dépendre de l'autre.
+[importlinter:contract:modules-metier-acyclic-siblings]
+name = Les modules métier (zylo_liquid, zylo_tanker) ne forment aucun cycle
+type = acyclic_siblings
+ancestors =
+    app.modules

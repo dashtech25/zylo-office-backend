@@ -30,7 +30,7 @@ T-021 (compte `pending`), T-013 (règle de mot de passe), T-020 (révocation des
 - Jeton expiré : refusé.
 - Jeton d'un autre compte : refusé.
 - Le créateur, connecté, ne peut ni lire ni utiliser le jeton (test explicite).
-- Playwright sur build prod : création (propriétaire), activation (titulaire), première connexion.
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : création (propriétaire), activation (titulaire), première connexion.
 
 ## Critères d'acceptation
 - Aucun mot de passe connu du créateur dans le parcours.

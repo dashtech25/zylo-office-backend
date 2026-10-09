@@ -30,7 +30,7 @@ T-002 (configuration validée), T-005 (base de test). Bloque T-013 et T-020 (mê
 - Unitaires : 10 échecs sur un couple (IP, compte) donnent 429 ; compte inconnu et mauvais mot de passe : même corps.
 - Intégration : une tentative massive depuis IP A ne verrouille pas le compte pour IP B (test explicite, REV-S-07).
 - Intégration : une IP qui dépasse la limite globale reçoit 429, les autres IP ne sont pas touchées.
-- Playwright sur build prod : connexion refusée avec message générique.
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : connexion refusée avec message générique.
 
 ## Critères d'acceptation
 - Brute force bloqué par couple et par IP.

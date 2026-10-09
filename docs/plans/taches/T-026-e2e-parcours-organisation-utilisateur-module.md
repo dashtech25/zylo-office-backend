@@ -1,6 +1,8 @@
 # T-026 : Parcours E2E Playwright : organisation, utilisateur, affectation à un module
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : frontend et backend · **Domaine** : iam · **Type** : test
+> **Suspendue le 2026-10-09** : Playwright suspendu par décision du client. Voir `docs/process/decision-playwright-suspendu.md`.
+
+- **Statut** : Suspendue · **Priorité** : P1 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : frontend et backend · **Domaine** : iam · **Type** : test
 - **Branche suggérée** : `test/T-026-e2e-parcours-socle` · **Base de test** : `zylo_t026_test` · **Ports** : back 3126, front prod 3326
 - **Dépendances** : T-008, T-046, T-024, T-025, T-047
 - **Décisions requises** : aucune

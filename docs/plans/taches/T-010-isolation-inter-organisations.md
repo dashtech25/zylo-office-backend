@@ -33,7 +33,7 @@ Dépendances initiales retirées par décision du coordinateur : T-005 (base dé
 - Échantillon de routes sans chemin (zylo_liquid, zylo_tanker, files) : en-tête de B refusé pour un membre de A seul.
 - Membre de A et B reste autorisé selon ses droits sur chacune.
 - Non-régression : `tests/test_rbac*.py`, `tests/test_modules.py`.
-- Playwright sur build prod : `proprietaire-02` et `-04` passent (configuration de T-008).
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : création d'organisation et activation de module (anciens `proprietaire-02` et `-04`).
 
 ## Critères d'acceptation
 - Les 13 routes de `identite-permissions.md` refusent le cross-tenant, avec au moins 13 cas de test.

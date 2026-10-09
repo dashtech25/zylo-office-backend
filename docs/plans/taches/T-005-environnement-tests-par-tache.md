@@ -35,7 +35,7 @@ T-004. Prérequis de T-006, T-008, T-010, T-028, T-034 et de toute tâche qui to
 
 ## Critères d'acceptation
 - Une seule commande crée l'environnement d'une tâche.
-- Impossible de vider une base interdite, par pytest ou par Playwright.
+- Impossible de vider une base interdite, par pytest (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`).
 - Le seed pays n'est plus relancé à la main.
 
 ## Risque et retour arrière

@@ -21,13 +21,13 @@ T-022 (contrat d'API), T-024 (même `PermissionContext`, séquentiel), T-030 (co
 
 ## Stratégie
 1. Signature cible : `can(permissionCode: string, moduleCode?: string)`. La portée module est un paramètre explicite.
-2. Table « module × permission » attendue pour les rôles par défaut, écrite dans la fiche et dans `docs/process/frontend-permissions.md`. Le critère Playwright s'appuie sur cette table.
+2. Table « module × permission » attendue pour les rôles par défaut, écrite dans la fiche et dans `docs/process/frontend-permissions.md`. Le contrôle des accès par module s'appuie sur cette table (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`).
 3. Navigation filtrée par module actif et permission.
 4. Écran d'affectation : liste des utilisateurs, cases des rôles du module, état vide et erreur.
 
 ## Tests attendus
 - Unitaires : `can()` avec module et `deny` (`test:unit`).
-- Playwright prod : utilisateur affecté au module A ne voit pas le module B ; le refus est visible.
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : utilisateur affecté au module A ne voit pas le module B ; le refus est visible.
 - `tsc`, `build`.
 
 ## Critères d'acceptation

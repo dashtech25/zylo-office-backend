@@ -24,7 +24,7 @@ T-035a (le lot précédent est fusionné avant de toucher `service.py`).
 ## Tests attendus
 - Suite `tests/test_zylo_liquid_*` identique.
 - Caractérisation du rapprochement de livraisons.
-- Playwright prod : parcours livraison.
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : parcours livraison.
 
 ## Critères d'acceptation
 - Fonctions de livraisons déplacées ; `lint-imports` vert ; aucune route modifiée.

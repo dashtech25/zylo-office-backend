@@ -30,7 +30,7 @@ T-006 (tests de payload verts, sinon le filet est incomplet), T-005 (base). Pas 
 ## Tests attendus
 - Suite `tests/test_zylo_liquid_*` identique avant et après (mêmes résultats).
 - Tests de caractérisation pour chaque fonction déplacée.
-- Playwright prod : parcours station et cuve inchangés.
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : parcours station et cuve inchangés.
 
 ## Critères d'acceptation
 - `service.py` diminué des fonctions de stations et de cuves ; façade documentée.

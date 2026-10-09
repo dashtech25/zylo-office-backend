@@ -28,8 +28,8 @@ T-030 (la coquille porte les tokens de `.zl-shell`), T-031 (même fichiers de pa
 
 ## Tests attendus
 - Contrôle après `next build` : `grep -c -- "--color-[a-z-]*:var(--color-" .next/static/**/*.css` renvoie 0 pour les tokens de `globals.css`.
-- Captures de référence avant/après (Playwright `toHaveScreenshot`, configuration de T-008) : tableau de bord, station, cuve. Écarts listés et acceptés par le client.
-- Playwright prod : navigation et rendu des écrans principaux.
+- Captures de référence avant/après non produites (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) : écarts visuels non contrôlés par test automatisé. Écarts listés et acceptés par le client.
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : navigation et rendu des écrans principaux.
 - `tsc`, `build`, `test:unit`.
 
 ## Critères d'acceptation

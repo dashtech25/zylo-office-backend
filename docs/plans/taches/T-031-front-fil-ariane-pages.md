@@ -27,7 +27,7 @@ T-030 (coquille unique, sinon deux topbars à modifier).
 4. Script de contrôle : aucune `page.tsx` de plus d'une ligne hors exceptions listées ; échoue sinon.
 
 ## Tests attendus
-- Playwright prod : un seul fil d'Ariane par page, `getByTestId('breadcrumb')` présent exactement une fois sur les pages de détail ; navigation station vers cuve.
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : un seul fil d'Ariane par page (`breadcrumb` présent une seule fois sur les pages de détail) ; navigation station vers cuve.
 - Script de contrôle vert.
 - Unitaires : `breadcrumbLabel` par défaut (`test:unit`).
 

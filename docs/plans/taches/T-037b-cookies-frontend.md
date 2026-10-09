@@ -22,23 +22,23 @@ T-037a (backend), T-030 (coquille et providers d'authentification), T-033b (clie
 ## Stratégie
 1. Bascule après la date de fin fixée en T-037a, pas avant : pendant la transition, le frontend reste compatible.
 2. Retirer l'envoi de l'en-tête dans `client.ts` en un seul commit.
-3. Les tests Playwright qui injectaient un jeton dans le stockage sont remplacés par une connexion réelle.
+3. Les tests Playwright qui injectaient un jeton dans le stockage sont sans objet tant que Playwright est suspendu (voir `docs/process/decision-playwright-suspendu.md`).
 
 ## En-têtes de sécurité du frontend (REV-S-19)
 - `next.config.ts` : `headers()` avec `Content-Security-Policy` (politique stricte, sans `unsafe-inline` pour les scripts si Next.js le permet, à vérifier au build), `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`.
 - Le passage des jetons en cookies rend ces en-têtes nécessaires : ils sont livrés dans la même PR.
-- Test : les en-têtes de la réponse de production contiennent chacun la valeur attendue (Playwright, configuration de T-008).
+- Test : les en-têtes de la réponse de production contiennent chacun la valeur attendue (tests pytest / tsc / lint / build locaux ; Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`).
 
 ## Tests attendus
-- Playwright prod : en-têtes de sécurité présents sur `/login` et sur une page protégée.
-- Playwright prod : connexion, rafraîchissement, déconnexion ; `localStorage` et `sessionStorage` ne contiennent aucun jeton ; `document.cookie` ne montre pas le jeton (test d'exposition).
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : en-têtes de sécurité présents sur `/login` et sur une page protégée.
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : connexion, rafraîchissement, déconnexion ; `localStorage` et `sessionStorage` ne contiennent aucun jeton ; `document.cookie` ne montre pas le jeton.
 - Parcours complet de T-026 vert.
 
 ## Critères d'acceptation
 - En-têtes CSP, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy` présents sur les réponses de production (test).
 - Aucun jeton dans `localStorage` ni `sessionStorage`.
 - Déconnexion efface les cookies.
-- Parcours Playwright complet vert sur build prod.
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : parcours complet connexion, rafraîchissement, déconnexion.
 
 ## Risque et retour arrière
 Élevé. Retour arrière : réactiver l'en-tête côté client tant que la date de fin n'est pas passée.

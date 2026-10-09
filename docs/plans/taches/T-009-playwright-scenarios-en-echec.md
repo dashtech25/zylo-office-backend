@@ -1,6 +1,8 @@
 # T-009 : Corriger les 10 scénarios Playwright en échec
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : frontend (+ backend si la donnée manque) · **Domaine** : zylo-liquid · **Type** : test
+> **Suspendue le 2026-10-09** : Playwright suspendu par décision du client. Voir `docs/process/decision-playwright-suspendu.md`.
+
+- **Statut** : Suspendue · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : frontend (+ backend si la donnée manque) · **Domaine** : zylo-liquid · **Type** : test
 - **Branche suggérée** : `fix/T-009-playwright-echecs` · **Base de test** : `zylo_t009_test` · **Ports** : back 3109, front prod 3309
 - **Dépendances** : T-046
 - **Décisions requises** : `tests/holykell-simulateur.md`

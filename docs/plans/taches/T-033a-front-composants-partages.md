@@ -27,7 +27,7 @@ T-030 (coquille), T-032 (tokens), T-042 (tests unitaires des composants partagé
 
 ## Tests attendus
 - Unitaires : composants partagés (`test:unit`), logique de `QueryState`.
-- Playwright prod : écrans migrés, rendu inchangé sur les captures de référence.
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : écrans migrés, rendu inchangé.
 - Contrôle `<table` : liste vide hors exemptions.
 
 ## Critères d'acceptation

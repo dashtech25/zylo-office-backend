@@ -27,7 +27,7 @@ T-033a (`QueryState` et composants partagés utilisés pour les états d'erreur)
 3. Message d'erreur d'import XLSX lu depuis `body.error.message`.
 
 ## Tests attendus
-- Playwright prod : import XLSX avec message d'erreur correct ; état d'erreur affiché si l'API échoue (interception réseau) ; réessai fonctionne.
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : import XLSX avec message d'erreur correct ; état d'erreur affiché si l'API échoue ; réessai fonctionne.
 - Unitaires : `escapeHtml` (`test:unit`).
 - Contrôle `fetch(` vert.
 

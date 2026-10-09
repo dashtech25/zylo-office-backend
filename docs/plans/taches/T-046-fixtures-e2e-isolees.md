@@ -1,6 +1,8 @@
 # T-046 : Fixtures e2e isolées par spec (une organisation et une station par test)
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : frontend · **Type** : test
+> **Suspendue le 2026-10-09** : Playwright suspendu par décision du client. Voir `docs/process/decision-playwright-suspendu.md`.
+
+- **Statut** : Suspendue · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : frontend · **Type** : test
 - **Branche suggérée** : `test/T-046-fixtures-isolees` · **Base de test** : `zylo_t046_test` · **Ports** : back 3146, front prod 3346
 - **Dépendances** : T-008
 - **Décisions requises** : aucune

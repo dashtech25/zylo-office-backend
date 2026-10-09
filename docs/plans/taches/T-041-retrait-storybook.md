@@ -1,6 +1,8 @@
 # T-041 : Retrait de Storybook (branche chore/retirer-storybook) et smoke Playwright sur build prod
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 0 · **Taille** : S · **Dépôt(s)** : frontend · **Domaine** : frontend · **Type** : chore
+> **Suspendue le 2026-10-09** : Playwright suspendu par décision du client. Voir `docs/process/decision-playwright-suspendu.md`.
+
+- **Statut** : Suspendue · **Priorité** : P1 · **Vague** : 0 · **Taille** : S · **Dépôt(s)** : frontend · **Domaine** : frontend · **Type** : chore
 - **Branche suggérée** : `chore/retirer-storybook` (existante, commit `64c97e1`, worktree `worktrees/frontend-retirer-storybook`) · **Base de test** : aucune · **Ports** : back 3141, front prod 3341
 - **Dépendances** : T-004
 - **Décisions requises** : aucune

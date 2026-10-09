@@ -36,7 +36,7 @@ T-002, T-005. T-010 recommandé pour le contrôle d'appartenance des fichiers (o
 - Fichier existant de type actif : réponse `attachment` et `nosniff` (test sur un fichier de fixture).
 - Import XLSX au-delà de la limite : 413.
 - Lecture bornée : test qui vérifie qu'un fichier de 10 Mo n'est pas lu en entier.
-- Playwright sur build prod : upload d'un document dans le module concerné.
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : upload d'un document dans le module concerné.
 
 ## Critères d'acceptation
 - Aucun type actif servi inline depuis l'API.

@@ -28,7 +28,7 @@ T-002 (configuration), T-012 (limitation de l'inscription).
 ## Tests attendus
 - Unitaires : mot de passe de 11 caractères refusé partout ; e-mail en majuscules normalisé.
 - Intégration : deux inscriptions avec la même adresse (casse différente) : une seule acceptée, réponse identique.
-- Playwright sur build prod : inscription et changement de mot de passe, message d'erreur attendu.
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : inscription et changement de mot de passe, message d'erreur attendu.
 
 ## Critères d'acceptation
 - Une seule constante de longueur, côté backend et frontend.

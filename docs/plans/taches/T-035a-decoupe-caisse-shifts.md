@@ -27,7 +27,7 @@ T-034 (lot 1 fusionné), T-027 (colonne chiffrée si la télémétrie est touch�
 ## Tests attendus
 - Suite `tests/test_zylo_liquid_*` identique avant et après.
 - Caractérisation des calculs de caisse (sorties figées).
-- Playwright prod : parcours caisse, configuration de T-008.
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : parcours caisse.
 
 ## Critères d'acceptation
 - Fonctions de caisse et de shifts déplacées ; façade documentée.

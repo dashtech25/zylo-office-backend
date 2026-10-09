@@ -29,7 +29,7 @@ T-041 (gabarit retiré : le travail restant est réduit). T-008 (parcours de nav
 ## Tests attendus
 - `npx tsc --noEmit` et `npm run build` verts.
 - `npm run test:unit` vert.
-- Playwright sur build prod (configuration de T-008) : navigation de base, login et tableau de bord.
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : navigation de base, login et tableau de bord.
 
 ## Critères d'acceptation
 - `ui-preview` inaccessible (404 en build de production).

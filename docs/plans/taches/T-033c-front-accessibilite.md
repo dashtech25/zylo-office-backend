@@ -22,11 +22,11 @@ T-033b (réseau et états stabilisés avant de toucher aux interactions).
 ## Stratégie
 1. Focus : piégé dans les modales, restauré à la fermeture ; Échap ferme.
 2. Onglets : navigation par flèches et touches de l'onglet.
-3. Règle ESLint `jsx-a11y` si elle est compatible avec la configuration ; sinon contrôle Playwright (`getByRole`).
+3. Règle ESLint `jsx-a11y` si elle est compatible avec la configuration ; sinon aucun contrôle automatisé des rôles (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`).
 4. La protection CSRF et la règle ESLint sur `fetch` restent des hypothèses signalées : elles ne sont pas revendiquées par cette tâche.
 
 ## Tests attendus
-- Playwright prod : onglets au clavier ; Échap ferme la modale ; focus restauré.
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : onglets au clavier ; Échap ferme la modale ; focus restauré.
 - Unitaires : logique de focus si extraite (`test:unit`).
 
 ## Critères d'acceptation

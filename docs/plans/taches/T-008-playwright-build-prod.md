@@ -1,6 +1,8 @@
 # T-008 : Playwright sur build de production, e2e versionnés, jetons exclus
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : frontend (backend pour le démarrage) · **Domaine** : frontend · **Type** : test
+> **Suspendue le 2026-10-09** : Playwright suspendu par décision du client. Voir `docs/process/decision-playwright-suspendu.md`.
+
+- **Statut** : Suspendue · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : frontend (backend pour le démarrage) · **Domaine** : frontend · **Type** : test
 - **Branche suggérée** : `test/T-008-playwright-prod` · **Base de test** : `zylo_t008_test` · **Ports** : back 3108, front prod 3308
 - **Dépendances** : T-003, T-005, T-041
 - **Décisions requises** : `tests/retention-traces-video.md`

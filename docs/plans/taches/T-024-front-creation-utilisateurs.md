@@ -28,12 +28,12 @@ T-021 (contrat d'API), T-012 et T-013 (règles de mot de passe et d'e-mail), T-0
 
 ## Tests attendus
 - Unitaires : validation partagée (e-mail, champs requis).
-- Playwright prod : propriétaire crée un utilisateur ; le formulaire ne montre aucun mot de passe ; le bouton est absent pour un membre sans permission.
+- Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : propriétaire crée un utilisateur ; le formulaire ne montre aucun mot de passe ; le bouton est absent pour un membre sans permission.
 - Scénario d'activation complet : porté par T-026.
 - `tsc`, `build`, `test:unit`.
 
 ## Critères d'acceptation
-- Bouton visible seulement si la permission existe (test Playwright sur deux comptes).
+- Bouton visible seulement si la permission existe ; vérification à deux comptes non automatisée (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`).
 - Aucune donnée secrète affichée ou stockée côté client.
 
 ## Risque et retour arrière

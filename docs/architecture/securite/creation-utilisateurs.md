@@ -2,7 +2,7 @@
 
 - **Statut** : en place sur `feat/T-021-creation-utilisateurs`, à vérifier (validation client avant fusion ; Playwright suspendu).
 - **Code** : `app/identity/invitations.py`, `app/identity/router.py`, `app/identity/schemas.py`, `app/identity/permissions.py`, `app/auth/router.py` (`POST /auth/activate`), `app/shared/email.py`, `app/core/config.py`, migration `alembic/versions/e7f8a9b0c1d2_creation_utilisateurs_invitations.py`.
-- **Tests** : `tests/test_creation_utilisateurs.py` (36 cas).
+- **Tests** : `tests/test_creation_utilisateurs.py` (36 cas) ; contournement des rôles de module : `tests/test_contournement_role_module.py` (5 cas).
 - **Décision** : `docs/questions/rbac/activation-compte.md` (option A, création désactivée tant que l'envoi n'est pas configuré).
 - **Flux pour le module** : `docs/modules/identite/flux-creation-activation.md`.
 
@@ -66,4 +66,5 @@ Un échec d'envoi annule la création (503 `email_delivery_failed`, transaction 
 3. **Pas de limitation de débit sur `POST /auth/activate`** : le jeton (256 bits) rend la recherche infaisable, mais une limite par IP reste à ajouter (T-012 à étendre).
 4. **Personnel de station** : `create_station_staff_member` (module zylo_liquid) crée toujours ses comptes avec un mot de passe temporaire affiché au créateur (IAM-007). Il n'est pas migré dans cette tâche, ce qui laisse ce défaut ouvert pour ce chemin.
 5. **Politique de mot de passe** : longueur 8 seulement, en attente de T-013.
-6. **Migration de tête** : la révision `e7f8a9b0c1d2` suit `a9b8c7d6e5f4` sur `remy`. Si T-018 est fusionnée avant, une fusion de têtes sera nécessaire.
+6. **Migration de tête** : la révision `e7f8a9b0c1d2` suit `b4e1c7d2a9f3` (tête de `remy` après la fusion de T-018). Une seule tête Alembic.
+7. **Rôles de module (T-018)** : `assign_role` (route générique `POST /rbac/organizations/{id}/user-roles`) ne contourne plus la règle « un rôle par module et par utilisateur ». Rôle de module à l'échelle de l'organisation : délégué à `assign_module_role`. Rôle de module avec portée ressource (station, zylo_liquid / zylo_tanker) : compatibilité explicite, un autre rôle du même module est refusé (409 `module_role_already_assigned`) ; décision à confirmer, car un gérant ne peut plus avoir un rôle de module sur deux stations. Tests : `tests/test_contournement_role_module.py`.

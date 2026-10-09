@@ -20,6 +20,8 @@
 
 ### 1.1 Tests backend échoués (22)
 
+**Statut (T-006, 2026-10-09)** : groupes A et B corrigés par T-006 (21 tests, correction des payloads et des codes d'erreur ; aucun contrat d'API modifié). Le groupe C (rôle manager) n'est pas présent à `base-T004` : il ne vit que dans le snapshot WIP `a7329ec` et reste en attente de la décision client T-007. Aucun droit de rôle modifié.
+
 Toutes les causes ci-dessous sont des **écarts test / contrat d'API**, mesurés dans le log. La cause n'a pas été vérifiée côté code applicatif.
 
 **Groupe A — payload sans `lines` (12 tests, HTTP 422 `validation_error`, champ `body.lines` requis).** Le test envoie une commande ou une déclaration sans la liste `lines` que l'API exige désormais.

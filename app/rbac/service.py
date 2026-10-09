@@ -449,6 +449,34 @@ async def assign_role(
     role = await get_role(db, organization_id, role_id)
     # IAM-004 : on n'attribue un rôle qu'à un membre de l'organisation.
     await assert_target_is_member(db, organization_id, target_user_id)
+    if role.moduleCode is not None:
+        if resource_type is None:
+            # T-018 : un rôle de module à l'échelle de l'organisation n'a qu'un chemin, l'API de module
+            # (un rôle par module, module actif, non-élévation). Jamais de contournement ici.
+            from app.rbac.module_assignment import assign_module_role
+
+            return await assign_module_role(db, organization_id, granter_user_id, target_user_id, role_id)
+        # Compatibilité explicite (zylo_liquid, zylo_tanker) : les rôles de station passent par une portée
+        # ressource, que l'API de module ne sait pas exprimer. La règle « un rôle par module » reste appliquée :
+        # un autre rôle du même module, sur n'importe quelle portée, est refusé. Le duplicat exact garde son
+        # refus habituel (role_already_assigned, plus bas).
+        autre = await db.scalar(
+            select(UserRole.id)
+            .join(Role, Role.id == UserRole.roleId)
+            .where(
+                UserRole.userId == target_user_id,
+                UserRole.organizationId == organization_id,
+                Role.moduleCode == role.moduleCode,
+                ~((UserRole.roleId == role_id) & (UserRole.resourceType == resource_type) & (UserRole.resourceId == resource_id)),
+            )
+            .limit(1)
+        )
+        if autre is not None:
+            raise AppError(
+                code="module_role_already_assigned",
+                message=f"Cet utilisateur a déjà un rôle sur le module {role.moduleCode}. Retirez-le avant d'en affecter un autre.",
+                status_code=409,
+            )
     role_codes = await get_role_permission_codes(db, role.id)
     await assert_permissions_match_module(db, role.moduleCode, role_codes)
     await _assert_no_privilege_escalation(db, organization_id, granter_user_id, role_codes, resource_type, resource_id)

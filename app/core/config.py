@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     STORAGE_BACKEND: str = "local"
     STORAGE_LOCAL_ROOT: str = "./var/storage"
     STORAGE_SIGNED_URL_SECRET: str = FALLBACK_JWT_SECRET
+    # Clé de chiffrement des champs sensibles (T-027 l'utilise). Déclarée ici :
+    # vide par défaut, obligatoire hors development et test (voir le validateur).
+    APP_FIELD_ENCRYPTION_KEY: str = ""
     STORAGE_SIGNED_URL_TTL_SECONDS: int = 900
     STORAGE_S3_ENDPOINT_URL: str | None = None
     STORAGE_S3_BUCKET: str = "zylo-office-documents"
@@ -108,6 +111,11 @@ class Settings(BaseSettings):
             fautives.append("STORAGE_SIGNED_URL_SECRET")
         if _mot_de_passe_db(self.DATABASE_URL) == FALLBACK_DB_PASSWORD:
             fautives.append("DATABASE_URL (mot de passe de repli)")
+
+        # Clé de chiffrement : exigée hors development et test (test la fournit
+        # ou n'en a pas besoin). Absente, vide ou trop courte : refus.
+        if self.ENVIRONMENT != "test" and _secret_refuse(self.APP_FIELD_ENCRYPTION_KEY, ""):
+            fautives.append("APP_FIELD_ENCRYPTION_KEY")
 
         if fautives:
             raise ConfigurationSecretError(

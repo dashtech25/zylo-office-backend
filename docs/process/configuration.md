@@ -24,7 +24,7 @@ Le `Dockerfile` déclare `ENV ENVIRONMENT=production`. Pour un lancement local, 
 | `DATABASE_URL` | obligatoire en pratique | refusée si le mot de passe vaut le mot de passe de repli `changeme` |
 | `JWT_SECRET` | obligatoire | refusé s'il vaut la valeur de repli ou fait moins de 32 caractères |
 | `STORAGE_SIGNED_URL_SECRET` | obligatoire | refusé s'il vaut la valeur de repli ou fait moins de 32 caractères |
-| `APP_FIELD_ENCRYPTION_KEY` | à introduire par T-027 (clé de chiffrement de champs) | non déclarée dans `config.py` à ce stade |
+| `APP_FIELD_ENCRYPTION_KEY` | obligatoire hors `development` et `test`, au moins 32 caractères | refusée si absente, vide ou trop courte (déclarée ici, utilisée par T-027) |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | facultatives | vides = canal Web Push désactivé |
 | `HOLYKELL_SYNC_BASE_URL` | facultative | vide = boucle de sondage désactivée |
 | `STORAGE_S3_ACCESS_KEY`, `STORAGE_S3_SECRET_KEY` | requises si `STORAGE_BACKEND` est S3 | non vérifiées par T-002 |

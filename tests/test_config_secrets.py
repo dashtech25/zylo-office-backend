@@ -28,8 +28,9 @@ SECRET_FORT_STORAGE = "stockage-fedcba9876543210fedcba9876543210"
 DB_FORTE = "postgresql+asyncpg://zylo_test:mdp-propre-7H3kQ9@localhost:5432/zylo_test"
 DB_REPLI = f"postgresql+asyncpg://zylo_office:{FALLBACK_DB_PASSWORD}@localhost:5432/zylo_office"
 SECRET_COURT = "trop-court-123"
+SECRET_CHIFFREMENT = "chiffrement-" + "0123456789abcdef" * 2
 
-VARIABLES = ("ENVIRONMENT", "JWT_SECRET", "STORAGE_SIGNED_URL_SECRET", "DATABASE_URL")
+VARIABLES = ("ENVIRONMENT", "JWT_SECRET", "STORAGE_SIGNED_URL_SECRET", "DATABASE_URL", "APP_FIELD_ENCRYPTION_KEY")
 
 
 def _environnement(monkeypatch, **valeurs):
@@ -55,6 +56,28 @@ def test_variable_absente_avec_secret_de_repli_refuse(monkeypatch):
     assert "JWT_SECRET" in str(info.value)
 
 
+@pytest.mark.parametrize("environnement", ["production", "staging", ""])
+@pytest.mark.parametrize("cle", ["", SECRET_COURT])
+def test_cle_de_chiffrement_obligatoire_hors_development_et_test(monkeypatch, environnement, cle):
+    _environnement(
+        monkeypatch,
+        ENVIRONMENT=environnement,
+        JWT_SECRET=SECRET_FORT,
+        STORAGE_SIGNED_URL_SECRET=SECRET_FORT_STORAGE,
+        DATABASE_URL=DB_FORTE,
+        APP_FIELD_ENCRYPTION_KEY=cle,
+    )
+    with pytest.raises(ConfigurationSecretError) as info:
+        _settings()
+    assert "APP_FIELD_ENCRYPTION_KEY" in str(info.value)
+
+
+@pytest.mark.parametrize("environnement", ["test", "development"])
+def test_cle_de_chiffrement_non_exigee_en_test_et_development(monkeypatch, environnement):
+    _environnement(monkeypatch, ENVIRONMENT=environnement)
+    assert _settings().APP_FIELD_ENCRYPTION_KEY == ""
+
+
 @pytest.mark.parametrize(
     "variables, attendu",
     [
@@ -71,6 +94,7 @@ def test_hors_development_secret_de_repli_ou_court_refuse(monkeypatch, environne
         "JWT_SECRET": SECRET_FORT,
         "STORAGE_SIGNED_URL_SECRET": SECRET_FORT_STORAGE,
         "DATABASE_URL": DB_FORTE,
+        "APP_FIELD_ENCRYPTION_KEY": SECRET_CHIFFREMENT,
     }
     base.update(variables)
     _environnement(monkeypatch, **base)
@@ -112,6 +136,7 @@ def test_secrets_valides_hors_development_acceptes(monkeypatch, environnement):
         JWT_SECRET=SECRET_FORT,
         STORAGE_SIGNED_URL_SECRET=SECRET_FORT_STORAGE,
         DATABASE_URL=DB_FORTE,
+        APP_FIELD_ENCRYPTION_KEY=SECRET_CHIFFREMENT,
     )
     settings = _settings()
     assert settings.ENVIRONMENT == environnement
@@ -159,5 +184,6 @@ def test_import_app_main_accepte_production_avec_secrets_valides():
         "JWT_SECRET": SECRET_FORT,
         "STORAGE_SIGNED_URL_SECRET": SECRET_FORT_STORAGE,
         "DATABASE_URL": DB_FORTE,
+        "APP_FIELD_ENCRYPTION_KEY": SECRET_CHIFFREMENT,
     })
     assert resultat.returncode == 0, resultat.stderr[-800:]

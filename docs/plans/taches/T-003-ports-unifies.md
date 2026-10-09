@@ -1,6 +1,6 @@
 # T-003 : Table de ports unique, allocation par worktree, CORS configurable
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 0 · **Taille** : S · **Dépôt(s)** : backend et frontend · **Domaine** : docs · **Type** : chore
+- **Statut** : À vérifier · **Priorité** : P1 · **Vague** : 0 · **Taille** : S · **Dépôt(s)** : backend et frontend · **Domaine** : docs · **Type** : chore
 - **Branche suggérée** : `docs/T-003-ports-unifies` · **Base de test** : aucune · **Ports** : aucun (la tâche définit la table)
 - **Dépendances** : T-004
 - **Décisions requises** : `architecture/ports-canoniques.md` (appliquée, à confirmer)

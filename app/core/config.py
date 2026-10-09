@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     # explicite `development` (voir docs/process/configuration.md).
     ENVIRONMENT: str = "production"
     PORT: int = 3002
+    # Origines autorisées par CORS. Configurable par variable d'environnement
+    # (liste JSON, ex. CORS_ORIGINS=["http://localhost:3203"]) : une variable
+    # présente remplace entièrement ce défaut. Le défaut couvre le frontend de
+    # développement (3001) et le serveur e2e Playwright (3055).
     CORS_ORIGINS: list[str] = [
         "http://localhost:3001",
         "http://127.0.0.1:3001",

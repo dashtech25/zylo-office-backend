@@ -8,4 +8,4 @@
   - B. BFF Next.js qui détient les jetons : une couche de plus, mais le backend ne gère plus les cookies.
   - C. Conserver `localStorage` : rejeté (jeton lisible par tout script de la page).
 - **Recommandation vérifiée** : option A. Vérification : aucune dépendance BFF dans le frontend actuel ; le comportement de `Secure` sur `http://localhost` varie selon les navigateurs (Safari historiquement), à tester avant la bascule.
-- **État** : En attente de réponse (décision d'infrastructure du client : proxy ou sous-domaine)
+- **État** : Option A appliquée dans `feat/T-020-T-037-sessions-cookies` (cookies posés par FastAPI, `SameSite=Lax`, `Secure` hors development). Reste à confirmer par l'infrastructure : interface et API sur le même site (proxy ou sous-domaine). Voir `docs/architecture/securite/sessions.md`.

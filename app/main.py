@@ -59,12 +59,14 @@ app.add_middleware(RequestIdMiddleware)
 # frontend (fetch GET/POST/PUT/PATCH/DELETE ; Authorization, Content-Type,
 # X-Organization-Id). Une méthode ou un en-tête non listé est refusé au
 # préflight. Les origines restent lues depuis la configuration (CORS_ORIGINS).
+# T-037a : credentials explicites (cookies de session) et en-tête X-CSRF-Token
+# (double soumission, voir app/core/session_http.py). Jamais de joker sur les origines.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Organization-Id", "Accept"],
+    allow_headers=["Authorization", "Content-Type", "X-Organization-Id", "X-CSRF-Token", "Accept"],
 )
 # En-têtes de sécurité (T-015) : ajoutés en dernier, donc les plus externes ;
 # ils couvrent aussi les réponses du préflight CORS.

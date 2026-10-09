@@ -62,6 +62,12 @@ Aucun mot de passe, aucun email. Le journal ne remplace pas une rétention de s�
 - `mustChangePassword` est appliqué côté backend : tant qu'il est vrai, seuls `GET /auth/me` et `POST /auth/change-password` répondent (sinon 403 `password_change_required`).
 - Le changement révoque les refresh tokens des autres sessions (`refreshToken` optionnel dans le corps pour garder la session courante).
 
+## 6 ter. Sessions par cookies (T-020, T-037a)
+
+- Les jetons sont posés en cookies `HttpOnly` par l'API (`zylo_access`, `zylo_refresh`) ; le corps ne les porte plus qu'après la fin de la transition. Détail : `docs/architecture/securite/sessions.md`.
+- Rotation avec famille : présenter un refresh token déjà révoqué révoque toute la famille. Le renouvellement est sérialisé (`FOR UPDATE`).
+- Les requêtes non sûres portées par cookie exigent le jeton CSRF (`X-CSRF-Token`) et une origine autorisée.
+
 ## 7. Retour arrière
 
 `AUTH_RATE_LIMIT_ENABLED=false` désactive les contrôles sans modifier le code. Les échecs continuent d'être enregistrés pour que la réactivation prenne effet immédiatement.

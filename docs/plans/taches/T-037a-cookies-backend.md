@@ -1,6 +1,6 @@
 # T-037a : Jetons dans des cookies HttpOnly, partie backend
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
+- **Statut** : À vérifier (implémentée sur `feat/T-020-T-037-sessions-cookies`, non fusionnée ; date de fin de transition proposée, à confirmer) · **Priorité** : P1 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
 - **Branche suggérée** : `feat/T-037a-cookies-backend` · **Base de test** : `zylo_t037a_test` · **Ports** : back 3137
 - **Dépendances** : T-020
 - **Décisions requises** : `securite/stockage-jetons.md` (en attente : infrastructure de même site)

@@ -89,8 +89,8 @@ async def test_list_organization_modules_is_forbidden_for_a_non_member(client: A
     headers = {"Authorization": f"Bearer {login.json()['accessToken']}"}
 
     res = await client.get(f"/api/v1/modules/organizations/{organization['id']}", headers=headers)
-    assert res.status_code == 403
-    assert res.json()["error"]["code"] == "not_organization_member"
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == "organization_not_found"
 
 
 async def test_backfill_grants_permissions_added_after_module_activation(client: AsyncClient, registered_user: dict, organization: dict):

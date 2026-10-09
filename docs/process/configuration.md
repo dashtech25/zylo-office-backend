@@ -40,3 +40,9 @@ Pour générer une valeur forte : `openssl rand -hex 32` (64 caractères).
 ## 4. Tests
 
 `tests/conftest.py` fixe `ENVIRONMENT=test` et des secrets de test explicites (longs, non issus des replis) avant tout import de l'application. `tests/test_config_secrets.py` couvre le refus, l'acceptation en `development` et les secrets valides, y compris un démarrage en sous-processus.
+
+## 5. Documentation de l'API et en-têtes (T-015)
+
+- `/docs`, `/redoc` et `/openapi.json` ne sont montés qu'en `ENVIRONMENT=development`. Hors de cette valeur (production, test, valeur absente ou inconnue) ces routes renvoient 404. Source : `app/core/securite_http.py` (`options_documentation`), branché dans `app/main.py`.
+- Des en-têtes de sécurité (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`) sont ajoutés à chaque réponse, sans écraser un en-tête déjà posé par une route.
+- Les dépendances de développement (pytest, import-linter, pip-audit) sont dans `requirements-dev.txt`, qui inclut `requirements.txt`. Le Dockerfile n'installe que `requirements.txt`.

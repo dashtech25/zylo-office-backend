@@ -12,6 +12,7 @@ from app.modules.zylo_liquid.router import router as zylo_liquid_router
 from app.modules.zylo_tanker.router import router as zylo_tanker_router
 from app.modules_registry.router import router as modules_router
 from app.rbac.module_router import router as rbac_module_router
+from app.notifications.router import router as notifications_router
 from app.rbac.router import router as rbac_router
 from app.audit.router import router as audit_router
 from app.shared.currency_router import currency_router, exchange_rate_router
@@ -29,6 +30,7 @@ api_router.include_router(modules_router, prefix="/modules", tags=["modules"])
 api_router.include_router(rbac_router, prefix="/rbac", tags=["rbac"])
 api_router.include_router(rbac_module_router, prefix="/rbac", tags=["rbac"])
 api_router.include_router(audit_router, prefix="/audit", tags=["audit"])
+api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(billing_router, prefix="/billing", tags=["billing"])
 api_router.include_router(zylo_liquid_router, prefix="/zylo-liquid", tags=["zylo-liquid"])
 api_router.include_router(files_router, prefix="/zylo-liquid", tags=["files"])

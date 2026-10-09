@@ -62,6 +62,7 @@ ROUTES_PUBLIQUES: dict[str, str] = {
     # --- Webhooks GPS : pas de JWT, secret d'ingestion propre à l'organisation ---
     "POST /api/v1/zylo-liquid/gps/ingest": "Webhook GPS : secret d'ingestion de l'organisation (en-tête X-GPS-Ingest-Secret) vérifié dans le service (invalid_ingest_secret, 401). 2026-10-09.",
     "POST /api/v1/zylo-tanker/gps/ingest": "Webhook GPS : secret d'ingestion de l'organisation (en-tête X-GPS-Ingest-Secret) vérifié dans le service (invalid_ingest_secret, 401). 2026-10-09.",
+    "GET /api/v1/notifications/vapid-public-key": "Clé publique VAPID (non secrète), lue avant tout abonnement, aucune donnée d'organisation. 2026-10-09 (T-004b lot 2).",
 }
 
 

@@ -23,6 +23,7 @@ from app.modules.zylo_liquid.roles_seed import seed_default_roles as seed_roles_
 from app.modules.zylo_tanker.roles_seed import seed_default_roles as seed_roles_zylo_tanker
 from app.modules_registry.service import enregistre_hook_activation
 from app.modules_registry.service import backfill_active_module_permissions_for_owners
+from app.notifications.service import handle_alert_created
 from app.rbac.seed import seed_known_permissions as seed_rbac_permissions
 from app.shared.events import subscribe
 
@@ -93,6 +94,9 @@ app.include_router(api_router, prefix="/api/v1")
 # `app.shared.events` et `app.location.service.run_truck_stop_detection`,
 # premier cas d'usage réel).
 subscribe("TruckStopUnqualified", handle_truck_stop_unqualified)
+# Notifications Web Push (2026-09-20) — même mécanisme, voir la docstring
+# de `app.notifications.service` pour le détail du découplage.
+subscribe("AlertCreated", handle_alert_created)
 
 
 @app.on_event("startup")

@@ -80,6 +80,7 @@ from app.core.errors import AppError
 from app.modules.zylo_liquid.models import Station, Tank, Truck
 from app.modules.zylo_tanker.models import Vessel
 from app.rbac.service import list_visible_resource_ids
+from app.shared.events import publish
 from app.shared.pagination import PaginationParams
 from app.shared.schemas import Page, PageMeta
 
@@ -231,6 +232,14 @@ async def upsert_active_alert(
     )
     db.add(alert)
     await db.flush()
+    # Point de branchement unique des notifications (2026-09-20) — événement
+    # de domaine (`app.shared.events`, même mécanisme que
+    # `app.location` -> `app.alerts` depuis la Phase 5), jamais un import
+    # direct d'`app.notifications` : ce module n'a donc pas besoin de le
+    # connaître, symétrique à la dépendance déjà supprimée entre Location et
+    # Alertes. Toutes les données nécessaires au handler voyagent dans le
+    # payload, jamais une référence à re-résoudre.
+    await publish("AlertCreated", alert_id=alert.id, alert_type=alert.type, severity=alert.severity, station_id=alert.stationId, truck_id=alert.truckId)
     return alert
 
 

@@ -1,6 +1,6 @@
 # Issues à créer (une par tâche, générées depuis les fiches)
 
-Labels : `priority:Px`, `wave:N`, `area:<domaine>`, `type:<type>`, `repo:<backend|frontend>`. Généré par le même contrôle que le registre : ne pas éditer à la main.
+Labels : `priority:Px`, `wave:N`, `area:<domaine>`, `type:<type>`, `repo:<backend|frontend>`. Généré par `scripts/docs/check_plan.py --generer` : ne pas éditer à la main.
 
 | ID | Titre d'issue | Labels |
 |---|---|---|

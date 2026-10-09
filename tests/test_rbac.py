@@ -11,6 +11,8 @@ async def test_owner_has_access_to_own_organization(client: AsyncClient, registe
 
 
 async def test_other_user_without_role_is_denied(client: AsyncClient, organization: dict):
+    """Un utilisateur qui n'appartient pas à l'organisation reçoit la même
+    réponse 404 qu'une organisation inexistante (T-010, IAM-001)."""
     email = unique_email()
     password = "TestPassword123!"
     await client.post("/api/v1/auth/register", json={"email": email, "password": password, "fullName": "Outsider"})
@@ -19,8 +21,8 @@ async def test_other_user_without_role_is_denied(client: AsyncClient, organizati
 
     headers = {"Authorization": f"Bearer {outsider_token}", "X-Organization-Id": organization["id"]}
     res = await client.get(f"/api/v1/organizations/{organization['id']}/protected-demo", headers=headers)
-    assert res.status_code == 403
-    assert res.json()["error"]["code"] == "permission_denied"
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == "organization_not_found"
 
 
 async def test_missing_organization_header_is_rejected(client: AsyncClient, registered_user: dict, organization: dict):

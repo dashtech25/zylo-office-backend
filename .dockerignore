@@ -1,6 +1,49 @@
-venv
-.venv
-__pycache__
+# Contexte de build de l'image (T-051). Rien de ce qui suit ne doit entrer dans l'image :
+# secrets, données, sauvegardes, dépôt git, environnements locaux.
+
+# Dépôt et outils de développement
 .git
+.githooks
+.github
+.venv
+venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.import_linter_cache
+.importlinter
+.ruff_cache
+.mypy_cache
+tests
+docs
+taches
+scripts/dev
+
+# Secrets et configuration locale (.env.example compris : non nécessaire à l'exécution)
 .env
-*.pyc
+.env.*
+**/*.pem
+**/*.key
+**/*.p12
+id_rsa
+id_ed25519
+
+# Données, sauvegardes et dumps
+backups
+var
+sauvegarde-*
+**/*.sql
+**/*.sql.gz
+**/*.sql.bz2
+**/*.sql.xz
+**/*.dump
+**/*.pgdump
+
+# Documents et notes hors exécution
+**/*.md
+teste.html
+test.txt
+validation_log.md
+phase_1_database.md
+requirements-dev.txt
+pytest.ini

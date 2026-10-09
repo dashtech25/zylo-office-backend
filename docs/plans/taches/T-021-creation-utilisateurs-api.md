@@ -52,7 +52,9 @@ T-017, T-020, T-023 (fichiers distincts) ; séquencer avec T-020 sur `auth/`.
 
 ## Réalisation (T-021, lot 3, 2026-10-09) : À vérifier
 - Routes : `POST /organizations/{id}/users` (201, `pending`, sans secret), `POST …/users/{userId}/invitation` (réémission), `PATCH …/users/{userId}` (suspension et réactivation), `POST /auth/activate` (T-049 minimal). Détail : `docs/architecture/securite/creation-utilisateurs.md`.
-- Tests : `tests/test_creation_utilisateurs.py` (36 cas). Non-régression : voir le rapport de lot.
+- Tests : `tests/test_creation_utilisateurs.py` (36 cas) et `tests/test_contournement_role_module.py` (5 cas, preuve de fermeture du contournement de `assign_role`, 4 échouent sans le correctif).
+- Suite complète sur `feat/T-021-creation-utilisateurs` (remy fusionnée) : 477 réussis, 2 échecs dans `tests/test_zylo_liquid_dev_seed.py` (`MultipleResultsFound` dans `run_leak_test_for_tank`). Ces deux échecs se reproduisent à l'identique sur `remy` seul : préexistants, hérités de remy, non traités ici.
+- Fusion de `remy` (T-018 incluse) : la migration T-021 est rattachée à la tête unique `b4e1c7d2a9f3`.
 - Décision recommandée appliquée (`rbac/activation-compte.md`, option A) ; création désactivée tant que `EMAIL_BACKEND=none` (503). Fournisseur d'e-mail non choisi.
 - Migration `e7f8a9b0c1d2` : table `userInvitation` (jeton haché, usage unique, index partiel) et permission accordée aux propriétaires existants (rejouable).
 - Écarts à valider : énumération par les administrateurs (409 `email_already_used`) ; personnel de station non migré (mot de passe temporaire inchangé, IAM-007 ouvert) ; politique de mot de passe 8 caractères en attendant T-013.

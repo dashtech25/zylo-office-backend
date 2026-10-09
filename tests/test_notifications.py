@@ -98,3 +98,24 @@ async def test_alert_notification_is_silent_without_vapid_private_key(monkeypatc
     await notifications_service._notify_new_alert(
         alert_id=uuid.uuid4(), alert_type="test", severity="low", station_id=uuid.uuid4(), truck_id=None
     )
+
+
+async def test_handler_alert_created_est_awaitable_par_publish(monkeypatch):
+    # `app.shared.events.publish` fait `await handler(...)` : le handler doit
+    # donc être une coroutine. Une version synchrone levait une TypeError à
+    # chaque alerte créée, avalée et journalisée par publish.
+    from app.shared.events import publish, subscribe, _handlers
+
+    monkeypatch.setattr(settings, "VAPID_PRIVATE_KEY", "")
+    monkeypatch.setitem(_handlers, "AlertCreated", [])
+    subscribe("AlertCreated", notifications_service.handle_alert_created)
+    journal_erreurs: list[str] = []
+    monkeypatch.setattr(
+        "app.shared.events.logger",
+        type("Journal", (), {"exception": lambda self, msg, *a, **k: journal_erreurs.append(msg)})(),
+    )
+    await publish(
+        "AlertCreated",
+        alert_id=uuid.uuid4(), alert_type="test", severity="low", station_id=uuid.uuid4(), truck_id=None,
+    )
+    assert journal_erreurs == []

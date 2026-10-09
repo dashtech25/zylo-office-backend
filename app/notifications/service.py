@@ -165,7 +165,7 @@ async def _resolve_organization_id(db: AsyncSession, station_id: uuid.UUID | Non
     return None
 
 
-def handle_alert_created(
+async def handle_alert_created(
     alert_id: uuid.UUID,
     alert_type: str,
     severity: str,

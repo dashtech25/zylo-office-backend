@@ -243,7 +243,7 @@ async def test_delegation_cascade_revocation(client: AsyncClient):
     from app.identity.schemas import CreateOrganizationRequest
     from app.rbac.service import create_grant, revoke_grant
     from app.rbac.models import UserPermissionGrant
-    from app.identity.models import User
+    from app.identity.models import OrganizationUser, User
     from app.core.security import hash_password
 
     async with AsyncSessionLocal() as db:
@@ -253,6 +253,14 @@ async def test_delegation_cascade_revocation(client: AsyncClient):
         db.add_all([owner, delegate1, delegate2])
         await db.flush()
         org = await create_organization(db, owner, CreateOrganizationRequest(name="DelegOrg", slug=f"deleg-{uuid.uuid4().hex[:8]}"))
+        # T-010 (IAM-004) : un grant ne vise qu'un membre de l'organisation.
+        db.add_all(
+            [
+                OrganizationUser(organizationId=org.id, userId=delegate1.id),
+                OrganizationUser(organizationId=org.id, userId=delegate2.id),
+            ]
+        )
+        await db.commit()
 
         origin_grant = await create_grant(db, org.id, owner.id, owner.id, "identity.organization.manage", "allow")
 

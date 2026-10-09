@@ -1,6 +1,6 @@
 # T-017 : Refonte de la documentation backend en arborescence de petits fichiers
 
-- **Statut** : Planifiée · **Priorité** : P2 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : docs · **Type** : docs
+- **Statut** : À vérifier · **Priorité** : P2 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : docs · **Type** : docs
 - **Branche suggérée** : `docs/T-017-arborescence-backend` · **Base de test** : aucune · **Ports** : aucun
 - **Dépendances** : T-003, T-016
 - **Décisions requises** : aucune

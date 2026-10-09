@@ -1,6 +1,6 @@
 # T-040 : Agents et règles Claude Code : CLAUDE.md court, règles par zone, gabarit d'agent d'exécution
 
-- **Statut** : Planifiée · **Priorité** : P2 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : backend et frontend · **Domaine** : docs · **Type** : docs
+- **Statut** : À vérifier · **Priorité** : P2 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : backend et frontend · **Domaine** : docs · **Type** : docs
 - **Branche suggérée** : `docs/T-040-agents-claude` · **Base de test** : aucune · **Ports** : aucun
 - **Dépendances** : T-016, T-017, T-039
 - **Décisions requises** : aucune

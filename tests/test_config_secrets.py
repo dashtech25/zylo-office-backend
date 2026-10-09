@@ -72,9 +72,20 @@ def test_cle_de_chiffrement_obligatoire_hors_development_et_test(monkeypatch, en
     assert "APP_FIELD_ENCRYPTION_KEY" in str(info.value)
 
 
-@pytest.mark.parametrize("environnement", ["test", "development"])
-def test_cle_de_chiffrement_non_exigee_en_test_et_development(monkeypatch, environnement):
-    _environnement(monkeypatch, ENVIRONMENT=environnement)
+def test_cle_de_chiffrement_non_exigee_en_development(monkeypatch):
+    _environnement(monkeypatch, ENVIRONMENT="development")
+    assert _settings().APP_FIELD_ENCRYPTION_KEY == ""
+
+
+def test_cle_de_chiffrement_non_exigee_en_test(monkeypatch):
+    # En test, les autres secrets doivent être valides (règles strictes) ; seule la clé est dispensée.
+    _environnement(
+        monkeypatch,
+        ENVIRONMENT="test",
+        JWT_SECRET=SECRET_FORT,
+        STORAGE_SIGNED_URL_SECRET=SECRET_FORT_STORAGE,
+        DATABASE_URL=DB_FORTE,
+    )
     assert _settings().APP_FIELD_ENCRYPTION_KEY == ""
 
 

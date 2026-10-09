@@ -47,7 +47,8 @@ Moyen : un conteneur non root ne peut plus écrire dans un volume existant (vér
 ## Parallélisable avec
 T-016, T-017 (fichiers distincts).
 
-## Réalisation partielle (branche `chore/T-028-T-051-migrations-conteneur`, statut À vérifier)
+## Réalisation partielle (fusion dans `remy` : `8546b03`, statut À vérifier)
 - Fait : image multi-étapes, utilisateur système uid/gid 10001 (`USER`), `HEALTHCHECK` conservé, `curl` retiré, `.dockerignore` complété (secrets, sauvegardes, dumps, dépôt, documents).
 - Non fait (hors mission de cette branche) : montage unique de `location_router`, suppression des routes de démonstration (`/health/error-demo`, routes démo identity/modules_registry).
 - Docker vérifié localement (hôte de développement) : build de l'image, utilisateur `10001`, `GET /api/v1/health` 200, `HEALTHCHECK` healthy, écriture refusée hors `var/storage`, aucun fichier `.env`/dump dans l'image. Base de test : Postgres 16 jetable (`zylo_t028_test`), jamais une base réelle.
+- Raison de « À vérifier » : montage unique de `location_router` et suppression des routes de démonstration non faits (voir ci-dessus). Vérification au démarrage sur base de test (2026-10-09) : uvicorn démarre sans migration, `/api/v1/health` 200. Build de l'image `zylo-office-backend:t028-merge` OK, utilisateur `10001:10001`. Test du `HEALTHCHECK` dans un conteneur non fait (la base de test est sur la socket locale, inaccessible au conteneur).

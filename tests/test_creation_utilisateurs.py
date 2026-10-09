@@ -33,7 +33,7 @@ from app.audit.models import AuditLog
 from app.auth.models import RefreshToken
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.identity.models import Organization, OrganizationUser, User, UserInvitation
+from app.identity.models import OrganizationUser, User, UserInvitation
 from app.rbac.models import Role, UserRole
 from app.shared.email import memory_outbox
 from tests.conftest import unique_email
@@ -121,7 +121,10 @@ async def _activer(client: AsyncClient, jeton: str, mot_de_passe: str = MOT_DE_P
 
 
 @pytest.fixture(autouse=True)
-def _boite_vide():
+def _boite_de_test(monkeypatch):
+    """Envoi en boîte mémoire pour ce module seulement. Réglé sur l'objet `settings`
+    (et non dans l'environnement), pour ne pas fausser les tests de configuration."""
+    monkeypatch.setattr(settings, "EMAIL_BACKEND", "memory")
     memory_outbox().clear()
     yield
     memory_outbox().clear()
@@ -745,4 +748,3 @@ async def test_organisation_creee_donne_au_proprietaire_la_permission(client: As
             db, uuid.UUID(createur["id"]), uuid.UUID(createur["organisation"]), USER_MANAGE
         )
     assert autorise is True
-    assert Organization is not None  # import utilisé par les autres tests de la suite

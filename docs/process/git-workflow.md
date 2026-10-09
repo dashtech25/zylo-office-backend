@@ -30,7 +30,11 @@ Sauvegarde préalable (hors dépôts, dossier `office/sauvegarde-T004-2026-10-08
 ## 4. Worktrees
 
 - Un worktree par tâche et par dépôt, dans `office/worktrees/T-XXX-<back|front>` (dossier frère des dépôts, hors dépôt).
-- Création et suppression : `scripts/dev/env_tache.sh creer|supprimer <NNN> <back|front>` (dépôt backend). Le préflight vérifie tout avant de créer ; la base n'est créée que si le rôle a CREATEDB (variable `ZYLO_PG_ADMIN_URL`).
+- Création et suppression : `scripts/dev/env_tache.sh creer|supprimer <NNN> <back|front>` (dépôt backend). Le préflight vérifie tout avant de créer ; la base n'est créée que si le rôle a CREATEDB.
+- Serveur d'administration (back) : `ZYLO_PG_ADMIN_URL`, par défaut le rôle Unix courant via la socket locale (auth peer, sans mot de passe). Ce rôle doit avoir CREATEDB ; il crée la base avec `OWNER zylo_office` sans modifier le rôle `zylo_office` (aucun `ALTER ROLE`, aucun `GRANT`, pas de sudo).
+- `creer back` crée `zylo_t<NNN>_test`, applique `alembic upgrade head` sur cette seule base (venv du dépôt backend : `.venv`), puis écrit `.env` dans le worktree. En cas d'échec des migrations, le worktree et la base sont retirés.
+- `supprimer back` ne supprime que le motif `zylo_t[0-9]{3}_test`, après `git worktree remove` (sans `--force`).
+- Procédure vérifiée : `creer 098 back`, `pytest tests/test_rbac.py` avec `TEST_DATABASE_URL` pris dans le `.env` du worktree, puis `supprimer 098 back`.
 - Fichiers d'environnement du worktree : `.env` (backend, lu par `app/core/config.py`) et `.env.local` (frontend), tous deux ignorés par git.
 - Ports : table unique dans `docs/process/ports.md` (T-003). Worktree T-NNN : back 3100+n, front dev 3200+n, front prod 3300+n, avec n = NNN.
 - Bases de test : `zylo_t<NNN>[a-z]?_test` uniquement. Les bases `zylo`, `zylo_office`, `zylo_dev`, `zylo_liquid`, `zylo_recette` ne sont jamais utilisées par un test.

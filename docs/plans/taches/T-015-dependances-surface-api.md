@@ -2,7 +2,7 @@
 
 - **Statut** : Terminée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
 - **Branche suggérée** : `chore/T-015-dependances-api` · **Base de test** : `zylo_t015_test` · **Ports** : back 3115
-- **Dépendances** : T-002, T-005
+- **Dépendances** : aucune
 - **Décisions requises** : aucune
 
 ## Objectif
@@ -12,7 +12,7 @@ Réduire la surface d'attaque sans changer le comportement métier : dépendance
 - BCK-009 (P1, `python-jose` 3.3.0, `Pillow` 11.0.0, dépendances de test en production), BCK-010 (partie identifiants de démo), BCK-014 (P2, OpenAPI public), BCK-022 (P3, CORS), BCK-023 (P3), REV-S-03 (littéraux de développement suivis), REV-S-11 (critère « aucune CVE » non vérifiable)
 
 ## Dépendances : justification
-T-002 (configuration), T-005 (base de test pour les tests de non-régression d'authentification). La partie conteneur et routes démo est dans T-051, après T-010.
+- Retirées (confort ou CI, pas de prérequis technique) : T-002 (ordre de fusion) ; T-005 (confort).
 
 ## Fichiers / modules concernés
 - `requirements.txt` ; `requirements-dev.txt` (créé)

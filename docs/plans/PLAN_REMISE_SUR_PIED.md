@@ -24,7 +24,7 @@
 - **Fusions** : l'orchestrateur seul fusionne, vague par vague, dans l'ordre des fichiers chauds (§5). L'agent d'exécution ne fusionne jamais.
 - **Migrations** : une seule tâche avec migration Alembic par vague à la fois, ou rebase avant fusion avec `alembic heads` = 1. Toute migration est additive et a un test de `downgrade` sur base jetable, sauf si la fiche déclare explicitement le contraire (retour arrière non restaurant).
 - **Validation client avant fusion** : les tâches qui changent des droits existants ne sont pas fusionnées sans réponse écrite du client : T-007, T-018, T-021, T-049, T-048, T-050 (voir §7). Une décision non tranchée n'est jamais « appliquée » par défaut si elle touche des droits existants.
-- **CI bloquante** : introduite en vague 1 (T-038a), complétée en vague 2 (T-038b). Une tâche de vague 2 ou 3 ne fusionne que si la CI est verte.
+- **CI indépendante** : T-038a (vague 1) et T-038b (vague 2) sont des tâches parallèles, sans dépendance de confort. Aucune tâche n'est bloquée par la CI, et la CI n'est pas un prérequis de fusion. Décision du coordinateur : chaque tâche se valide par des tests exécutés en local. Les dépendances ne gardent que les prérequis techniques réels (table, colonne, module, contrat consommé), justifiés dans chaque fiche.
 - **Interdits** : migration destructive (`DROP`, `TRUNCATE`, suppression de colonne) sans accord écrit ; opération sur la production ; réécriture d'historique git sans accord écrit ; `git stash`, `git checkout --` ou `git reset` sur du travail non commité.
 - **Décisions non évidentes** : chacune crée ou complète `docs/questions/<catégorie>/<sujet>.md` (gabarit de `questions/README.md`). Pour un choix technique réversible, on avance sur la recommandation. Pour un choix qui change des droits ou des données, on attend la réponse.
 - **Hypothèses** : toute hypothèse non sourcée est marquée dans la fiche et transformée en contrôle mesurable (script, test ou grep), jamais affirmée comme acquise.
@@ -34,13 +34,15 @@
 
 Les listes sont celles produites par le contrôle du plan (`check_plan`, §10). Le niveau est indiqué entre parenthèses.
 
+> Les niveaux entre parenthèses de cette section datent de la version précédente du graphe. Source de vérité : `REGISTRE_TACHES.md` (régénéré depuis les fiches).
+
 ### Vague 0 : fondations (9 tâches)
 - **Base et espace de travail** : T-004 (niv. 0) puis T-004b (niv. 1, tri restant, non bloquant).
 - **Fondations** : T-001 retrait du dump (P0), T-002 refus de démarrage avec secrets par défaut (P0), T-003 table de ports et CORS configurable, T-005 environnement de test isolé et garde de base.
 - **Storybook et tests unitaires** : T-041 retrait de Storybook et smoke Playwright sur build de production, T-042 Vitest minimal sans Storybook, T-043 catalogue de composants dans `docs/`.
 
 ### Vague 1 : stabilisation, sécurité périphérique, IAM de base (18 tâches)
-- **CI** : T-038a CI bloquante minimale (niv. 3).
+- **CI** : T-038a CI minimale, tâche indépendante et parallèle (aucune dépendance).
 - **Tests** : T-006 pytest (niv. 2), T-007 rôle manager, décision client (niv. 2), T-008 Playwright sur build de production et e2e versionnés (niv. 2), T-046 fixtures isolées (niv. 3), T-009 scénarios en échec (niv. 4).
 - **IAM** : T-010 isolation inter-organisations, IDOR (P0, niv. 4).
 - **Sécurité** : T-012 limitation de débit (niv. 2), T-013 mot de passe et réponses neutres (niv. 3), T-014 uploads (niv. 2), T-015 dépendances et surface API (niv. 2), T-027 chiffrement Holykell (niv. 2), T-051 conteneur, routeurs et routes de démonstration (niv. 5).
@@ -52,7 +54,7 @@ Les listes sont celles produites par le contrôle du plan (`check_plan`, §10). 
 - **Frontend** : T-030 coquille unique (niv. 4), T-031 fil d'Ariane (niv. 5), T-032 tokens (niv. 6).
 - **Architecture** : T-036 contrats import-linter (niv. 5), T-035a à T-035e découpe `zylo_liquid` (niv. 5 à 9), T-017 documentation backend (niv. 2).
 - **Sécurité** : T-037a cookies, backend (niv. 5).
-- **CI** : T-038b CI complète (niv. 6).
+- **CI** : T-038b CI complète, tâche indépendante de la chaîne IAM (dépend de T-038a et T-036 : fichiers de workflow et contrats).
 
 ### Vague 3 : parcours complet et fermeture (13 tâches)
 - **Parcours métier** : T-022 affectation par module, API (niv. 8), T-048 cycle de vie utilisateur (niv. 9), T-049 activation par lien à usage unique (niv. 8), T-024 front création d'utilisateurs (niv. 8), T-025 front affectation (niv. 9), T-047 accès interdit et inter-organisations (niv. 9), T-026 E2E du parcours socle (niv. 10, dernier de la chaîne IAM).
@@ -64,20 +66,15 @@ Les listes sont celles produites par le contrôle du plan (`check_plan`, §10). 
 Le graphe complet est dans chaque fiche (ligne « Dépendances ») et dans `REGISTRE_TACHES.md`. Les chaînes principales :
 
 ```
-T-004 ──┬─> T-001, T-002, T-003, T-005, T-041, T-016
-        ├─> T-004b (tri restant, non bloquant)
-        └─> T-041 ──┬─> T-042 ──> T-038a ──> T-010 ──┬─> T-019 ──> T-018 ──> T-021 ──> T-022 ──> T-047 ──> T-026
-                    ├─> T-043                       │          ↑                 ↑
-                    └─> T-008 (+ T-003, T-005) ──┬─> T-046 ──┘                 T-036 (T-010)
-                                                 ├─> T-009 (T-046)
-                                                 └─> T-011, T-030 (+ T-042) ──> T-031 ──> T-032 ──> T-033a ──> T-033b ──> T-033c
-T-002 ──> T-012 ──> T-013 ──> T-020 ──> T-037a ──> T-037b
-T-005 ──> T-006 ──> T-034 ──> T-029 (T-028) ──> T-035a ──> T-035b ──> T-035c ──> T-035d ──> T-035e
-T-010 + T-028 ──> T-051
-T-009 + T-036 ──> T-038b
+T-004 ──┬─> T-001, T-004b, T-016, T-041 ──┬─> T-042 ──> T-043 (catalogue, sans dépendance)
+T-010 ──> T-019 ──> T-018 (+ T-007, T-036) ──> T-021 (+ T-013) ──> T-022 ──┬─> T-025 (+ T-024) ──> T-026
+                                                                           └─> T-047 (+ T-046)
+T-012 ──> T-013 ──> T-021 ;  T-030 ──> T-031 ──> T-032 ──> T-033a ──> T-033b ──> T-033c
+T-002 ──> T-027 ──> T-035a ──> T-035b ──> T-035c ──> T-035d ──> T-035e  (+ T-034, T-028 ──> T-029)
+T-038a ──> T-038b (+ T-036) ─ CI : hors de toute chaîne bloquante
 ```
 
-**Chemin critique** : 11 tâches, niveaux 0 à 10 : T-004 → T-041 → T-042 → T-038a → T-010 → T-019 → T-018 → T-021 → T-022 → T-047 → T-026. La durée n'est pas estimée en jours : aucune donnée de capacité n'existe. Les tailles sont indiquées dans chaque fiche (9 S, 38 M, 11 L). La chaîne frontend T-008 → T-030 → T-031 → T-032 → T-033a est parallèle à la chaîne IAM sauf sur T-024 et T-025.
+**Chemin critique** : les chaînes les plus longues font 7 tâches (niveaux 0 à 6) : T-002 → T-027 → T-035a → … → T-035e (découpe `zylo_liquid`), et la chaîne IAM T-010 → T-019 → T-018 → T-021 → T-022 → T-025 → T-026. La chaîne IAM est détaillée dans `IAM_PAR_MODULE.md`. La durée n'est pas estimée en jours : aucune donnée de capacité n'existe. La chaîne frontend T-030 → T-031 → T-032 → T-033a est parallèle à la chaîne IAM.
 
 ## 5. Fichiers chauds (ordre de fusion)
 

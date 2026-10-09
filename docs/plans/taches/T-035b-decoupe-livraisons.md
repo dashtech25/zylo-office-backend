@@ -12,7 +12,7 @@ Extraire les livraisons et les rapprochements dans `deliveries/`, sans changemen
 - ARC-004 (P1), suite de la découpe
 
 ## Dépendances : justification
-T-035a (le lot précédent est fusionné avant de toucher `service.py`).
+- T-035a : lot précédent : modules extraits à découper ensuite.
 
 ## Fichiers / modules concernés
 - `app/modules/zylo_liquid/service.py`, `app/modules/zylo_liquid/deliveries/` (créé)

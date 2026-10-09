@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 2 · **Taille** : L · **Dépôt(s)** : frontend · **Domaine** : frontend · **Type** : refactor
 - **Branche suggérée** : `refactor/T-030-coquille-unique` · **Base de test** : `zylo_t030_test` · **Ports** : back 3130, front dev 3230, front prod 3330
-- **Dépendances** : T-008, T-011, T-042
+- **Dépendances** : aucune
 - **Décisions requises** : aucune
 
 ## Objectif
@@ -12,7 +12,7 @@ Trois coquilles (`AppShell`, `ZyloLiquidShell`, `ZyloTankerShell`) réécrivent 
 - FRT-002 (P1), FRT-016 (P2, menu mobile), FRT-021 (P3), FRT-015 (partie : tanker sans providers)
 
 ## Dépendances : justification
-T-008 (parcours prod pour valider la navigation), T-011 (routes nettoyées), T-042 (tests unitaires de la configuration de navigation). Bloque T-031, T-032 et T-033a.
+- Retirées (confort ou CI, pas de prérequis technique) : T-008 (confort) ; T-011 (confort : routes nettoyées, sans artefact consommé) ; T-042 (confort : tests unitaires).
 
 ## Fichiers / modules concernés
 - `src/core/layout/ModuleShell.tsx`, `src/core/layout/CoreProviders.tsx` (créés)

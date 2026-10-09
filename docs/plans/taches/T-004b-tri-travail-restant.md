@@ -11,6 +11,9 @@ Trier et commiter le reste du travail en cours (zylo_liquid backend, zylo_tanker
 ## Problèmes résolus
 - DOC-019 (partie restante), REV-A-05 (découpe de T-004).
 
+## Dépendances : justification
+- T-004 : le tri porte sur le reste identifié par T-004.
+
 ## Règles
 - Un lot = un sujet = une branche `wip/<date>-<lot>`. Aucun lot ne contient de `.env*`, dump, `.next/`, `storybook-static/`, `e2e/.auth/`, `test-results/`.
 - Un lot qui touche un fichier chaud du plan (`docs/plans/PLAN_REMISE_SUR_PIED.md` §5) est fusionné **avant** que la tâche concernée ne démarre, ou rebasé sur la tâche dans son worktree. Aucune tâche de vague 1 ne démarre sur un fichier dont le lot est non fusionné.

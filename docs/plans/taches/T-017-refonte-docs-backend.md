@@ -12,7 +12,8 @@ Remplacer les gros fichiers (`validation_log.md` 598 lignes, `phase-2-api.md` 90
 - DOC-005 (`zylo_tanker` non documenté), DOC-006, DOC-009, DOC-010, DOC-011, DOC-013, DOC-015 (fichiers parasites), DOC-022, DOC-023, DOC-024, ARC-019
 
 ## Dépendances : justification
-T-003 (ports), T-016 (process, script de liens). Ne touche pas au code : aucun conflit avec les tâches de code.
+- T-003 : table des ports citée dans la documentation créée par T-003.
+- T-016 : dossier `docs/process/` et script de liens créés par T-016.
 
 ## Fichiers / modules concernés
 - `docs/` (réorganisation), `README.md`, `ARCHITECTURE.md`, `phase_1_database.md`, `validation_log.md` (déplacés ou remplacés par des liens)

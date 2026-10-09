@@ -1,8 +1,8 @@
 # T-013 : Politique de mot de passe et réponses neutres, sans annoncer d'envoi inexistant
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend et frontend · **Domaine** : security · **Type** : security
+- **Statut** : À vérifier · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend et frontend · **Domaine** : security · **Type** : security
 - **Branche suggérée** : `feat/T-013-mot-de-passe` · **Base de test** : `zylo_t013_test` · **Ports** : back 3113, front dev 3213, front prod 3313
-- **Dépendances** : T-002, T-012
+- **Dépendances** : T-012
 - **Décisions requises** : `securite/politique-mot-de-passe.md` (recommandation : 12 caractères)
 
 ## Objectif
@@ -12,7 +12,8 @@ Une seule règle de mot de passe (12 caractères minimum, mots de passe courants
 - BCK-005 (P1), IAM-015 (P2, énumération), IAM-016 (P2), IAM-024 (P3), FRT-013 (P2), REV-S-08 (message d'envoi inexistant, 409 de `create_station_staff_member`)
 
 ## Dépendances : justification
-T-002 (configuration), T-012 (limitation de l'inscription).
+- T-012 : limitation de l'inscription (endpoint) que T-013 modifie et teste.
+- Retirées (confort ou CI, pas de prérequis technique) : T-002 (même zone de configuration : ordre de fusion seulement).
 
 ## Fichiers / modules concernés
 - Backend : `app/auth/schemas.py`, `app/auth/service.py`, `app/identity/service.py` (`check_email_available`), `app/modules/zylo_liquid/service.py` (fonctions de personnel uniquement : `create_station_staff_member`, `reset_station_staff_password`)

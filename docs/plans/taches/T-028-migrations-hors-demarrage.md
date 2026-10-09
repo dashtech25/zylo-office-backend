@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : ci · **Type** : refactor
 - **Branche suggérée** : `fix/T-028-migrations-job` · **Base de test** : `zylo_t028_test` · **Ports** : back 3128
-- **Dépendances** : T-002, T-005
+- **Dépendances** : aucune
 - **Décisions requises** : `architecture/migrations-au-demarrage.md` (appliquée), `architecture/sauvegarde-avant-migration.md` (en attente)
 
 ## Objectif
@@ -12,7 +12,7 @@ Aujourd'hui le `CMD` exécute `alembic upgrade head` puis `uvicorn` à chaque d�
 - BCK-006 (P1, migrations au démarrage), ARC-022 (P3), BCK-016 (partie seeds à chaque processus), REV-S-12 (sauvegarde et retour arrière non encadrés), REV-S-05 (backfills au démarrage)
 
 ## Dépendances : justification
-T-002 (configuration), T-005 (base dédiée). Bloque T-029, T-051.
+- Retirées (confort ou CI, pas de prérequis technique) : T-002 (ordre de fusion) ; T-005 (confort).
 
 ## Fichiers / modules concernés
 - `Dockerfile` (ligne 33 : `CMD`)

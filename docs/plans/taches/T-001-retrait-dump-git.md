@@ -12,7 +12,7 @@ Retirer `backups/zylo_office_20260831_180729.sql.gz` de l'index git (le fichier 
 - BCK-003 (P0), ARC-003, DOC-015 (partie dump), BCK-011 (`.env.migration`), REV-S-01
 
 ## Dépendances : justification
-T-004 (base propre). Le hook de garde est posé par T-004 (lot 0) ; cette tâche ne le duplique pas.
+- T-004 : pose le hook de garde que cette tâche étend (non dupliqué).
 
 ## Fichiers / modules concernés
 - `backups/` (index uniquement)

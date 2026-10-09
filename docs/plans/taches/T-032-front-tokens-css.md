@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : frontend · **Type** : refactor
 - **Branche suggérée** : `refactor/T-032-tokens` · **Base de test** : `zylo_t032_test` · **Ports** : back 3132, front dev 3232, front prod 3332
-- **Dépendances** : T-030, T-031
+- **Dépendances** : T-030
 - **Décisions requises** : `frontend/palette-de-reference.md` (en attente de validation design, à trancher avant le démarrage)
 
 ## Objectif
@@ -12,7 +12,8 @@ Une seule palette, définie dans `globals.css` sur `:root`, consommée par les c
 - FRT-004 (P1), FRT-010 (P2), FRT-019 (P3), REV-D-08 (référence circulaire, troisième couche non recensée), REV-D-09 (variante sombre contraire au code)
 
 ## Dépendances : justification
-T-030 (la coquille porte les tokens de `.zl-shell`), T-031 (même fichiers de pages et de topbar : ordre écrit, pas en parallèle).
+- T-030 : tokens CSS portés par la coquille.
+- Retirées (confort ou CI, pas de prérequis technique) : T-031 (même fichiers, ordre d'écriture seulement).
 
 ## Fichiers / modules concernés
 - `src/app/globals.css` (tokens : bloc `:root` et bloc `@theme inline`)

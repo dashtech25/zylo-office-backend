@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée, en attente de décision client · **Priorité** : P2 · **Vague** : 1 · **Taille** : S · **Dépôt(s)** : backend · **Domaine** : iam · **Type** : test
 - **Branche suggérée** : `fix/T-007-role-manager` · **Base de test** : `zylo_t007_test` · **Ports** : back 3107
-- **Dépendances** : T-005
+- **Dépendances** : aucune
 - **Décisions requises** : `rbac/manager-role-superset.md` (en attente de réponse client, bloque la fusion du changement de droits)
 
 ## Objectif
@@ -12,7 +12,7 @@ Le test `test_shift_manager_role_rights_and_manager_superset` échoue : le rôle
 - Baseline section 1.1, groupe C ; ARC-016 (partie : permissions dupliquées entre `seed.py` et `roles_seed.py`) ; REV-S-05 (élévation automatique au démarrage) ; REV-A-10
 
 ## Dépendances : justification
-T-005 (base de test). Le modèle final dépend de T-018, mais le changement du rôle par défaut n'attend pas T-018 : T-018 n'utilise que la décision et son rapport.
+- Retirées (confort ou CI, pas de prérequis technique) : T-005 (confort : test local sur base dédiée).
 
 ## Fichiers / modules concernés
 - `app/modules/zylo_liquid/roles_seed.py` (`DEFAULT_ROLES`, `seed_default_roles`)

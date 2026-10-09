@@ -12,7 +12,7 @@ Documenter le workflow git réellement suivi, préparer les labels, rendre versi
 - DOC-018, DOC-020, DOC-004 (cahiers métier hors versionnement), DOC-012 (copies « (1) » et « (2) »), DOC-014 (références absentes), DOC-021 (exigences socle), REV-A-13 (contrôle des dépendances)
 
 ## Dépendances : justification
-T-004 (base et plan versionnés). Bloque T-017 et T-040.
+- T-004 : plan et process versionnés par T-004, modifiés ici.
 
 ## Fichiers / modules concernés
 - `docs/process/git-workflow.md` (complété par T-004), `docs/process/labels.md` (créé)

@@ -12,7 +12,8 @@ Un test parcourt les routes FastAPI et échoue si une route métier n'a ni garde
 - IAM-013, IAM-018 (tests d'isolation insuffisants), IAM-020 (catalogues publics), REV-S-23 (critère « aucun changement de comportement » contradictoire)
 
 ## Dépendances : justification
-T-010 (gardes en place), T-019 (garde-fous). Ne modifie aucun comportement métier.
+- T-010 : gardes d'isolation que la matrice vérifie.
+- T-019 : garde-fous que la matrice inventorie.
 
 ## Fichiers / modules concernés
 - `tests/test_route_inventory.py` (créé), `tests/test_authorization_matrix.py` (créé)
@@ -42,3 +43,7 @@ Faible pour le code. Le test d'inventaire peut échouer massivement au début : 
 
 ## Parallélisable avec
 T-017, T-018, T-020, T-021 (tests seulement).
+
+## Réalisation (branche fix/T-019-gardes-routes, 2026-10-09)
+- Inventaire et matrice régénérés ; liste d'exceptions justifiée dans `docs/architecture/securite/routes-publiques.md`.
+- Statut : À vérifier.

@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P2 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : frontend · **Type** : refactor
 - **Branche suggérée** : `refactor/T-033a-partages` · **Base de test** : `zylo_t033a_test` · **Ports** : back 3133, front dev 3233, front prod 3333
-- **Dépendances** : T-030, T-032, T-042, T-043
+- **Dépendances** : T-030, T-032
 - **Décisions requises** : `frontend/bibliotheque-graphiques.md` (recommandation : ECharts)
 
 ## Objectif
@@ -12,7 +12,9 @@ Un `Table`, un composant de tendance, `Tabs`, `Modal` et `QueryState` (chargemen
 - FRT-005 (P2, tableaux bruts), FRT-006 (P2, trois graphiques), FRT-014 (remplacé par le catalogue), ARC-011 (P2), ARC-012 (P2, `TrucksMap` importé par un autre module)
 
 ## Dépendances : justification
-T-030 (coquille), T-032 (tokens), T-042 (tests unitaires des composants partagés), T-043 (catalogue mis à jour pour chaque export ajouté).
+- T-030 : coquille unique.
+- T-032 : tokens utilisés par les composants partagés.
+- Retirées (confort ou CI, pas de prérequis technique) : T-042 (confort : tests unitaires) ; T-043 (confort : catalogue mis à jour en parallèle).
 
 ## Fichiers / modules concernés
 - `src/shared/ui/Table.tsx`, `Tabs.tsx`, `Modal.tsx`, `QueryState.tsx` (créé)

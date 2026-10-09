@@ -2,7 +2,7 @@
 
 - **Statut** : À vérifier · **Priorité** : P1 · **Vague** : 0 · **Taille** : S · **Dépôt(s)** : backend et frontend · **Domaine** : docs · **Type** : chore
 - **Branche suggérée** : `docs/T-003-ports-unifies` · **Base de test** : aucune · **Ports** : aucun (la tâche définit la table)
-- **Dépendances** : T-004
+- **Dépendances** : aucune
 - **Décisions requises** : `architecture/ports-canoniques.md` (appliquée, à confirmer)
 
 ## Objectif
@@ -22,7 +22,7 @@ Unicité : pour n entre 1 et 51, les plages 3101–3151, 3201–3251 et 3301–3
 - DOC-002 (P1), DOC-003 (P2), ARC-014 (P2), BCK-024 (P3), DOC-025 (partie ports), REV-S-16 (ports et CORS), REV-A-20 (ports Playwright et worktrees), REV-D-26
 
 ## Dépendances : justification
-T-004. T-008, T-038a et T-017 s'appuient sur la table.
+- Retirées (confort ou CI, pas de prérequis technique) : T-004 (base de départ : `remy` à jour).
 
 ## Fichiers / modules concernés
 - Backend : `docs/process/ports.md` (créé, table unique), `README.md`, `CLAUDE.md` (3007 vers 3002), `app/core/config.py` (valeur `PORT` et `CORS_ORIGINS` configurable), `.env.example`, `scripts/check_ports.sh` (créé)

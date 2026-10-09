@@ -12,7 +12,7 @@ Corriger les défauts d'autorisation qui ne relèvent pas de l'isolation : retra
 - IAM-002 (P1), IAM-004 (P1), IAM-012 (P2), IAM-017 (P2), IAM-022 (P3), IAM-023 (P3), IAM-003 (partie : création de plans par API), REV-A-08 (permission plateforme supposée)
 
 ## Dépendances : justification
-T-010 (isolation). Bloque T-018 et T-021 (création d'utilisateurs suppose l'appartenance).
+- T-010 : gardes d'isolation par organisation que T-019 étend.
 
 ## Fichiers / modules concernés
 - `app/rbac/service.py` (retrait du dernier propriétaire, `deny`, délégation)
@@ -49,3 +49,10 @@ Moyen : un garde-fou trop strict bloque l'administration légitime (transfert de
 
 ## Parallélisable avec
 T-020, T-023 (fichiers distincts) ; séquencer avec T-018 sur `rbac/service.py`.
+
+## Réalisation (branche fix/T-019-gardes-routes, 2026-10-09)
+- Gardes de permission sur les 198 routes de module qui n'en avaient pas ; 4 restent sans permission, justifiées (`tests/route_baseline_sans_permission.txt`).
+- `POST /billing/plans` retiré (option A de T-050) ; conflit de prix 409 `plan_conflict`.
+- Garde-fous : dernier propriétaire (409), compte supprimé (401). Non traités : deny sur propriétaire (la règle §5.4 et ses tests l'autorisent : à trancher), quota d'organisation (valeur client), dernier grant `ORGANIZATION_MANAGE`.
+- Suite complète (base zylo_t019_test, commit HEAD de fix/T-019-gardes-routes) : 519 passed, 2 failed. Les 2 échecs (tests/test_zylo_liquid_dev_seed.py) préexistent au commit de départ fc1f83e (MultipleResultsFound dans service.py:_measurement_height_at), hors périmètre.
+- Statut : À vérifier.

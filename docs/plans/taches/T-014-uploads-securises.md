@@ -2,7 +2,7 @@
 
 - **Statut** : Terminée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
 - **Branche suggérée** : `fix/T-014-uploads` · **Base de test** : `zylo_t014_test` · **Ports** : back 3114
-- **Dépendances** : T-002, T-005
+- **Dépendances** : aucune
 - **Décisions requises** : `securite/types-fichiers-autorises.md` (recommandation : PDF et images seulement)
 
 ## Objectif
@@ -12,7 +12,7 @@ Empêcher le stockage et la diffusion inline de contenu actif (HTML, SVG, script
 - BCK-008 (P1, XSS stockée), BCK-012 (P2, limite sur import XLSX), IAM-019 (P2, photo de profil non contrôlée), REV-S-10 (listes incohérentes, lecture avant limite, fichiers existants)
 
 ## Dépendances : justification
-T-002, T-005. T-010 recommandé pour le contrôle d'appartenance des fichiers (ordre indicatif, pas bloquant).
+- Retirées (confort ou CI, pas de prérequis technique) : T-002 (ordre de fusion) ; T-005 (confort).
 
 ## Fichiers / modules concernés
 - `app/shared/storage_router.py` (lecture ligne 34 : `await file.read()` avant contrôle de taille ; service ligne 87)

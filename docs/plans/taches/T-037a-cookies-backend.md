@@ -2,7 +2,7 @@
 
 - **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
 - **Branche suggérée** : `feat/T-037a-cookies-backend` · **Base de test** : `zylo_t037a_test` · **Ports** : back 3137
-- **Dépendances** : T-020, T-002
+- **Dépendances** : T-020
 - **Décisions requises** : `securite/stockage-jetons.md` (en attente : infrastructure de même site)
 
 ## Objectif
@@ -12,7 +12,8 @@ Le backend pose les jetons d'accès et de rafraîchissement en cookies `HttpOnly
 - FRT-001 (partie backend), BCK-015 (partie backend), IAM-011, REV-S-20 (transition, CSRF, `Secure` en local)
 
 ## Dépendances : justification
-T-020 (rotation et famille de tokens). T-002 (configuration des domaines).
+- T-020 : famille et rotation des refresh tokens transportés par les cookies.
+- Retirées (confort ou CI, pas de prérequis technique) : T-002 (ordre de fusion (domaines de configuration)).
 
 ## Fichiers / modules concernés
 - `app/auth/router.py`, `app/auth/service.py`

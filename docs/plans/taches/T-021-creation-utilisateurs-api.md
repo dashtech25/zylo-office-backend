@@ -2,7 +2,7 @@
 
 - **Statut** : À vérifier (implémentée sur `feat/T-021-creation-utilisateurs`, validation client avant fusion) · **Priorité** : P1 · **Vague** : 2 · **Taille** : L · **Dépôt(s)** : backend · **Domaine** : iam · **Type** : feature
 - **Branche suggérée** : `feat/T-021-creation-utilisateurs` · **Base de test** : `zylo_t021_test` · **Ports** : back 3121
-- **Dépendances** : T-010, T-013, T-018, T-019
+- **Dépendances** : T-013, T-018, T-019
 - **Décisions requises** : `rbac/activation-compte.md` (recommandation : compte en attente, activation par lien à usage unique, validation client avant fusion)
 
 ## Objectif
@@ -12,7 +12,10 @@ Un propriétaire ou un administrateur d'organisation crée un utilisateur au niv
 - IAM-006 (P1), IAM-007 (P1, `mustChangePassword` seulement côté frontend), REV-S-06 (mot de passe temporaire connu du créateur), REV-A-07, DOC-021 (exigence « créer ses utilisateurs »)
 
 ## Dépendances : justification
-T-010 (isolation), T-013 (règle de mot de passe), T-018 (rôles par module), T-019 (appartenance et garde-fous). L'activation (T-049) et la révocation (T-020) suivent.
+- T-013 : validateur de mot de passe appelé à la création.
+- T-018 : modèle de rôles par module (`Role.moduleCode`) utilisé à la création.
+- T-019 : appartenance à l'organisation et garde-fous.
+- Retirées (confort ou CI, pas de prérequis technique) : T-010 (transitive via T-019).
 
 ## Fichiers / modules concernés
 - `app/identity/router.py` (`POST /organizations/{id}/users`), `app/identity/service.py`, `app/identity/schemas.py`

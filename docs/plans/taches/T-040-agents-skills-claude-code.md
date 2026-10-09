@@ -12,7 +12,9 @@ Faire de `CLAUDE.md` un point d'entrée court (moins de 200 lignes) qui renvoie 
 - Consigne `documentation-architecture-agents.md` (CLAUDE.md long, instructions dupliquées, règles non scopées), DOC-006 (partie), DOC-008 (partie)
 
 ## Dépendances : justification
-T-016 (workflow), T-017 (arborescence backend), T-039 (arborescence frontend). Dernière tâche de la chaîne documentaire, pour ne pas réécrire `CLAUDE.md` deux fois.
+- T-016 : workflow documenté.
+- T-017 : arborescence backend documentée.
+- T-039 : arborescence frontend documentée.
 
 ## Fichiers / modules concernés
 - `CLAUDE.md` (backend et frontend) : réduction

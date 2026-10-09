@@ -12,7 +12,7 @@ Tous les appels réseau passent par `src/core/api/client.ts` (sauf exceptions do
 - FRT-007 (P2, `fetch` hors client), FRT-008 (P2, `escapeHtml` dupliqué), FRT-011 (P2, erreurs non gérées : 71 `useQuery`, recompte à refaire), REV-D-15 (comptages non reproductibles)
 
 ## Dépendances : justification
-T-033a (`QueryState` et composants partagés utilisés pour les états d'erreur).
+- T-033a : `QueryState` et composants partagés pour les états d'erreur.
 
 ## Fichiers / modules concernés
 - `src/core/api/client.ts` (`apiUpload`, `apiFetchBlob`)

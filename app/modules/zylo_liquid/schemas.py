@@ -5,45 +5,45 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_serializer, field_validator
 
+# Réexports (T-034, lot 1) : stations et cuves sont dans `stations/schemas.py` et
+# `tanks/schemas.py`. Les noms restent importables depuis ce module.
+from app.modules.zylo_liquid.stations.schemas import (  # noqa: F401
+    _reject_reserved_red,
+    CreateFuelProductRequest,
+    CreateStationFuelProductRequest,
+    UpdateStationFuelProductRequest,
+    StationFuelProductResponse,
+    _validate_closed_weekdays,
+    DayHours,
+    _validate_weekly_hours,
+    CreateStationRequest,
+    UpdateStationRequest,
+    StationResponse,
+    CreateStationServiceRequest,
+    UpdateStationServiceRequest,
+    StationServiceResponse,
+    UpdatePricingPolicyRequest,
+    PricingPolicyResponse,
+)
+from app.modules.zylo_liquid.tanks.schemas import (  # noqa: F401
+    CreateTankRequest,
+    UpdateTankRequest,
+    TankResponse,
+    CreatePumpRequest,
+    UpdatePumpRequest,
+    PumpResponse,
+    CreateTankSensorMappingRequest,
+    HolykellSensorLiveState,
+    TankSensorMappingResponse,
+    CalibrationPointInput,
+    ReplaceTankCalibrationPointsRequest,
+)
+
 # Reflète exactement ck_zlSale_paymentMethod / ck_zlProductSaleTransaction_paymentMethod
 # (app/modules/zylo_liquid/models.py) — élargi mission
 # « vente-maintenant-reglementation » Bloc 3 (mobile money, Phase 2 §2 de la
 # mission : dominance confirmée d'Orange Money/MTN MoMo au Cameroun).
 PAYMENT_METHODS = ("cash", "card", "fleet", "credit", "orange_money", "mtn_momo", "bank_transfer", "cheque", "other")
-
-
-def _reject_reserved_red(value: str | None) -> str | None:
-    """Le rouge est réservé à l'indicateur de stock bas (cuve au seuil bas,
-    Tank.lowAlarmMm) — un produit ne peut jamais se l'approprier comme
-    couleur d'affichage, sinon "barre rouge" perdrait sa signification
-    unique à l'écran. Rejette toute teinte perçue comme rouge (pas
-    seulement le rouge exact utilisé pour l'alerte), pour éviter les
-    contournements par une nuance très proche."""
-    if value is None:
-        return value
-    hex_value = value.lstrip("#")
-    if len(hex_value) != 6:
-        raise ValueError("displayColor doit être un code hexadécimal #RRGGBB.")
-    try:
-        r, g, b = (int(hex_value[i : i + 2], 16) for i in (0, 2, 4))
-    except ValueError as exc:
-        raise ValueError("displayColor doit être un code hexadécimal valide.") from exc
-    hue, lightness, saturation = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
-    hue_deg = hue * 360
-    is_reddish = saturation > 0.25 and 0.15 < lightness < 0.85 and (hue_deg <= 20 or hue_deg >= 340)
-    if is_reddish:
-        raise ValueError("Le rouge est réservé à l'indicateur de stock bas — choisissez une autre couleur pour ce produit.")
-    return value
-
-
-class CreateFuelProductRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
-    code: str = Field(min_length=1, max_length=10)
-    densityGPerCm3: float | None = None
-    thermalExpansionCoefficient: float | None = None
-    displayColor: str | None = Field(default=None, max_length=7)
-
-    _validate_display_color = field_validator("displayColor")(_reject_reserved_red)
 
 
 class UpdateFuelProductRequest(BaseModel):
@@ -65,27 +65,6 @@ class FuelProductResponse(BaseModel):
     thermalExpansionCoefficient: float | None
     displayColor: str | None
     active: bool
-
-    model_config = {"from_attributes": True}
-
-
-class CreateStationFuelProductRequest(BaseModel):
-    stationId: uuid.UUID
-    fuelProductId: uuid.UUID
-
-
-class UpdateStationFuelProductRequest(BaseModel):
-    active: bool
-
-
-class StationFuelProductResponse(BaseModel):
-    id: uuid.UUID
-    stationId: uuid.UUID
-    fuelProductId: uuid.UUID
-    active: bool
-    minThresholdLiters: float | None = None
-    criticalThresholdLiters: float | None = None
-    safetyStockLiters: float | None = None
 
     model_config = {"from_attributes": True}
 
@@ -122,270 +101,6 @@ class StationFuelProductOverviewResponse(BaseModel):
     priceEffectiveFrom: datetime | None
 
     model_config = {"from_attributes": True}
-
-
-def _validate_closed_weekdays(value: str | None) -> str | None:
-    """CSV de jours ISO (1=lundi..7=dimanche), ex. "7" ou "6,7". `None`/chaîne
-    vide = ouvert tous les jours. Normalisé (dédoublonné, trié) pour que deux
-    saisies équivalentes ("7,6" et "6,7") produisent la même valeur stockée."""
-    if value is None or value.strip() == "":
-        return None
-    parts = [p.strip() for p in value.split(",") if p.strip() != ""]
-    days: set[int] = set()
-    for p in parts:
-        if not p.isdigit() or not (1 <= int(p) <= 7):
-            raise ValueError("closedWeekdays doit être une liste de jours ISO (1=lundi..7=dimanche) séparés par des virgules.")
-        days.add(int(p))
-    return ",".join(str(d) for d in sorted(days))
-
-
-class DayHours(BaseModel):
-    """Horaires d'un jour donné (P2 §5.3, audit module Stations
-    2026-09-16). `closed=True` ferme ce jour indépendamment de
-    `closedWeekdays` (les deux mécanismes ne se combinent jamais — voir
-    `weeklyHours` sur `Station`)."""
-
-    open: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
-    close: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
-    closed: bool = False
-
-
-def _validate_weekly_hours(value: dict[str, DayHours] | None) -> dict[str, DayHours] | None:
-    if value is None:
-        return None
-    if not value:
-        return None
-    invalid_keys = set(value.keys()) - {str(d) for d in range(1, 8)}
-    if invalid_keys:
-        raise ValueError("weeklyHours doit être indexé par jour ISO (\"1\"=lundi..\"7\"=dimanche).")
-    return value
-
-
-class CreateStationRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-    code: str = Field(min_length=1, max_length=20)
-    cityId: uuid.UUID | None = None
-    address: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    timezone: str = "Africa/Douala"
-    phone: str | None = Field(default=None, max_length=20)
-    email: str | None = Field(default=None, max_length=200)
-    openingTime: str = "06:00"
-    closingTime: str = "22:00"
-    is24h: bool = False
-    closedWeekdays: str | None = Field(default=None, description="Jours de fermeture hebdomadaire, CSV de jours ISO (1=lundi..7=dimanche), ex. \"7\" ou \"6,7\". `None`/vide = ouvert tous les jours.")
-    weeklyHours: dict[str, DayHours] | None = Field(default=None, description="Horaires personnalisés par jour (clé \"1\"=lundi..\"7\"=dimanche). `None` = pas de personnalisation, openingTime/closingTime/closedWeekdays ci-dessus s'appliquent à tous les jours ouverts.")
-    notes: str | None = None
-    currencyOverrideId: uuid.UUID | None = Field(default=None, description="Devise spécifique à cette station si différente de la devise par défaut de l'organisation.")
-    # Champs commerce/amenities — présents sur le modèle Station depuis le
-    # début (phase-1-database.md §5) mais jamais exposés par aucun schéma
-    # jusqu'ici (Centre administratif et opérationnel de la station, domaines
-    # Exploitation/Infrastructure).
-    exploitationType: str = Field(default="propre", max_length=20, description="Mode d'exploitation de la station (ex. \"propre\" pour une station en gestion directe, vs. gérance/franchise) — pas de contrainte enum en base, valeur libre.")
-    hasShop: bool = False
-    shopName: str | None = Field(default=None, max_length=120)
-    shopSurfaceM2: float | None = None
-    hasLavage: bool = False
-    hasVidange: bool = False
-    hasGazDomestique: bool = False
-    nbPistes: int | None = Field(default=None, ge=0)
-    surfaceTotaleM2: float | None = None
-
-    _validate_closed_weekdays = field_validator("closedWeekdays")(_validate_closed_weekdays)
-    _validate_weekly_hours = field_validator("weeklyHours")(_validate_weekly_hours)
-
-
-class UpdateStationRequest(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=200)
-    cityId: uuid.UUID | None = None
-    address: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    timezone: str | None = None
-    phone: str | None = Field(default=None, max_length=20)
-    email: str | None = Field(default=None, max_length=200)
-    openingTime: str | None = None
-    closingTime: str | None = None
-    is24h: bool | None = None
-    closedWeekdays: str | None = None
-    weeklyHours: dict[str, DayHours] | None = None
-    notes: str | None = None
-    currencyOverrideId: uuid.UUID | None = None
-    exploitationType: str | None = Field(default=None, max_length=20)
-    hasShop: bool | None = None
-    shopName: str | None = Field(default=None, max_length=120)
-    shopSurfaceM2: float | None = None
-    hasLavage: bool | None = None
-    hasVidange: bool | None = None
-    hasGazDomestique: bool | None = None
-    nbPistes: int | None = Field(default=None, ge=0)
-    surfaceTotaleM2: float | None = None
-
-    _validate_closed_weekdays = field_validator("closedWeekdays")(_validate_closed_weekdays)
-    _validate_weekly_hours = field_validator("weeklyHours")(_validate_weekly_hours)
-
-
-class StationResponse(BaseModel):
-    id: uuid.UUID
-    organizationId: uuid.UUID
-    name: str
-    code: str
-    cityId: uuid.UUID | None
-    address: str | None
-    latitude: float | None
-    longitude: float | None
-    timezone: str
-    phone: str | None
-    email: str | None
-    openingTime: str
-    closingTime: str
-    is24h: bool
-    closedWeekdays: str | None = None
-    weeklyHours: dict[str, DayHours] | None = None
-    status: str = Field(description="\"active\" ou \"inactive\" — basculé par les endpoints `/deactivate` et `/reactivate`, jamais modifié via un PATCH direct.")
-    integrationDate: date | None = Field(description="Date d'entrée de la station dans le réseau/l'organisation (pas la date de création de l'enregistrement).")
-    notes: str | None
-    activeTankCount: int = Field(default=0, description="Nombre de cuves actives rattachées à la station, calculé à la volée — jamais stocké en base.")
-    currencyOverrideId: uuid.UUID | None = None
-    exploitationType: str = "propre"
-    hasShop: bool = False
-    shopName: str | None = None
-    shopSurfaceM2: float | None = None
-    hasLavage: bool = False
-    hasVidange: bool = False
-    hasGazDomestique: bool = False
-    nbPistes: int | None = None
-    surfaceTotaleM2: float | None = None
-
-    model_config = {"from_attributes": True}
-
-
-class CreateTankRequest(BaseModel):
-    stationId: uuid.UUID
-    tankNumber: int = Field(gt=0)
-    displayName: str = Field(min_length=1, max_length=100)
-    capacityLiters: float = Field(gt=0)
-    tankHeightMm: float = Field(gt=0)
-    fuelProductId: uuid.UUID | None = None
-    newFuelProductName: str | None = Field(default=None, min_length=1, max_length=100)
-    newFuelProductCode: str | None = Field(default=None, min_length=1, max_length=10)
-    heightAlarmMm: float = Field(gt=0, description="Seuil haut critique (mm) : hauteur de produit au-delà de laquelle une alarme de débordement se déclenche.")
-    heightAlertMm: float = Field(gt=0, description="Seuil haut d'alerte (mm), plus bas que `heightAlarmMm` — signale un remplissage important sans être encore critique.")
-    lowAlarmMm: float = Field(gt=0, description="Seuil bas critique (mm) : hauteur de produit en-dessous de laquelle la cuve est considérée en stock bas (déclenche l'indicateur visuel réservé, cf. `_reject_reserved_red`).")
-    alertWaterMaxMm: float = Field(default=25.00, description="Hauteur d'eau maximale tolérée au fond de la cuve (mm) avant déclenchement d'une alerte eau — l'eau se dépose sous le carburant et fausse le jaugeage si elle s'accumule.")
-    dataSourceType: str = Field(default="console", description="Origine des mesures de niveau pour cette cuve (ex. \"console\" pour une jauge manuelle, capteur télémétrique sinon) — détermine si un mapping capteur Holykell est attendu.")
-
-
-class UpdateTankRequest(BaseModel):
-    displayName: str | None = Field(default=None, min_length=1, max_length=100)
-    capacityLiters: float | None = Field(default=None, gt=0)
-    calibratedCapacityLiters: float | None = Field(default=None, description="Capacité réelle mesurée par jaugeage (peut différer de `capacityLiters`, la capacité nominale constructeur) — utilisée pour les calculs de volume quand disponible.")
-    tankHeightMm: float | None = Field(default=None, gt=0)
-    fuelProductId: uuid.UUID | None = Field(default=None, description="Nouveau produit carburant existant à associer à la cuve — exclusif avec newFuelProductName/newFuelProductCode (P0-1, audit module Stations 2026-09-16).")
-    newFuelProductName: str | None = Field(default=None, min_length=1, max_length=100, description="Crée un nouveau produit carburant à la volée puis l'associe à la cuve — exclusif avec fuelProductId, requiert newFuelProductCode.")
-    newFuelProductCode: str | None = Field(default=None, min_length=1, max_length=10)
-    heightAlarmMm: float | None = Field(default=None, description="Seuil haut critique (mm), voir `CreateTankRequest.heightAlarmMm`.")
-    heightAlertMm: float | None = Field(default=None, description="Seuil haut d'alerte (mm), voir `CreateTankRequest.heightAlertMm`.")
-    lowAlarmMm: float | None = Field(default=None, description="Seuil bas critique (mm), voir `CreateTankRequest.lowAlarmMm`.")
-    alertWaterMaxMm: float | None = Field(default=None, description="Hauteur d'eau maximale tolérée (mm), voir `CreateTankRequest.alertWaterMaxMm`.")
-    active: bool | None = None
-    notes: str | None = None
-
-
-class TankResponse(BaseModel):
-    id: uuid.UUID
-    stationId: uuid.UUID
-    fuelProductId: uuid.UUID
-    tankNumber: int
-    displayName: str
-    capacityLiters: float
-    calibratedCapacityLiters: float | None = Field(description="Capacité réelle mesurée par jaugeage, si elle a été établie — sinon `None` et `capacityLiters` (capacité nominale) fait foi.")
-    tankHeightMm: float | None
-    dataSourceType: str
-    heightAlarmMm: float
-    heightAlertMm: float
-    lowAlarmMm: float
-    alertWaterMaxMm: float
-    active: bool
-    productSince: date | None = Field(description="Date depuis laquelle la cuve contient son produit actuel (pertinent après un changement de produit).")
-    notes: str | None
-
-    model_config = {"from_attributes": True}
-
-
-class CreatePumpRequest(BaseModel):
-    stationId: uuid.UUID
-    tankId: uuid.UUID
-    name: str = Field(min_length=1, max_length=100)
-
-
-class UpdatePumpRequest(BaseModel):
-    tankId: uuid.UUID | None = None
-    name: str | None = Field(default=None, min_length=1, max_length=100)
-    active: bool | None = None
-
-
-class PumpResponse(BaseModel):
-    id: uuid.UUID
-    stationId: uuid.UUID
-    tankId: uuid.UUID
-    name: str
-    active: bool
-
-    model_config = {"from_attributes": True}
-
-
-class CreateTankSensorMappingRequest(BaseModel):
-    tankId: uuid.UUID
-    hkSerialNumber: str = Field(min_length=1, max_length=100)
-    measurementType: str = Field(pattern="^(product_level|water_level|temperature)$")
-
-
-class HolykellSensorLiveState(BaseModel):
-    """Dernier état connu d'un sensor côté registre Holykell (couche
-    télémétrie, `zyloLiquidHolykellDeviceRegistry`) — la vérité *mesurée*,
-    distincte de la vérité *déclarée* du mapping (`validFrom`/`validUntil`/
-    `active`). La fraîcheur et la santé de la sonde se lisent ici
-    (`hkLastSeenAt`, `hkLastStatus`, `lastValueAt`), jamais sur la ligne de
-    mapping. Champs tous optionnels : un sensor inconnu du registre (ex.
-    mapping importé sans découverte Holykell) renvoie `live: null`, pas un
-    état inventé."""
-
-    hkSerialNumber: str | None = None
-    hkSensorName: str | None = None
-    hkUnit: str | None = None
-    hkReportCycleSec: int | None = None
-    # 1 = OK, 0 = KO côté Holykell (check `ck_zlHolykellDevice_lastStatus`)
-    hkLastStatus: int | None = None
-    hkLastSeenAt: datetime | None = None
-    lastValue: float | None = None
-    lastValueAt: datetime | None = None
-    syncFrom: datetime | None = None
-
-
-class TankSensorMappingResponse(BaseModel):
-    id: uuid.UUID
-    hkSensorId: int
-    tankId: uuid.UUID
-    measurementType: str
-    validFrom: datetime
-    validUntil: datetime | None
-    active: bool
-    # Renseigné par `service.list_tank_sensor_mappings` (jointure registre) ;
-    # `None` sur les réponses create/close, qui ne portent pas l'état live.
-    live: HolykellSensorLiveState | None = None
-
-    model_config = {"from_attributes": True}
-
-
-class CalibrationPointInput(BaseModel):
-    heightMm: float = Field(ge=0)
-    volumeLiters: float = Field(ge=0)
-
-
-class ReplaceTankCalibrationPointsRequest(BaseModel):
-    points: list[CalibrationPointInput] = Field(min_length=1)
 
 
 class TankCalibrationPointResponse(BaseModel):
@@ -1676,51 +1391,6 @@ class ResetStationStaffPasswordResponse(BaseModel):
 # services et politique commerciale par produit. Les seuils/l'overview des
 # carburants sont définis plus haut, avec StationFuelProductResponse.
 # ================================================================
-
-
-class CreateStationServiceRequest(BaseModel):
-    stationId: uuid.UUID
-    type: str = Field(min_length=1, max_length=40)
-    label: str = Field(min_length=1, max_length=150)
-    available: bool = True
-
-
-class UpdateStationServiceRequest(BaseModel):
-    label: str | None = Field(default=None, min_length=1, max_length=150)
-    available: bool | None = None
-
-
-class StationServiceResponse(BaseModel):
-    id: uuid.UUID
-    stationId: uuid.UUID
-    type: str
-    label: str
-    available: bool
-
-    model_config = {"from_attributes": True}
-
-
-class UpdatePricingPolicyRequest(BaseModel):
-    policyType: str | None = Field(default=None, max_length=30)
-    applicationPeriod: str | None = Field(default=None, max_length=30)
-    promotionsEnabled: bool | None = None
-    differentPriceByPeriod: bool | None = None
-    volumeDiscount: bool | None = None
-    corporateRate: bool | None = None
-
-
-class PricingPolicyResponse(BaseModel):
-    id: uuid.UUID
-    stationId: uuid.UUID
-    fuelProductId: uuid.UUID
-    policyType: str
-    applicationPeriod: str
-    promotionsEnabled: bool
-    differentPriceByPeriod: bool
-    volumeDiscount: bool
-    corporateRate: bool
-
-    model_config = {"from_attributes": True}
 
 
 # ================================================================

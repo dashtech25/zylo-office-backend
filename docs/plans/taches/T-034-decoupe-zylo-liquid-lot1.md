@@ -1,7 +1,7 @@
 # T-034 : Découpe de zylo_liquid/service.py, lot 1 (filet de caractérisation, stations et cuves)
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : L · **Dépôt(s)** : backend · **Domaine** : zylo-liquid · **Type** : refactor
-- **Branche suggérée** : `refactor/T-034-zl-service-lot1` · **Base de test** : `zylo_t034_test` · **Ports** : back 3134
+- **Statut** : À vérifier · **Priorité** : P1 · **Vague** : 1 · **Taille** : L · **Dépôt(s)** : backend · **Domaine** : zylo-liquid · **Type** : refactor
+- **Branche suggérée** : `refactor/T-034-zl-service-lot1` (branche réelle : `refactor/T-034-zylo-liquid-lot1`, worktree `worktrees/T-034-back`) · **Base de test** : `zylo_t034_test` · **Ports** : back 3134
 - **Dépendances** : aucune
 - **Décisions requises** : aucune
 
@@ -42,6 +42,13 @@
 
 ## Livrable documentaire
 - `docs/modules/zylo-liquid/architecture-service.md` (créé, carte des sous-domaines).
+
+## Réalisation (lot 1)
+- Commits sur `refactor/T-034-zylo-liquid-lot1` : filet de signatures (`48187a7`), stations (`0782524`), cuves (`1cbdba4`), schémas (`e35819e`), contrats import-linter (`bc42a58`), documentation (`471d26e`).
+- `service.py` : 7 092 -> 6 298 lignes ; 243 -> 208 fonctions de premier niveau. `schemas.py` : 2 150 -> 1 820 lignes. `router.py` inchangé.
+- Mesures de l'audit (15 681 lignes, 504 fonctions) non retrouvées dans ce dépôt : à corriger dans `docs/audit/architecture.md`.
+- Non couvert par un test automatisé (Playwright suspendu) : parcours station et cuve dans l'interface.
+- Reste hors lot 1 : état courant, mesures, prix, caisse, livraisons, fuites, alertes, réconciliation, ventes, produits, personnel, réglementation (lots T-035a à T-035e).
 
 ## Parallélisable avec
 T-030 à T-033c (frontend), T-038a. Pas en parallèle de T-027, T-029, T-035a sur `service.py`.

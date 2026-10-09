@@ -91,6 +91,9 @@ forbidden_modules =
     app.modules.zylo_liquid.service
     app.modules.zylo_liquid.router
     app.modules.zylo_liquid.schemas
+    app.modules.zylo_liquid.stations
+    app.modules.zylo_liquid.tanks
+    app.modules.zylo_liquid.common
     app.modules.zylo_tanker.service
     app.modules.zylo_tanker.router
     app.modules.zylo_tanker.schemas
@@ -135,6 +138,9 @@ forbidden_modules =
     app.modules.zylo_liquid.service
     app.modules.zylo_liquid.router
     app.modules.zylo_liquid.schemas
+    app.modules.zylo_liquid.stations
+    app.modules.zylo_liquid.tanks
+    app.modules.zylo_liquid.common
     app.modules.zylo_tanker.service
     app.modules.zylo_tanker.router
     app.modules.zylo_tanker.schemas

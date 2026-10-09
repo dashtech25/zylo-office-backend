@@ -51,11 +51,13 @@ async def create_module_role(
     await assert_permissions_match_module(db, module_code, permission_codes)
     await _assert_no_privilege_escalation(db, organization_id, actor_user_id, permission_codes)
 
+    # Résolution des permissions avant toute écriture : un code inconnu (404) ne
+    # laisse aucune ligne « role » en attente dans la session.
+    permissions = [await _get_permission_or_404(db, perm_code) for perm_code in permission_codes]
     role = Role(organizationId=organization_id, code=code, name=name, moduleCode=module_code)
     db.add(role)
     await db.flush()
-    for perm_code in permission_codes:
-        permission = await _get_permission_or_404(db, perm_code)
+    for permission in permissions:
         db.add(RolePermission(roleId=role.id, permissionId=permission.id))
 
     await record_audit_event(

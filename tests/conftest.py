@@ -2,6 +2,15 @@ import os
 import uuid
 from datetime import datetime, timezone
 
+# Intention (T-002) : les tests déclarent leur environnement. `test` applique
+# les règles strictes de app/core/config.py : aucun secret de repli n'est
+# accepté, donc les secrets ci-dessous sont explicites, propres aux tests et
+# assez longs. Ils écrasent volontairement le .env du worktree (variables
+# d'environnement prioritaires), sans jamais reprendre de valeur réelle.
+os.environ["ENVIRONMENT"] = "test"
+os.environ["JWT_SECRET"] = "test-only-jwt-secret-" + "0123456789abcdef" * 2
+os.environ["STORAGE_SIGNED_URL_SECRET"] = "test-only-storage-secret-" + "fedcba9876543210" * 2
+
 os.environ["DATABASE_URL"] = os.environ.get(
     "TEST_DATABASE_URL", "postgresql+asyncpg://zylo_office:zylo_office_dev@localhost:5432/zylo_office_test"
 )

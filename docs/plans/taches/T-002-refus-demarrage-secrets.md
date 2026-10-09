@@ -1,6 +1,6 @@
 # T-002 : Refuser le démarrage hors développement avec des secrets par défaut
 
-- **Statut** : Planifiée · **Priorité** : P0 · **Vague** : 0 · **Taille** : S · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
+- **Statut** : À vérifier · **Priorité** : P0 · **Vague** : 0 · **Taille** : S · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
 - **Branche suggérée** : `fix/T-002-secrets-demarrage` · **Base de test** : `zylo_t002_test` · **Ports** : back 3102
 - **Dépendances** : T-004
 - **Décisions requises** : `architecture/environnement-par-defaut.md` (appliquée, à confirmer)

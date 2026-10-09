@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 # assez longs. Ils écrasent volontairement le .env du worktree (variables
 # d'environnement prioritaires), sans jamais reprendre de valeur réelle.
 os.environ["ENVIRONMENT"] = "test"
+# T-027 : clé de chiffrement de test, propre au dépôt de test, jamais une valeur réelle.
+os.environ["APP_FIELD_ENCRYPTION_KEY"] = "test-only-field-encryption-key-" + "0123456789abcdef" * 2
 os.environ["JWT_SECRET"] = "test-only-jwt-secret-" + "0123456789abcdef" * 2
 os.environ["STORAGE_SIGNED_URL_SECRET"] = "test-only-storage-secret-" + "fedcba9876543210" * 2
 
@@ -183,13 +185,14 @@ async def register_holykell_sensor(organization_id: str, serial_number: str, mea
     import random
 
     from app.core.database import AsyncSessionLocal
+    from app.core.field_crypto import chiffrer
     from app.modules.zylo_liquid.models import HolykellAccount, HolykellDeviceRegistry
 
     async with AsyncSessionLocal() as db:
         account = HolykellAccount(
             organizationId=uuid.UUID(organization_id),
             holykellUsername=f"user-{uuid.uuid4().hex[:8]}",
-            holykellPassword="secret",
+            holykellPasswordChiffre=chiffrer("secret"),
         )
         db.add(account)
         await db.flush()

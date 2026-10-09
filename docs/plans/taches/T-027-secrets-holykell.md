@@ -1,6 +1,6 @@
 # T-027 : Chiffrer le mot de passe du compte Holykell, avec clé de secours et procédure de restauration
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : L · **Dépôt(s)** : backend · **Domaine** : zylo-liquid · **Type** : security
+- **Statut** : À vérifier · **Priorité** : P1 · **Vague** : 1 · **Taille** : L · **Dépôt(s)** : backend · **Domaine** : zylo-liquid · **Type** : security
 - **Branche suggérée** : `fix/T-027-secrets-holykell` · **Base de test** : `zylo_t027_test` · **Ports** : back 3127
 - **Dépendances** : T-001, T-002, T-005
 - **Décisions requises** : `securite/chiffrement-cle-holykell.md` (recommandation : variable dédiée, procédure de sauvegarde de clé hors dépôt)

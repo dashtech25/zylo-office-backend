@@ -68,7 +68,11 @@ class HolykellAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     holykellUsername: Mapped[str] = mapped_column(String(100), nullable=False)
-    holykellPassword: Mapped[str] = mapped_column(String(255), nullable=False)
+    # T-027 : mot de passe chiffré (app/core/field_crypto.py), seule valeur écrite
+    # par le code. L'ancienne colonne en clair reste lisible pendant la transition
+    # (repli dans app/core/field_crypto.lire_champ) puis sera supprimée par une tâche distincte.
+    holykellPasswordChiffre: Mapped[str | None] = mapped_column(Text, nullable=True)
+    holykellPassword: Mapped[str | None] = mapped_column(String(255), nullable=True)
     holykellTenantId: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     accessToken: Mapped[str | None] = mapped_column(Text, nullable=True)

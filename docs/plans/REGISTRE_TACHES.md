@@ -42,7 +42,7 @@ Statut initial : **Planifiée** (aucune tâche démarrée). **Généré à parti
 | T-033a | Frontend : composants partagés (Table, Tabs, Modal, QueryState, graphiques) | P2 | 3 | 2 | M | Planifiée | T-030, T-032 | frontend | `frontend/bibliotheque-graphiques.md` | [fiche](taches/T-033a-front-composants-partages.md) |
 | T-033b | Frontend : appels réseau par le client unique et états d'erreur des widgets | P2 | 3 | 3 | M | Planifiée | T-033a | frontend | — | [fiche](taches/T-033b-front-reseau-etats-erreur.md) |
 | T-033c | Frontend : accessibilité des éléments interactifs et des overlays | P2 | 3 | 0 | M | Planifiée | — | frontend | — | [fiche](taches/T-033c-front-accessibilite.md) |
-| T-034 | Découpe de zylo_liquid/service.py, lot 1 (filet de caractérisation, stations et cuves) | P1 | 1 | 0 | L | Planifiée | — | backend | — | [fiche](taches/T-034-decoupe-zylo-liquid-lot1.md) |
+| T-034 | Découpe de zylo_liquid/service.py, lot 1 (filet de caractérisation, stations et cuves) | P1 | 1 | 0 | L | À vérifier | — | backend | — | [fiche](taches/T-034-decoupe-zylo-liquid-lot1.md) |
 | T-035a | Découpe de zylo_liquid/service.py, lot a (caisse et shifts) | P2 | 2 | 2 | L | Planifiée | T-034, T-027 | backend | — | [fiche](taches/T-035a-decoupe-caisse-shifts.md) |
 | T-035b | Découpe de zylo_liquid/service.py, lot b (livraisons et rapprochements) | P2 | 2 | 3 | L | Planifiée | T-035a | backend | — | [fiche](taches/T-035b-decoupe-livraisons.md) |
 | T-035c | Découpe de zylo_liquid/service.py, lot c (réglementation et déclarations) | P2 | 2 | 4 | L | Planifiée | T-035b | backend | — | [fiche](taches/T-035c-decoupe-reglementation.md) |

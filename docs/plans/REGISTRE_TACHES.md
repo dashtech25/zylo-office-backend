@@ -9,7 +9,7 @@ Statut initial : **Planifiée** (aucune tâche démarrée). **Généré à parti
 | T-001 | Retirer le dump de l'index git et verrouiller les dumps | P0 | 0 | 1 | S | Planifiée | T-004 | backend | `securite/purge-historique-dump.md`, `securite/rotation-credentials.md`, `process/visibilite-depot-requirements.md` | [fiche](taches/T-001-retrait-dump-git.md) |
 | T-002 | Refuser le démarrage hors développement avec des secrets par défaut | P0 | 0 | 1 | S | Planifiée | T-004 | backend | `architecture/environnement-par-defaut.md` | [fiche](taches/T-002-refus-demarrage-secrets.md) |
 | T-003 | Table de ports unique, allocation par worktree, CORS configurable | P1 | 0 | 1 | S | Planifiée | T-004 | backend et frontend | `architecture/ports-canoniques.md` | [fiche](taches/T-003-ports-unifies.md) |
-| T-004 | Base de référence et espace de travail isolé | P0 | 0 | 0 | M | Planifiée | — | backend et frontend | — | [fiche](taches/T-004-base-de-reference.md) |
+| T-004 | Base de référence et espace de travail isolé | P0 | 0 | 0 | M | Réalisée (à vérifier) | — | backend et frontend | — | [fiche](taches/T-004-base-de-reference.md) |
 | T-004b | Tri du travail en cours restant (lots non bloquants) | P1 | 0 | 1 | L | Planifiée | T-004 | backend et frontend | — | [fiche](taches/T-004b-tri-travail-restant.md) |
 | T-005 | Environnement de test isolé par tâche et garde de base | P1 | 0 | 1 | M | Planifiée | T-004 | backend et frontend | — | [fiche](taches/T-005-environnement-tests-par-tache.md) |
 | T-006 | Corriger les 21 tests pytest en échec (payloads et cascades) | P1 | 1 | 2 | M | Planifiée | T-005 | backend | `zylo-liquid/ordre-validation-fournisseur.md` | [fiche](taches/T-006-pytest-payloads-cascades.md) |

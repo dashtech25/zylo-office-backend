@@ -1,6 +1,6 @@
 # T-004 : Base de référence et espace de travail isolé
 
-- **Statut** : Planifiée · **Priorité** : P0 · **Vague** : 0 · **Taille** : M · **Dépôt(s)** : backend et frontend · **Domaine** : process · **Type** : chore
+- **Statut** : Réalisée (à vérifier) · **Priorité** : P0 · **Vague** : 0 · **Taille** : M · **Dépôt(s)** : backend et frontend · **Domaine** : process · **Type** : chore
 - **Branche suggérée** : `chore/T-004-base-reference` · **Base de test** : aucune · **Ports** : aucun
 - **Dépendances** : aucune
 - **Décisions requises** : aucune
@@ -61,3 +61,10 @@ Aucune. Bloque toutes les tâches : T-001, T-002, T-003, T-005, T-041, T-016 et 
 
 ## Parallélisable avec
 Rien en amont. T-004b démarre après le tag.
+
+## Résultat (2026-10-08)
+- Contrôle indépendant requis : oui, pour le tri du snapshot (T-004b) et la revue des lots `wip/`.
+- Lots et commits : `docs/process/git-workflow.md`. Tag `base-T004` posé sur `remy` dans les deux dépôts.
+- Sauvegarde hors dépôt : `office/sauvegarde-T004-2026-10-08/` (bundles, statut, diff, archive).
+- Écarts par rapport à la fiche : `e2e/fixtures/` n'est pas ignoré (il contient une fixture réelle) ; seul `e2e/.auth/` l'est. Le backend lit `.env` (et non `.env.local`) : le worktree de test écrit `.env`.
+- Base de test : la création de `zylo_t<NNN>_test` exige le droit CREATEDB, absent du rôle utilisé.

@@ -96,6 +96,21 @@ class Settings(BaseSettings):
     VAPID_PRIVATE_KEY: str = ""
     VAPID_CLAIMS_EMAIL: str = "contact@zylo.example"
 
+    # Limitation de débit de l'authentification (T-012, docs/questions/securite/
+    # limitation-authentification.md). Compteurs d'échecs dans PostgreSQL (table
+    # loginAttempt), fenêtre glissante. Verrou par couple (IP, compte) avec backoff
+    # (base x 2^(échecs au-delà du seuil), plafonné) ; plafond global par IP.
+    # Retour arrière : AUTH_RATE_LIMIT_ENABLED=false (sans revert de code).
+    AUTH_RATE_LIMIT_ENABLED: bool = True
+    AUTH_RATE_LIMIT_WINDOW_SECONDS: int = 900
+    AUTH_RATE_LIMIT_MAX_FAILURES_PER_ACCOUNT: int = 10
+    AUTH_RATE_LIMIT_MAX_FAILURES_PER_IP: int = 100
+    AUTH_RATE_LIMIT_LOCK_BASE_SECONDS: int = 60
+    AUTH_RATE_LIMIT_LOCK_MAX_SECONDS: int = 900
+    # Adresses des proxys de confiance (reverse proxy). X-Forwarded-For n'est lu
+    # que si l'adresse du pair direct figure dans cette liste. Vide = aucun proxy.
+    AUTH_RATE_LIMIT_TRUSTED_PROXIES: list[str] = []
+
     @model_validator(mode="after")
     def _refuse_fallback_secrets_hors_development(self) -> "Settings":
         # Intention : l'import de ce module échoue (donc `import app.main` et

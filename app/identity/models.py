@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -52,3 +53,34 @@ class OrganizationUser(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True
     )
     userId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False, index=True)
+
+
+class UserInvitation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Jeton d'activation d'un compte créé par une organisation (T-021, T-049).
+
+    Intention : seule l'empreinte SHA-256 du jeton est stockée (le jeton n'existe
+    qu'en clair dans le message envoyé au titulaire). Usage unique (`usedAt`),
+    durée limitée (`expiresAt`), révocable (`revokedAt`, réémission). Un seul
+    jeton ouvert par compte : garanti par l'index partiel ci-dessous.
+    """
+
+    __tablename__ = "userInvitation"
+    __table_args__ = (
+        Index(
+            "uq_userInvitation_open_per_user",
+            "userId",
+            unique=True,
+            postgresql_where="\"usedAt\" IS NULL AND \"revokedAt\" IS NULL",
+        ),
+        {"comment": "Jeton d'activation à usage unique d'un compte créé par une organisation (haché, à durée limitée)."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True
+    )
+    userId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False, index=True)
+    createdByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False)
+    tokenHash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expiresAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    usedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revokedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

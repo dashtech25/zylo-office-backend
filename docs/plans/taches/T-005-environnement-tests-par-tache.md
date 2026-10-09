@@ -1,6 +1,6 @@
 # T-005 : Environnement de test isolé par tâche et garde de base
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 0 · **Taille** : M · **Dépôt(s)** : backend et frontend · **Domaine** : ci · **Type** : chore
+- **Statut** : À vérifier · **Priorité** : P1 · **Vague** : 0 · **Taille** : M · **Dépôt(s)** : backend et frontend · **Domaine** : ci · **Type** : chore
 - **Branche suggérée** : `chore/T-005-env-taches` · **Base de test** : `zylo_t005_test` · **Ports** : back 3105, front dev 3205, front prod 3305
 - **Dépendances** : T-004
 - **Décisions requises** : aucune

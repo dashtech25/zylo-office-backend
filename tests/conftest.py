@@ -13,14 +13,14 @@ os.environ["APP_FIELD_ENCRYPTION_KEY"] = "test-only-field-encryption-key-" + "01
 os.environ["JWT_SECRET"] = "test-only-jwt-secret-" + "0123456789abcdef" * 2
 os.environ["STORAGE_SIGNED_URL_SECRET"] = "test-only-storage-secret-" + "fedcba9876543210" * 2
 
-os.environ["DATABASE_URL"] = os.environ.get(
-    "TEST_DATABASE_URL", "postgresql+asyncpg://zylo_office:zylo_office_dev@localhost:5432/zylo_office_test"
-)
 # Le throttle de `run_truck_stop_detection` (2026-09-14) suppose des
 # positions réelles espacées dans le temps — en test, des dizaines
 # d'ingestions synthétiques partent en quelques millisecondes réelles,
 # donc désactivé ici pour que chaque appel recalcule bien comme avant.
 os.environ["TRUCK_STOP_DETECTION_THROTTLE_SECONDS"] = "0"
+
+import re
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from alembic import command
@@ -28,6 +28,59 @@ from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
 
 BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Garde de base de test (T-005). Intention : pytest vide la base à chaque
+# session (TRUNCATE de toutes les tables). Il ne doit donc JAMAIS pointer vers
+# une base de développement ou partagée. Règles :
+#  - TEST_DATABASE_URL doit être définie et non vide, sans valeur de repli ;
+#  - le nom de base doit suivre le motif zylo_t<NNN>[a-z]?_test, créé par
+#    scripts/dev/env_tache.sh (une base par tâche) ;
+#  - seule exception : zylo_office_test, héritée de l'ancien repli, et
+#    uniquement si ZYLO_TEST_TOLERER_ZYLO_OFFICE_TEST=1 est posée explicitement.
+# Les noms zylo, zylo_office, zylo_dev, zylo_liquid, zylo_recette ne passent
+# jamais, quel que soit le port ou l'hôte.
+MOTIF_BASE_DE_TEST = re.compile(r"^zylo_t[0-9]{3}[a-z]?_test$")
+BASE_TOLEREE_OPT_IN = "zylo_office_test"
+VARIABLE_OPT_IN = "ZYLO_TEST_TOLERER_ZYLO_OFFICE_TEST"
+COMMANDE_ENV_TACHE = "scripts/dev/env_tache.sh creer <NNN> back"
+
+
+def _noms_de_base(url: str) -> list[str]:
+    """Nom de base de l'URL, et ceux donnés par ?dbname= ou ?database= (asyncpg)."""
+    parties = urlsplit(url)
+    noms = [parties.path.lstrip("/")]
+    requete = parse_qs(parties.query)
+    for cle in ("dbname", "database"):
+        noms.extend(requete.get(cle, []))
+    return noms
+
+
+def verifie_base_de_test(url: str | None) -> None:
+    """Lève pytest.exit (message en français) si la base n'est pas une base de test."""
+    if not url:
+        pytest.exit(
+            "TEST_DATABASE_URL est absente : pytest refuse de démarrer, car il vide la base "
+            "de test. Dans un worktree déjà créé : export TEST_DATABASE_URL=\"$(sed -n "
+            "'s/^TEST_DATABASE_URL=//p' .env)\". Sinon, créez l'environnement de la tâche : "
+            f"{COMMANDE_ENV_TACHE}.",
+            returncode=3,
+        )
+    for nom in _noms_de_base(url):
+        if nom == BASE_TOLEREE_OPT_IN and os.environ.get(VARIABLE_OPT_IN) == "1":
+            continue
+        if not MOTIF_BASE_DE_TEST.match(nom):
+            pytest.exit(
+                f"Base refusée : « {nom} » n'est pas une base de test (motif attendu : "
+                f"zylo_t<NNN>[a-z]?_test). pytest vide cette base à chaque session. "
+                f"Créez la base de la tâche avec {COMMANDE_ENV_TACHE} et exportez son "
+                "TEST_DATABASE_URL. zylo_office_test n'est tolérée qu'avec "
+                f"{VARIABLE_OPT_IN}=1.",
+                returncode=3,
+            )
+
+
+verifie_base_de_test(os.environ.get("TEST_DATABASE_URL"))
+os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
 
 
 @pytest.fixture(scope="session", autouse=True)

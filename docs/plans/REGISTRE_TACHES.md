@@ -11,7 +11,7 @@ Statut initial : **Planifiée** (aucune tâche démarrée). **Généré à parti
 | T-003 | Table de ports unique, allocation par worktree, CORS configurable | P1 | 0 | 1 | S | À vérifier | T-004 | backend et frontend | `architecture/ports-canoniques.md` | [fiche](taches/T-003-ports-unifies.md) |
 | T-004 | Base de référence et espace de travail isolé | P0 | 0 | 0 | M | Réalisée (à vérifier) | — | backend et frontend | — | [fiche](taches/T-004-base-de-reference.md) |
 | T-004b | Tri du travail en cours restant (lots non bloquants) | P1 | 0 | 1 | L | Planifiée | T-004 | backend et frontend | — | [fiche](taches/T-004b-tri-travail-restant.md) |
-| T-005 | Environnement de test isolé par tâche et garde de base | P1 | 0 | 1 | M | Planifiée | T-004 | backend et frontend | — | [fiche](taches/T-005-environnement-tests-par-tache.md) |
+| T-005 | Environnement de test isolé par tâche et garde de base | P1 | 0 | 1 | M | À vérifier | T-004 | backend et frontend | — | [fiche](taches/T-005-environnement-tests-par-tache.md) |
 | T-006 | Corriger les 21 tests pytest en échec (payloads et cascades) | P1 | 1 | 2 | M | À vérifier | T-005, T-002, T-005 | backend | `zylo-liquid/ordre-validation-fournisseur.md` | [fiche](taches/T-006-pytest-payloads-cascades.md) |
 | T-007 | Droit du rôle manager (décision client, aucun élargissement automatique) | P2 | 1 | 2 | S | Planifiée, en attente de décision client | T-005 | backend | `rbac/manager-role-superset.md` | [fiche](taches/T-007-test-role-manager.md) |
 | T-008 | Playwright sur build de production, e2e versionnés, jetons exclus | P1 | 1 | 2 | M | Planifiée | T-003, T-005, T-041 | frontend (backend pour le démarrage) | `tests/retention-traces-video.md` | [fiche](taches/T-008-playwright-build-prod.md) |

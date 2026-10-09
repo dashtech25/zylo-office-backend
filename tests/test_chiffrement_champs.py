@@ -17,7 +17,8 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core import field_crypto
 from app.core.config import settings
@@ -35,6 +36,22 @@ CLE_FICTIVE = "cle-fictive-chiffrement-" + "0123456789abcdef" * 2
 def cle_de_test(monkeypatch):
     monkeypatch.setattr(settings, "APP_FIELD_ENCRYPTION_KEY", CLE_FICTIVE)
     return CLE_FICTIVE
+
+
+@pytest.fixture(autouse=True)
+async def retire_les_comptes_chiffres():
+    """Chaque test de ce module chiffre avec une clé qui lui est propre (CLE_FICTIVE, « autre-cle », ou
+    aucune). Ses comptes sont retirés à la fin du test : sinon le downgrade de T-027, lancé plus tard dans
+    la session (tests/test_rbac_module_roles.py, aller-retour de migration), ne peut pas déchiffrer ces
+    lignes avec la clé de l'environnement de test, et échoue. Cet échec est le comportement voulu de la
+    migration (elle refuse de perdre une valeur)."""
+    yield
+    engine = create_async_engine(os.environ["DATABASE_URL"])
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text('DELETE FROM "zyloLiquidHolykellAccount" WHERE "holykellPasswordChiffre" IS NOT NULL'))
+    finally:
+        await engine.dispose()
 
 
 def _charger_script_migration():

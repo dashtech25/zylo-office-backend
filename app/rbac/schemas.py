@@ -18,6 +18,8 @@ class RoleResponse(BaseModel):
     organizationId: uuid.UUID
     code: str
     name: str
+    # T-018 : null = rôle transverse du socle, sinon le module de rattachement.
+    moduleCode: str | None = None
 
     model_config = {"from_attributes": True}
 

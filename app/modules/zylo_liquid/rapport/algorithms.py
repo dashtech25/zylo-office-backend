@@ -1,0 +1,171 @@
+"""Règles pures des rubriques du rapport de tour (D4). Aucune lecture de base."""
+
+from app.modules.zylo_liquid.pumps.algorithms import parse_exact_decimal
+
+
+SHIFT_REPORT_PHONE_MAX = 20
+
+
+
+SHIFT_REPORT_SECTIONS_SAVED_EVENT = "ShiftReportSectionsSaved"
+
+
+
+SECTION_NUMBERS = (2, 3, 4, 5, 6, 7)
+
+
+
+SECTION_TITLES = {
+    2: "Lubrifiants", 3: "Gaz domestique", 4: "Boutique (S.F.S)", 5: "Crédits clients", 6: "Bons valeur", 7: "Paiements électroniques",
+}
+
+
+
+SECTION_STATUSES = ("not_started", "saved", "ras")
+
+
+
+SECTION_DETAIL_MODES = ("detailed", "summary")
+
+
+
+SECTION_NOTE_MAX = 255
+
+
+
+SECTION_OPENING_NOTE_MIN, SECTION_OPENING_NOTE_MAX = 10, 300
+
+
+
+SECTION_RATURE_REASONS = ("entry_error", "count_error", "voucher_found", "price_corrected", "other")
+
+
+
+SECTION_RATURE_REASON_LABELS = {
+    "entry_error": "Erreur de saisie", "count_error": "Erreur de comptage", "voucher_found": "Bon retrouvé", "price_corrected": "Prix corrigé", "other": "Autre",
+}
+
+
+
+# Gaz : tailles par défaut tant qu'aucun catalogue gaz n'existe (A3) ; sous-lignes de l'imprimé.
+GAS_SIZES_KG = ("6", "12.5", "26", "35")
+
+
+
+GAS_LINE_KINDS = ("bottle", "deposit", "deposit_refund")
+
+
+
+GAS_LINE_KIND_LABELS = {"bottle": "Bouteille", "deposit": "Consignation", "deposit_refund": "Déconsignation"}
+
+
+
+# Boutique : les 11 catégories de l'imprimé ; `total` = ligne unique du mode « sans détail ».
+SHOP_CATEGORIES = (
+    ("telecards", "Télécartes"), ("insecticides", "Insecticides"), ("alcoholic_drinks", "Boissons alcoolisées"),
+    ("soft_drinks", "Boissons sans alcool"), ("confectionery", "Confiserie"), ("grocery", "Épicerie"), ("fresh_products", "Produits frais"),
+    ("catering", "Restauration (boulangerie, café)"), ("lubricants", "Lubrifiants"), ("gas_auto_accessories", "Accessoires gaz et auto"), ("other", "Autres"),
+)
+
+
+
+SHOP_TOTAL_CODE, SHOP_TOTAL_LABEL = "total", "Total boutique sans détail"
+
+
+
+VALUE_VOUCHER_DENOMINATIONS = (10000, 5000, 3000)
+
+
+
+VALUE_VOUCHER_COLUMNS = ("daily", "value")  # (a) bons du jour, (c) bons en valeur ; la colonne (b) n'existe pas sur l'imprimé (PC-D4-g)
+
+
+
+MOBILE_OPERATORS = ("orange_money", "mtn_momo")
+
+
+
+MOBILE_OPERATOR_LABELS = {"orange_money": "Orange Money", "mtn_momo": "MTN Mobile Money"}
+
+
+
+MOBILE_ORIGINS = ("pump", "shop", "other")
+
+
+
+CREDIT_AMOUNT_TOLERANCE = 1  # FCFA : écart quantité x prix / montant du bon au-delà duquel un avertissement est émis (jamais un blocage)
+
+
+
+def parse_count(raw) -> "tuple[int | None, str | None]":
+    """Nombre ENTIER de bons/bouteilles/cartes ≥ 0 : (valeur, None) ou (None, problème : `not_a_number`, `not_integer`, `negative`,
+    `too_large`). Accepte 3, « 3 », « 3,0 » ; refuse « 1,5 » (jamais arrondi en silence)."""
+    from decimal import Decimal
+
+    value = parse_exact_decimal(raw)
+    if value is None:
+        return None, "not_a_number"
+    if value != value.to_integral_value():
+        return None, "not_integer"
+    if value < 0:
+        return None, "negative"
+    if value >= Decimal(10) ** 9:
+        return None, "too_large"
+    return int(value), None
+
+
+
+def round_money(value) -> "Decimal":
+    """Montant arrondi à 2 décimales (demi vers le haut), UNE fois par ligne ; le cumul est la somme des lignes arrondies."""
+    from decimal import ROUND_HALF_UP, Decimal
+
+    return Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+
+def compute_lubricant_line(opening, entry, sold, unit_price) -> dict:
+    """Rubrique 2, une référence : fermeture = ouverture + entrées - ventes ; montant = ventes x prix (None si prix inconnu).
+    `exceedsStock` vrai si les ventes dépassent le stock disponible (ouverture + entrées) : refusé à l'enregistrement."""
+    from decimal import Decimal
+
+    available = Decimal(opening) + Decimal(entry)
+    closing = available - Decimal(sold)
+    amount = None if unit_price is None else round_money(Decimal(sold) * Decimal(unit_price))
+    return {"available": available, "closing": closing, "amount": amount, "exceedsStock": closing < 0}
+
+
+
+def compute_gas_line(kind: str, opening, entry, sold, unit_price) -> dict:
+    """Rubrique 3, une sous-ligne : bouteille = stock (fermeture) + montant positif ; consignation = quantité x prix positive ;
+    déconsignation = quantité x prix NÉGATIVE (retour de consigne : hypothèse à confirmer terrain, PC-D4-e). Consignation et
+    déconsignation n'ont pas de stock (fermeture None)."""
+    from decimal import Decimal
+
+    closing = None
+    available = None
+    if kind == "bottle":
+        available = Decimal(opening) + Decimal(entry)
+        closing = available - Decimal(sold)
+    amount = None
+    if unit_price is not None:
+        amount = round_money(Decimal(sold) * Decimal(unit_price))
+        if kind == "deposit_refund":
+            amount = -amount
+    return {"available": available, "closing": closing, "amount": amount, "exceedsStock": closing is not None and closing < 0}
+
+
+
+def compute_value_vouchers(counts: "dict[tuple[int, str], int]") -> dict:
+    """Rubrique 6 : montant = nombre x coupure ; CUMUL (a) bons du jour, CUMUL (c) bons en valeur, total versé au gérant = (a) + (c)."""
+    from decimal import Decimal
+
+    amounts = {key: Decimal(key[0]) * Decimal(count) for key, count in counts.items()}
+    daily = sum((v for (_d, col), v in amounts.items() if col == "daily"), Decimal(0))
+    value = sum((v for (_d, col), v in amounts.items() if col == "value"), Decimal(0))
+    return {"amounts": amounts, "dailyTotal": daily, "valueTotal": value, "total": daily + value}
+
+
+
+def normalize_voucher_number(raw) -> str:
+    """Numéro de bon / code de paiement : espaces retirés en tête et en queue, majuscules (comparaison insensible à la casse)."""
+    return str(raw or "").strip().upper()

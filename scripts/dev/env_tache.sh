@@ -176,6 +176,8 @@ if [ "$CMD" = "creer" ]; then
   if [ "$KIND" = "back" ]; then
     echo "  backend : port $PORT_BACK ; base de test : $DB (propriétaire $PROPRIETAIRE_BASE, migrée à head)"
     echo "  venv : $BACK_REPO/.venv (partagé ; lancer depuis le worktree : $BACK_REPO/.venv/bin/pytest)"
+    # T-005 : pytest refuse de démarrer sans TEST_DATABASE_URL (tests/conftest.py).
+    echo "  pytest : export TEST_DATABASE_URL=\"\$(sed -n 's/^TEST_DATABASE_URL=//p' .env)\""
   else
     echo "  frontend dev : port $PORT_FRONT_DEV ; prod : $PORT_FRONT_PROD ; API : $PORT_BACK"
     echo "  reste à faire : node_modules (npm ci) dans le worktree"

@@ -22,8 +22,8 @@ from app.modules.zylo_liquid.models import (
     TankCalibrationPoint,
     TankSensorMapping,
 )
-from app.modules.zylo_liquid.schemas import (
-    CreateFuelProductRequest,
+from app.modules.zylo_liquid.stations.schemas import CreateFuelProductRequest
+from app.modules.zylo_liquid.tanks.schemas import (
     CreatePumpRequest,
     UpdatePumpRequest,
     PumpResponse,

@@ -1,0 +1,39 @@
+#!/bin/sh
+# Garde-fou de commit (T-004) : refuse les fichiers qui ne doivent jamais
+# entrer dans l'historique git, même par erreur (dumps de base, secrets).
+#
+# Intention : une fuite de dump SQL ou d'un fichier .env dans git est
+# irréversible sans réécriture d'historique. On bloque donc au moment du
+# commit, sur les seuls fichiers réellement indexés (git diff --cached).
+#
+# Activation (une fois par clone) : git config core.hooksPath .githooks
+# Contournement volontaire interdit : ne pas utiliser --no-verify.
+
+set -eu
+
+# Fichiers à indexer : ajouts et modifications (D exclu : la suppression ne fuit rien).
+staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+
+bloques=""
+for f in $staged; do
+  case "$f" in
+    *.sql|*.sql.gz|*.dump)
+      bloques="$bloques\n  $f (dump de base interdit)" ;;
+    .env|.env.*)
+      # Seul le modèle est autorisé à être versionné.
+      if [ "$f" != ".env.example" ]; then
+        bloques="$bloques\n  $f (fichier d'environnement interdit)"
+      fi ;;
+    */.env|*/.env.*)
+      if [ "${f##*/}" != ".env.example" ]; then
+        bloques="$bloques\n  $f (fichier d'environnement interdit)"
+      fi ;;
+  esac
+done
+
+if [ -n "$bloques" ]; then
+  printf "Commit refusé par .githooks/pre-commit :%b\n" "$bloques" >&2
+  printf "Retirer ces fichiers de l'index (git restore --staged <fichier>) puis recommencer.\n" >&2
+  exit 1
+fi
+exit 0

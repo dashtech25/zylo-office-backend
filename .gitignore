@@ -25,3 +25,12 @@ htmlcov/
 .vscode/
 backups/
 var/
+
+# Dossier de travail interne à la racine uniquement (cahiers terrain).
+# Ancré (/taches/) : les fiches docs/plans/taches/ sont versionnées (T-004).
+/taches/
+
+# Environnements locaux (.env.migration, .env.local par worktree...) : jamais versionnés.
+# Seul le modèle .env.example est suivi.
+.env.*
+!.env.example

@@ -53,6 +53,7 @@ ROUTES_PUBLIQUES: dict[str, str] = {
     "POST /api/v1/billing/plans": "DETTE CONNUE : tout utilisateur connecté peut créer un plan. Retrait de la route à faire par T-019. 2026-10-09.",
     "POST /api/v1/zylo-liquid/gps/ingest": "Webhook GPS : authentifié par le secret d'ingestion de l'organisation (en-tête). 2026-10-09.",
     "POST /api/v1/zylo-tanker/gps/ingest": "Webhook GPS : authentifié par le secret d'ingestion de l'organisation (en-tête). 2026-10-09.",
+    "GET /api/v1/notifications/vapid-public-key": "Clé publique VAPID (non secrète), lue avant tout abonnement, aucune donnée d'organisation. 2026-10-09 (T-004b lot 2).",
     "POST /api/v1/export/xlsx": "Conversion de tableau fourni par l'appelant, sans donnée d'organisation. A vérifier. 2026-10-09.",
     "POST /api/v1/export/docx": "Conversion de tableau fourni par l'appelant, sans donnée d'organisation. A vérifier. 2026-10-09.",
     "POST /api/v1/import/xlsx": "Lecture d'un fichier fourni par l'appelant, sans donnée d'organisation. A vérifier. 2026-10-09.",

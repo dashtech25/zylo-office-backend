@@ -60,6 +60,7 @@ Source : les dépendances FastAPI des routes (`tests/route_inventory.py`).
 - `GET /api/v1/health/error-demo`
 - `POST /api/v1/import/xlsx`
 - `GET /api/v1/modules`
+- `GET /api/v1/notifications/vapid-public-key`
 - `GET /api/v1/organizations`
 - `POST /api/v1/organizations`
 - `GET /api/v1/storage/local/{storage_reference}`

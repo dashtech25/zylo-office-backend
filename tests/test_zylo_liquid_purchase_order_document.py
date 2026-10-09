@@ -40,12 +40,13 @@ async def _create_supplier(client: AsyncClient, headers: dict, name: str) -> dic
     return res.json()
 
 
-async def _create_order(client: AsyncClient, headers: dict, station_id: str, tank_id: str, supplier_id: str, reference: str, volume: int) -> dict:
+async def _create_order(client: AsyncClient, headers: dict, station_id: str, fuel_product_id: str, supplier_id: str, reference: str, volume: int) -> dict:
+    # Contrat multi-produits (refonte 2026-09-17) : la commande porte ses lignes.
     res = await client.post(
         "/api/v1/zylo-liquid/purchase-orders",
         json={
-            "stationId": station_id, "tankId": tank_id, "supplierId": supplier_id,
-            "orderReference": reference, "orderedVolumeLiters": volume,
+            "stationId": station_id, "supplierId": supplier_id, "orderReference": reference,
+            "lines": [{"fuelProductId": fuel_product_id, "orderedVolumeLiters": volume}],
         },
         headers=headers,
     )
@@ -56,9 +57,9 @@ async def _create_order(client: AsyncClient, headers: dict, station_id: str, tan
 async def test_generate_purchase_order_document_pdf(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
     headers = _headers(registered_user, zylo_liquid_organization)
     suffix = uuid.uuid4().hex[:8]
-    station_id, _fuel_product_id, tank_id = await _setup_station_product_tank(client, headers, suffix)
+    station_id, fuel_product_id, _tank_id = await _setup_station_product_tank(client, headers, suffix)
     supplier = await _create_supplier(client, headers, f"Fournisseur {suffix}")
-    order = await _create_order(client, headers, station_id, tank_id, supplier["id"], f"CMD-{suffix}", 5000)
+    order = await _create_order(client, headers, station_id, fuel_product_id, supplier["id"], f"CMD-{suffix}", 5000)
 
     res = await client.post(f"/api/v1/zylo-liquid/purchase-orders/{order['id']}/generate-document", json={"format": "pdf"}, headers=headers)
     assert res.status_code == 201, res.text
@@ -91,9 +92,9 @@ async def test_generate_purchase_order_document_pdf(client: AsyncClient, registe
 async def test_generate_purchase_order_document_docx(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
     headers = _headers(registered_user, zylo_liquid_organization)
     suffix = uuid.uuid4().hex[:8]
-    station_id, _fuel_product_id, tank_id = await _setup_station_product_tank(client, headers, suffix)
+    station_id, fuel_product_id, _tank_id = await _setup_station_product_tank(client, headers, suffix)
     supplier = await _create_supplier(client, headers, f"Fournisseur {suffix}")
-    order = await _create_order(client, headers, station_id, tank_id, supplier["id"], f"CMD-{suffix}", 3200)
+    order = await _create_order(client, headers, station_id, fuel_product_id, supplier["id"], f"CMD-{suffix}", 3200)
 
     res = await client.post(f"/api/v1/zylo-liquid/purchase-orders/{order['id']}/generate-document", json={"format": "docx"}, headers=headers)
     assert res.status_code == 201, res.text
@@ -105,9 +106,9 @@ async def test_generate_purchase_order_document_docx(client: AsyncClient, regist
 async def test_generate_purchase_order_document_invalid_format(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
     headers = _headers(registered_user, zylo_liquid_organization)
     suffix = uuid.uuid4().hex[:8]
-    station_id, _fuel_product_id, tank_id = await _setup_station_product_tank(client, headers, suffix)
+    station_id, fuel_product_id, _tank_id = await _setup_station_product_tank(client, headers, suffix)
     supplier = await _create_supplier(client, headers, f"Fournisseur {suffix}")
-    order = await _create_order(client, headers, station_id, tank_id, supplier["id"], f"CMD-{suffix}", 1000)
+    order = await _create_order(client, headers, station_id, fuel_product_id, supplier["id"], f"CMD-{suffix}", 1000)
 
     res = await client.post(f"/api/v1/zylo-liquid/purchase-orders/{order['id']}/generate-document", json={"format": "xls"}, headers=headers)
     assert res.status_code == 422
@@ -119,9 +120,9 @@ async def test_generate_purchase_order_document_requires_permission(client: Asyn
     droit que la création de la commande elle-même."""
     headers = _headers(registered_user, zylo_liquid_organization)
     suffix = uuid.uuid4().hex[:8]
-    station_id, _fuel_product_id, tank_id = await _setup_station_product_tank(client, headers, suffix)
+    station_id, fuel_product_id, _tank_id = await _setup_station_product_tank(client, headers, suffix)
     supplier = await _create_supplier(client, headers, f"Fournisseur {suffix}")
-    order = await _create_order(client, headers, station_id, tank_id, supplier["id"], f"CMD-{suffix}", 1000)
+    order = await _create_order(client, headers, station_id, fuel_product_id, supplier["id"], f"CMD-{suffix}", 1000)
 
     outsider_email = f"outsider-{suffix}@example.com"
     outsider_password = "Password123!"

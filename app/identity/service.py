@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import Depends
+from fastapi import Depends, Header
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,8 +16,9 @@ from app.identity.schemas import CreateOrganizationRequest, UpdateOrganizationRe
 from app.modules_registry.permissions import MODULE_MANAGE
 from app.rbac.models import Role, RolePermission, UserRole
 from app.rbac.permissions import GRANT_MANAGE, ROLE_MANAGE
-from app.rbac.service import get_or_create_permission
+from app.rbac.service import assert_active_membership, get_or_create_permission, organisation_introuvable
 from app.shared.permissions import CURRENCY_MANAGE, CURRENCY_READ, EXCHANGE_RATE_MANAGE, EXCHANGE_RATE_READ, GEO_READ
+from app.shared.storage import organisation_de_la_reference
 
 # Permissions d'administration du socle accordées automatiquement au rôle
 # owner à la création d'une organisation — jamais les permissions d'un futur
@@ -207,6 +208,25 @@ async def update_user_profile(
                 status_code=403,
             )
 
+    # T-014 (IAM-019) : une photo ne peut référencer qu'un fichier écrit par une
+    # organisation dont l'acteur est membre. Sans ce contrôle, une référence d'une
+    # autre organisation (obtenue par énumération ou fuite) serait acceptée.
+    if data.photoStorageReference is not None:
+        organisation = organisation_de_la_reference(data.photoStorageReference)
+        membre = None
+        if organisation is not None:
+            membre = await db.scalar(
+                select(OrganizationUser.id).where(
+                    OrganizationUser.organizationId == organisation, OrganizationUser.userId == actor.id
+                )
+            )
+        if membre is None:
+            raise AppError(
+                code="photo_reference_forbidden",
+                message="Cette photo n'appartient pas à une organisation dont vous êtes membre.",
+                status_code=403,
+            )
+
     updates = data.model_dump(exclude_unset=True)
     for field, value in updates.items():
         setattr(target, field, value)
@@ -218,25 +238,22 @@ async def update_user_profile(
 
 async def require_organization_member(
     organization_id: uuid.UUID,
+    x_organization_id: uuid.UUID | None = Header(None, alias="X-Organization-Id"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Vérifie seulement l'appartenance à l'organisation — plus permissive
-    que `require_permission()` : voir les modules installés pour son
-    organisation ne doit pas nécessiter une permission d'administration
+    """Vérifie seulement l'appartenance (active) à l'organisation du chemin —
+    plus permissive que `require_permission()` : voir les modules installés pour
+    son organisation ne doit pas nécessiter une permission d'administration
     (contrairement à les activer/désactiver, toujours derrière MODULE_MANAGE).
     `organization_id` est résolu par FastAPI depuis le paramètre de chemin
     de même nom sur la route appelante — jamais une fabrique à la
     `require_permission(code)`, la valeur varie par requête, pas au chargement
-    du module."""
-    result = await db.execute(
-        select(OrganizationUser).where(
-            OrganizationUser.organizationId == organization_id, OrganizationUser.userId == current_user.id
-        )
-    )
-    if result.scalar_one_or_none() is None:
-        raise AppError(
-            code="not_organization_member",
-            message="Vous n'appartenez pas à cette organisation.",
-            status_code=403,
-        )
+    du module.
+
+    T-010 : un en-tête `X-Organization-Id` présent doit désigner la même
+    organisation que le chemin, sinon refus uniforme 404 ; un non-membre reçoit
+    la même réponse qu'une organisation inexistante (pas d'énumération)."""
+    if x_organization_id is not None and x_organization_id != organization_id:
+        raise organisation_introuvable()
+    await assert_active_membership(db, current_user.id, organization_id)

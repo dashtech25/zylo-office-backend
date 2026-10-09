@@ -1,6 +1,6 @@
 # T-016 : Process git, labels et exigences versionnées, script de contrôle du plan
 
-- **Statut** : Planifiée · **Priorité** : P2 · **Vague** : 1 · **Taille** : S · **Dépôt(s)** : backend et frontend · **Domaine** : docs · **Type** : docs
+- **Statut** : À vérifier · **Priorité** : P2 · **Vague** : 1 · **Taille** : S · **Dépôt(s)** : backend et frontend · **Domaine** : docs · **Type** : docs
 - **Branche suggérée** : `docs/T-016-process` · **Base de test** : aucune · **Ports** : aucun
 - **Dépendances** : T-004
 - **Décisions requises** : `process/visibilite-depot-requirements.md`

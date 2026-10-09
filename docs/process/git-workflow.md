@@ -36,7 +36,7 @@ Sauvegarde préalable (hors dépôts, dossier `office/sauvegarde-T004-2026-10-08
 - `supprimer back` ne supprime que le motif `zylo_t[0-9]{3}_test`, après `git worktree remove` (sans `--force`).
 - Procédure vérifiée : `creer 098 back`, `pytest tests/test_rbac.py` avec `TEST_DATABASE_URL` pris dans le `.env` du worktree, puis `supprimer 098 back`.
 - Fichiers d'environnement du worktree : `.env` (backend, lu par `app/core/config.py`) et `.env.local` (frontend), tous deux ignorés par git.
-- Ports : table unique dans `docs/process/ports.md` (T-003). Worktree T-NNN : back 3100+n, front dev 3200+n, front prod 3300+n, avec n = NNN.
+- Ports : table unique des ports (créée par T-003 ; absente tant que T-003 n'est pas fusionnée). Worktree T-NNN : back 3100+n, front dev 3200+n, front prod 3300+n, avec n = NNN.
 - Bases de test : `zylo_t<NNN>[a-z]?_test` uniquement. Les bases `zylo`, `zylo_office`, `zylo_dev`, `zylo_liquid`, `zylo_recette` ne sont jamais utilisées par un test.
 
 ## 5. Interdits
@@ -44,3 +44,10 @@ Sauvegarde préalable (hors dépôts, dossier `office/sauvegarde-T004-2026-10-08
 - Pas de `git stash`, `git checkout --`, `git reset --hard`, `git clean` sur du travail non commité.
 - Pas de réécriture d'historique et pas de push sans accord écrit.
 - Pas de `--no-verify` pour contourner le hook.
+
+## 6. Commits, labels, issues et PR
+
+- Commits en français, un sujet par commit. Trailers en fin de message : `Co-Authored-By: <modèle> <noreply@anthropic.com>` puis `Claude-Session: <lien de session>`.
+- Labels : `labels.md`. Issues : `gabarit-issue.md`. Pull requests : `gabarit-pr.md`.
+- Contrôle du plan et régénération du registre : `controle-plan.md`.
+- Aucune issue ni label n'est créé sur GitHub sans accord écrit ; `check_plan.py --gh` ne fait qu'afficher les commandes.

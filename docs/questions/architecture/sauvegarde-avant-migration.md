@@ -7,4 +7,4 @@
   - A. Sauvegarde chiffrée par l'opérateur avant chaque déploiement, stockée hors dépôt, restauration testée sur base jetable chaque trimestre (recommandation).
   - B. Sauvegarde automatique déclenchée par le job de déploiement : meilleure traçabilité, à mettre en place.
 - **Recommandation vérifiée** : option A pour commencer. Vérification : le runbook de T-028 contient les étapes ; la révision de production reste à relever par l'opérateur (lecture seule).
-- **État** : En attente de réponse (opérateur et lieu de stockage à désigner)
+- **État** : Appliquée provisoirement : option A (recommandation vérifiée, mise en œuvre dans docs/operations/deploiement.md). Lieu de stockage des sauvegardes et personne chargée de tester la restauration : à désigner par l'opérateur. Révision de production : à relever par l'opérateur (lecture seule).

@@ -1,6 +1,6 @@
 # T-028 : Sortir migrations et seeds du démarrage, avec runbook de sauvegarde et de retour arrière
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : ci · **Type** : refactor
+- **Statut** : À vérifier · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : ci · **Type** : refactor
 - **Branche suggérée** : `fix/T-028-migrations-job` · **Base de test** : `zylo_t028_test` · **Ports** : back 3128
 - **Dépendances** : aucune
 - **Décisions requises** : `architecture/migrations-au-demarrage.md` (appliquée), `architecture/sauvegarde-avant-migration.md` (en attente)
@@ -47,3 +47,9 @@ Aujourd'hui le `CMD` exécute `alembic upgrade head` puis `uvicorn` à chaque d�
 
 ## Parallélisable avec
 T-012 à T-015 (séquencer avec T-015 et T-051 sur `app/main.py`).
+
+## Réalisation (branche `chore/T-028-T-051-migrations-conteneur`, statut À vérifier)
+- `CMD` du `Dockerfile` : uvicorn seul. `on_startup` ne seed, ne backfill, ne migre plus ; il vérifie seulement la révision (`app/core/migrations.py`).
+- `app/cli.py` : `verifier-revision`, `migrer` (garde destructive : confirmation + fichier de sauvegarde), `seed`, `backfill` (rôle owner seulement).
+- Documentation : `docs/operations/migration.md`, `deploiement.md`, `retour-arriere.md`.
+- Non fait ici : runbook de production (révision à renseigner par l'opérateur), tests de `downgrade -1` sur base jetable pour chaque migration des vagues 1 et 2, réécriture de `7ffb9473d45e` (seulement commentée).

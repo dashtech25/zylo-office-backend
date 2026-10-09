@@ -11,20 +11,12 @@ from app.core.errors import register_exception_handlers
 from app.core.logging import setup_logging
 from app.core.middleware import RequestIdMiddleware, TimingMiddleware
 from app.core.securite_http import EnTetesSecuriteMiddleware, options_documentation
-from app.audit.seed import seed_known_permissions as seed_audit_permissions
-from app.core.database import AsyncSessionLocal
-from app.identity.seed import seed_known_permissions as seed_identity_permissions
-from app.identity.service import backfill_owner_default_permissions
-from app.modules.zylo_liquid.seed import seed_known_permissions
+from app.core.migrations import verifie_revision_a_jour
 from app.modules.zylo_liquid.telemetry_sync import structural_sweep_loop, sync_loop as holykell_sync_loop
-from app.modules.zylo_tanker.seed import seed_known_permissions as seed_zylo_tanker_permissions
-from app.modules_registry.seed import seed_known_modules
 from app.modules.zylo_liquid.roles_seed import seed_default_roles as seed_roles_zylo_liquid
 from app.modules.zylo_tanker.roles_seed import seed_default_roles as seed_roles_zylo_tanker
 from app.modules_registry.service import enregistre_hook_activation
-from app.modules_registry.service import backfill_active_module_permissions_for_owners
 from app.notifications.service import handle_alert_created
-from app.rbac.seed import seed_known_permissions as seed_rbac_permissions
 from app.shared.events import subscribe
 
 setup_logging()
@@ -101,25 +93,12 @@ subscribe("AlertCreated", handle_alert_created)
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    await seed_known_modules()
-    await seed_rbac_permissions()
-    await seed_identity_permissions()
-    await seed_audit_permissions()
-    await seed_known_permissions()
-    await seed_zylo_tanker_permissions()
-    # Répare les organisations créées avant l'ajout d'une entrée à
-    # OWNER_DEFAULT_PERMISSIONS (ex. ROLE_MANAGE/GRANT_MANAGE/AUDIT_LOG_VIEW) —
-    # idempotent, sans effet une fois toutes les organisations à jour.
-    async with AsyncSessionLocal() as db:
-        await backfill_owner_default_permissions(db)
-    # Même principe, côté permissions de module : répare les organisations
-    # dont un module était déjà actif avant l'ajout de nouvelles permissions
-    # à ce module (ex. couche déclarative/commerciale/rapprochement ajoutée
-    # à zylo_liquid après coup, processus-double-sources-verite Phase 8) —
-    # sans quoi un owner déjà actif ne reçoit jamais les permissions
-    # ajoutées après son activation initiale du module.
-    async with AsyncSessionLocal() as db:
-        await backfill_active_module_permissions_for_owners(db)
+    # T-028 : le démarrage ne migre pas, ne seed pas et ne rejoue aucun backfill.
+    # Migrations : `python -m app.cli migrer` ; seeds et backfills : `python -m
+    # app.cli seed` puis `python -m app.cli backfill`, une fois par déploiement
+    # (docs/operations/deploiement.md). Ici, seule une vérification en lecture
+    # seule : une base non à la tête fait refuser le démarrage avec un message clair.
+    await verifie_revision_a_jour()
 
     # Refonte alertes Étape 2 (décision D1) : la boucle de sondage Holykell
     # tourne dans ce process, plus jamais dépendante d'un script externe.

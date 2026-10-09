@@ -1,6 +1,6 @@
 # T-036 : Contrats import-linter complets et découplage du socle
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : socle · **Type** : refactor
+- **Statut** : Terminée · **Priorité** : P1 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : socle · **Type** : refactor
 - **Branche suggérée** : `refactor/T-036-contrats` · **Base de test** : `zylo_t036_test` · **Ports** : back 3136
 - **Dépendances** : T-005, T-010
 - **Décisions requises** : `architecture/contrats-importlinter.md` (appliquée)
@@ -43,7 +43,7 @@ T-010 (dépendances d'identité stabilisées), T-005 (base). Bloque T-018 : le r
 Moyen : déplacer des dépendances FastAPI peut casser des injections. Retour arrière : contrats repassés en avertissement par configuration.
 
 ## Livrable documentaire
-- `docs/architecture/import-contracts.md` (créé, contrats et exceptions).
+- `docs/architecture/modules/` (créé 2026-10-09) : `matrice-dependances.md`, `capacites-proprietaires.md`, `files-usage-zylo-liquid.md`, `exceptions-importlinter.md` (contrats, exceptions datées, violations du snapshot wip).
 
 ## Parallélisable avec
 T-035a à T-035e (fichiers distincts ; T-035a touche `zylo_liquid`, pas le socle). Attention à `rbac/service.py` avec T-018 et T-019.

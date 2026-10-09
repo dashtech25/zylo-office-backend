@@ -22,6 +22,16 @@ class Role(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     code: Mapped[str] = mapped_column(String(100), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
 
+    # T-018 : rattachement du rôle à UN module. null = rôle transverse du socle
+    # (ex. `owner`, rôles personnalisés existants). Non null = rôle de module :
+    # il ne peut contenir que les permissions de son module ou du socle partagé
+    # (voir rbac/module_policy.py). Un seul mécanisme : aucune portée module
+    # n'est ajoutée sur userRole. Le rattachement des rôles déjà existants se
+    # fait par backfill explicite (rbac/module_backfill.py), jamais au démarrage.
+    moduleCode: Mapped[str | None] = mapped_column(
+        String(100), ForeignKey("module.code"), nullable=True, index=True
+    )
+
 
 class Permission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "permission"

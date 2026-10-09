@@ -45,3 +45,7 @@ Faible si l'on corrige les tests. Élevé si l'on modifie l'API sans décision. 
 
 ## Parallélisable avec
 T-007, T-008, T-011 à T-015 (pas de fichier commun hors tests zylo_liquid).
+
+## Statut au lot 2 (2026-10-09) : À vérifier
+- Les 21 tests des groupes A et B passent après fusion (`pytest tests/test_zylo_liquid_*` : 42 verts sur les six fichiers touchés, suite complète : aucun échec sur ces tests).
+- Critère « aucune ligne `assert` retirée » non satisfait au sens strict : des assertions sont réécrites pour le contrat multi-lignes (rattachement porté par la ligne, `purchase_order_line_received`), et une valeur attendue change (`open` devient `partially_received`, conforme au modèle). Chaque réécriture garde le même contrôle sur le nouveau contrat ; aucune n'est supprimée sans équivalent. Décision de revue à confirmer.

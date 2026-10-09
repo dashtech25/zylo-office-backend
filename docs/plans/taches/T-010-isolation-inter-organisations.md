@@ -55,3 +55,9 @@ Dépendances initiales retirées par décision du coordinateur : T-005 (base dé
 
 ## Parallélisable avec
 T-006, T-007, T-011 à T-016 (fichiers distincts ; `rbac/` n'est touché par aucune de ces tâches).
+
+## Statut au lot 2 (2026-10-09) : À vérifier
+- Critères 1 et 2 satisfaits : 13 cas paramétrés sur les routes par chemin, en-tête étranger refusé (`tests/test_isolation_organisations.py`).
+- Critère 3 non satisfait : « aucune route d'organisation sans dépendance d'appartenance » relève du contrôle de T-023, pas encore réalisé.
+- Défaut trouvé après fusion et corrigé (commit `fix(gps)`) : le webhook Traccar `POST /gps/ingest`, sans utilisateur connecté, était refusé. Le webhook lit désormais l'en-tête d'organisation, le secret de passerelle reste la garde.
+- Contrat : organisation étrangère répond 404 `organization_not_found` (option A), ce qui modifie des tests de T-014 et du poste pompiste (mis à jour).

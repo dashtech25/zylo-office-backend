@@ -1,6 +1,6 @@
 # T-012 : Limitation de débit et verrouillage progressif de l'authentification
 
-- **Statut** : À vérifier · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
+- **Statut** : Terminée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
 - **Branche suggérée** : `feat/T-012-rate-limit-auth` · **Base de test** : `zylo_t012_test` · **Ports** : back 3112
 - **Dépendances** : T-002, T-005
 - **Décisions requises** : `securite/limitation-authentification.md` (recommandation appliquée)

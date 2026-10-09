@@ -4,10 +4,11 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import RefreshToken
+from app.auth.politique_mot_de_passe import MESSAGE_IDENTIQUE, PolitiqueMotDePasseErreur, erreur_api, verifie_mot_de_passe
 from app.auth.schemas import LoginRequest, RegisterRequest
 from app.core.config import settings
 from app.core.errors import AppError
@@ -22,8 +23,11 @@ def _hash_token(token: str) -> str:
 async def register_user(db: AsyncSession, data: RegisterRequest) -> User:
     from app.identity.service import build_user, check_email_available
 
-    await check_email_available(db, data.email)
-    user = build_user(email=data.email, full_name=data.fullName, hashed_password=hash_password(data.password))
+    # Intention (T-013) : l'e-mail est stocké en minuscules. L'index unique sur
+    # lower(email) empêche deux comptes qui ne diffèrent que par la casse.
+    email = data.email.lower()
+    await check_email_available(db, email)
+    user = build_user(email=email, full_name=data.fullName, hashed_password=hash_password(data.password))
     db.add(user)
     await db.flush()
     await db.commit()
@@ -31,14 +35,42 @@ async def register_user(db: AsyncSession, data: RegisterRequest) -> User:
     return user
 
 
-async def change_password(db: AsyncSession, user: User, current_password: str, new_password: str) -> User:
+async def revoque_sessions(db: AsyncSession, user_id, *, sauf_refresh_token: str | None = None) -> None:
+    """Révoque les refresh tokens ouverts de l'utilisateur, sauf celui fourni.
+    Ne commite pas : l'appelant reste maître de la transaction.
+
+    Limite connue : un jeton d'accès déjà émis reste valable jusqu'à son
+    expiration (JWT_ACCESS_TOKEN_EXPIRE_MINUTES), car il est sans état."""
+    maintenant = datetime.now(timezone.utc)
+    requete = update(RefreshToken).where(RefreshToken.userId == user_id, RefreshToken.revokedAt.is_(None))
+    if sauf_refresh_token is not None:
+        requete = requete.where(RefreshToken.tokenHash != _hash_token(sauf_refresh_token))
+    await db.execute(requete.values(revokedAt=maintenant))
+
+
+async def change_password(
+    db: AsyncSession, user: User, current_password: str, new_password: str, refresh_token: str | None = None
+) -> User:
     """Vérifie le mot de passe actuel (temporaire ou non) avant de le
     remplacer — jamais un changement sans preuve de connaissance de
-    l'ancien, même pour lever `mustChangePassword`."""
+    l'ancien, même pour lever `mustChangePassword`. Applique la politique
+    commune, puis révoque les sessions (le refresh_token fourni reste ouvert)."""
     if not verify_password(current_password, user.hashedPassword):
         raise AppError(code="invalid_credentials", message="Mot de passe actuel incorrect.", status_code=401)
+    try:
+        verifie_mot_de_passe(new_password, email=user.email, nom_complet=user.fullName)
+    except PolitiqueMotDePasseErreur as exc:
+        raise erreur_api(exc) from exc
+    if verify_password(new_password, user.hashedPassword):
+        raise AppError(
+            code="password_policy_violation",
+            message=MESSAGE_IDENTIQUE,
+            status_code=422,
+            details=[{"message": MESSAGE_IDENTIQUE}],
+        )
     user.hashedPassword = hash_password(new_password)
     user.mustChangePassword = False
+    await revoque_sessions(db, user.id, sauf_refresh_token=refresh_token)
     await db.commit()
     await db.refresh(user)
     return user
@@ -56,7 +88,9 @@ def _hachage_factice() -> str:
 
 
 async def authenticate_user(db: AsyncSession, data: LoginRequest) -> User:
-    result = await db.execute(select(User).where(User.email == data.email))
+    # Comparaison insensible à la casse : les comptes anciens peuvent avoir une
+    # adresse saisie avec des majuscules (voir register_user).
+    result = await db.execute(select(User).where(func.lower(User.email) == data.email.lower()))
     user = result.scalar_one_or_none()
     if user is None:
         verify_password(data.password, _hachage_factice())

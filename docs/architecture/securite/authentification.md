@@ -56,6 +56,12 @@ Aucun mot de passe, aucun email. Le journal ne remplace pas une rétention de s�
 - **Non vérifié ici** : le comportement derrière le proxy de production (`TRUSTED_PROXIES` à renseigner), et le test Playwright sur build prod (T-012, critère « connexion refusée avec message générique ») : le frontend n'est pas modifié par cette tâche.
 - **Multi-instance** : les compteurs sont dans PostgreSQL, donc partagés entre processus. Un verrou n'est pas perdu au redémarrage.
 
+## 6 bis. Mot de passe et sessions (T-013)
+
+- Politique commune à l'inscription, à l'activation, au changement et au personnel : `docs/architecture/securite/politique-mot-de-passe.md`.
+- `mustChangePassword` est appliqué côté backend : tant qu'il est vrai, seuls `GET /auth/me` et `POST /auth/change-password` répondent (sinon 403 `password_change_required`).
+- Le changement révoque les refresh tokens des autres sessions (`refreshToken` optionnel dans le corps pour garder la session courante).
+
 ## 7. Retour arrière
 
 `AUTH_RATE_LIMIT_ENABLED=false` désactive les contrôles sans modifier le code. Les échecs continuent d'être enregistrés pour que la réactivation prenne effet immédiatement.

@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.auth.politique_mot_de_passe import verifie_mot_de_passe
+
 
 class UpdateUserProfileRequest(BaseModel):
     """PATCH /users/{user_id} — pour l'instant, seule la photo de profil est
@@ -84,7 +86,15 @@ class ReissuedInvitationResponse(BaseModel):
 
 class ActivateAccountRequest(BaseModel):
     token: str = Field(min_length=20, max_length=200)
-    password: str = Field(min_length=8, max_length=255)
+    # Règle commune (app/auth/politique_mot_de_passe.py). Le nom et l'e-mail du
+    # titulaire sont vérifiés au service, après résolution du jeton.
+    password: str = Field(max_length=255)
+
+    @field_validator("password")
+    @classmethod
+    def _politique_mot_de_passe(cls, valeur: str) -> str:
+        verifie_mot_de_passe(valeur)
+        return valeur
 
 
 class AccountActivatedResponse(BaseModel):

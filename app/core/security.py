@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.errors import AppError
 from app.identity.models import User
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -62,10 +63,7 @@ def decode_token(token: str, expected_type: str) -> uuid.UUID:
     return uuid.UUID(payload["sub"])
 
 
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-    db: AsyncSession = Depends(get_db),
-) -> User:
+async def _utilisateur_actif_du_jeton(credentials: HTTPAuthorizationCredentials | None, db: AsyncSession) -> User:
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentification requise.")
     user_id = decode_token(credentials.credentials, expected_type="access")
@@ -74,3 +72,30 @@ async def get_current_user(
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Utilisateur introuvable ou inactif.")
     return user
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Utilisateur authentifié, sans restriction. Intention (T-013) : tant que
+    `mustChangePassword` est vrai (mot de passe temporaire), le jeton ne donne
+    accès à rien d'autre que le profil et le changement de mot de passe. La
+    restriction est appliquée ici, côté backend, et non dans l'interface seule."""
+    user = await _utilisateur_actif_du_jeton(credentials, db)
+    if user.mustChangePassword:
+        raise AppError(
+            code="password_change_required",
+            message="Un changement de mot de passe est requis avant d'accéder à l'application.",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+    return user
+
+
+async def get_current_user_pour_changement_mot_de_passe(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Réservée à GET /auth/me et POST /auth/change-password : seuls endpoints
+    accessibles tant que `mustChangePassword` est vrai. Ne pas l'utiliser ailleurs."""
+    return await _utilisateur_actif_du_jeton(credentials, db)

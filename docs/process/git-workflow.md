@@ -32,7 +32,7 @@ Sauvegarde préalable (hors dépôts, dossier `office/sauvegarde-T004-2026-10-08
 - Un worktree par tâche et par dépôt, dans `office/worktrees/T-XXX-<back|front>` (dossier frère des dépôts, hors dépôt).
 - Création et suppression : `scripts/dev/env_tache.sh creer|supprimer <NNN> <back|front>` (dépôt backend). Le préflight vérifie tout avant de créer ; la base n'est créée que si le rôle a CREATEDB (variable `ZYLO_PG_ADMIN_URL`).
 - Fichiers d'environnement du worktree : `.env` (backend, lu par `app/core/config.py`) et `.env.local` (frontend), tous deux ignorés par git.
-- Ports : table unique dans docs/process/ports.md (créé par T-003, absent avant T-003) (T-003). Worktree T-NNN : back 3100+n, front dev 3200+n, front prod 3300+n, avec n = NNN.
+- Ports : table unique des ports (créée par T-003 ; absente tant que T-003 n'est pas fusionnée). Worktree T-NNN : back 3100+n, front dev 3200+n, front prod 3300+n, avec n = NNN.
 - Bases de test : `zylo_t<NNN>[a-z]?_test` uniquement. Les bases `zylo`, `zylo_office`, `zylo_dev`, `zylo_liquid`, `zylo_recette` ne sont jamais utilisées par un test.
 
 ## 5. Interdits

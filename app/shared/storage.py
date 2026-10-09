@@ -21,6 +21,7 @@ import hashlib
 import hmac
 import io
 import os
+import re
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -56,6 +57,26 @@ class StorageBackend(ABC):
 
 def _sign(payload: str, secret: str) -> str:
     return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+# Préfixe d'organisation des références : `<org>_<hex>.<ext>` (local) et
+# `<org>/<hex>.<ext>` (S3). Les deux backends écrivent l'organisation en tête.
+_PREFIXE_ORGANISATION = re.compile(r"^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})[_/]")
+
+
+def organisation_de_la_reference(storage_reference: str) -> uuid.UUID | None:
+    """Organisation qui a écrit une référence de stockage, ou None si le préfixe est absent.
+
+    Sert à refuser à l'écriture (ex. photo de profil) une référence provenant d'une
+    organisation dont l'acteur n'est pas membre. Ne prouve pas l'auteur exact du
+    fichier : le stockage n'enregistre pas l'utilisateur uploadeur (limite notée
+    dans docs/architecture/securite/fichiers.md)."""
+    correspondance = _PREFIXE_ORGANISATION.match(storage_reference or "")
+    if correspondance is None:
+        return None
+    try:
+        return uuid.UUID(correspondance.group(1))
+    except ValueError:
+        return None
 
 
 class LocalFilesystemStorageBackend(StorageBackend):

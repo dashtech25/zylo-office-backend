@@ -12,7 +12,7 @@ import io
 import re
 
 from docx import Document as DocxDocument
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from openpyxl import Workbook
 from openpyxl.styles import Font
@@ -25,11 +25,22 @@ export_router = APIRouter()
 
 _UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
 
+# T-014 (BCK-012) : bornes d'export, même limite que l'import (miroir en lecture).
+MAX_EXPORT_ROWS = 10_000
+MAX_EXPORT_COLUMNS = 100
+
 
 class ExportTableRequest(BaseModel):
     filename: str = Field(min_length=1, max_length=100, description="Sans extension — ajoutée par l'endpoint selon le format.")
     headers: list[str] = Field(min_length=1)
     rows: list[list[str]] = Field(default_factory=list)
+
+
+def _verifier_bornes(data: "ExportTableRequest") -> None:
+    if len(data.rows) > MAX_EXPORT_ROWS or len(data.headers) > MAX_EXPORT_COLUMNS:
+        raise HTTPException(status_code=413, detail="Export au-delà de 10 000 lignes ou de 100 colonnes.")
+    if any(len(row) > MAX_EXPORT_COLUMNS for row in data.rows):
+        raise HTTPException(status_code=413, detail="Export au-delà de 100 colonnes.")
 
 
 def _safe_filename(name: str, extension: str) -> str:
@@ -39,6 +50,7 @@ def _safe_filename(name: str, extension: str) -> str:
 
 @export_router.post("/xlsx", dependencies=[Depends(get_current_user)])
 async def export_table_xlsx(data: ExportTableRequest) -> Response:
+    _verifier_bornes(data)
     workbook = Workbook()
     sheet = workbook.active
     sheet.append(data.headers)
@@ -64,6 +76,7 @@ async def export_table_xlsx(data: ExportTableRequest) -> Response:
 
 @export_router.post("/docx", dependencies=[Depends(get_current_user)])
 async def export_table_docx(data: ExportTableRequest) -> Response:
+    _verifier_bornes(data)
     # Même convention que document_generation.py (bons de commande) — table
     # "Table Grid", jamais un deuxième style de tableau DOCX réinventé.
     doc = DocxDocument()

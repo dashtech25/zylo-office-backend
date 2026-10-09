@@ -117,11 +117,16 @@ async def test_fichier_trop_volumineux_est_refuse_sans_lecture_complete(
 async def test_upload_dans_une_organisation_etrangere_est_refuse(
     client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict
 ):
-    """Un utilisateur ne peut pas écrire dans le préfixe d'une organisation dont il n'est pas membre."""
+    """Un utilisateur ne peut pas écrire dans le préfixe d'une organisation dont il n'est pas membre.
+
+    T-010 (option A) : la dépendance d'organisation refuse en premier, par une réponse
+    404 uniforme `organization_not_found` ; le contrôle d'appartenance de l'upload reste
+    en défense en profondeur."""
     autre = await _creer_utilisateur(client)
     autre_org = await _creer_organisation(client, autre)
     res = await _upload(client, _headers(registered_user, autre_org), "x.pdf", PDF_OK, "application/pdf")
-    assert res.status_code == 403, res.text
+    assert res.status_code == 404, res.text
+    assert res.json()["error"]["code"] == "organization_not_found"
 
 
 # ---- Téléchargement : en-têtes et type forcé ----

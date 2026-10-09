@@ -1,6 +1,6 @@
 # T-042 : Mise en place minimale de Vitest, sans Storybook, pour la logique pure
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 0 · **Taille** : S · **Dépôt(s)** : frontend · **Domaine** : frontend · **Type** : test
+- **Statut** : Terminée · **Priorité** : P1 · **Vague** : 0 · **Taille** : S · **Dépôt(s)** : frontend · **Domaine** : frontend · **Type** : test
 - **Branche suggérée** : `test/T-042-vitest-minimal` · **Base de test** : aucune · **Ports** : aucun
 - **Dépendances** : T-041
 - **Décisions requises** : `tests/couche-tests-unitaires.md` (appliquée, décision du coordinateur)

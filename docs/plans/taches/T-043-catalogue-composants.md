@@ -1,6 +1,6 @@
 # T-043 : Catalogue de composants dans docs/ (un fichier par composant partagé)
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 0 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : docs · **Type** : docs
+- **Statut** : Terminée · **Priorité** : P1 · **Vague** : 0 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : docs · **Type** : docs
 - **Branche suggérée** : `docs/T-043-catalogue-composants` · **Base de test** : aucune · **Ports** : aucun
 - **Dépendances** : T-041
 - **Décisions requises** : aucune

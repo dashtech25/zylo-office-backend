@@ -152,6 +152,11 @@ async def test_station_financial_denied_without_permission(client: AsyncClient, 
         ).scalar_one()
         me = await client.get("/api/v1/auth/me", headers=attendant_headers)
         user_id = me.json()["id"]
+        # T-010 : un rôle ne vaut accès qu'à un membre de l'organisation ; sans
+        # appartenance, la réponse serait 404 et non le 403 testé ici.
+        from app.identity.models import OrganizationUser
+
+        db.add(OrganizationUser(organizationId=uuid_module.UUID(zylo_liquid_organization["id"]), userId=uuid_module.UUID(user_id)))
         db.add(UserRole(userId=uuid_module.UUID(user_id), organizationId=uuid_module.UUID(zylo_liquid_organization["id"]), roleId=role.id, resourceType="station", resourceId=uuid_module.UUID(station_id)))
         await db.commit()
 

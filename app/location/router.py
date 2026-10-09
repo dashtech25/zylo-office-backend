@@ -419,7 +419,7 @@ async def regenerate_gps_ingest_credential(
 async def ingest_truck_position(
     data: IngestTruckPositionRequest,
     x_gps_ingest_secret: str = Header(...),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    x_organization_id: uuid.UUID = Header(..., alias="X-Organization-Id"),
     db: AsyncSession = Depends(get_db),
 ) -> TruckPositionPingResponse:
     """Webhook appelé par Traccar (passerelle protocole GPS) — jamais un
@@ -428,7 +428,12 @@ async def ingest_truck_position(
     ni zylo_tanker ni la variante `_any`) : un seul webhook sert les deux
     types de boîtier, Traccar ne sait pas la différence et n'a pas à la
     savoir — protégé uniquement par le secret d'ingestion de l'organisation
-    (`X-Gps-Ingest-Secret`), vérifié dans `service.ingest_truck_position`."""
+    (`X-Gps-Ingest-Secret`), vérifié dans `service.ingest_truck_position`.
+
+    T-010 : on lit l'en-tête d'organisation sans `get_current_organization_id`,
+    qui exige un utilisateur authentifié et son appartenance. Le secret,
+    lié à cette organisation précisément, reste l'unique garde."""
+    organization_id = x_organization_id
     return await service.ingest_truck_position(db, organization_id, x_gps_ingest_secret, data)
 
 

@@ -7,4 +7,4 @@
   - A. Pas de permission plateforme : catalogue seedé, administration par commande explicite (recommandation).
   - B. Permission `identity.platform.manage` attribuée par seed à un compte nommé, jamais par API.
 - **Recommandation vérifiée** : option A. Vérification : la phrase « sans concept de super-admin plateforme » est présente dans `app/identity/service.py` ; la création de plan par API est retirée par T-019.
-- **État** : En attente de réponse
+- **État** : Option A appliquée provisoirement le 2026-10-09 (T-019 : `POST /billing/plans` retiré) ; en attente de réponse du client

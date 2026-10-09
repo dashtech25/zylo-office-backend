@@ -46,3 +46,8 @@ Une commande crée l'environnement d'une tâche : venv, base PostgreSQL dédiée
 
 ## Parallélisable avec
 T-001, T-002, T-003 (séquencé avec T-002 sur `conftest.py`).
+
+## Réalisation (lot 5, 2026-10-09)
+- Fusionnée dans `remy` (`test/T-005-garde-base`). La garde refuse les bases hors motif `zylo_t<NNN>[a-z]?_test` et exige `TEST_DATABASE_URL`. Tests de garde : verts.
+- Écarts avec la fiche : (1) la fiche demande une liste autorisée d'hôte et de port, non implémentée (seul le nom de base est contrôlé) ; (2) `create_task_db.sh` remplacé par `scripts/dev/env_tache.sh` ; (3) le contrôle côté `e2e/global-setup.ts` n'est pas vérifié (Playwright suspendu).
+- Statut : reste À vérifier pour ces écarts.

@@ -44,3 +44,6 @@ Aucun pour le code. Risque de perte d'information : déplacer sans réécrire, p
 
 ## Parallélisable avec
 T-006 à T-015 (aucun code touché).
+
+## Fusion (lot 5, 2026-10-09)
+- Fusionnée dans `remy` (`docs/T-017-T-040-docs-agents`). Liens internes vérifiés par `scripts/docs/verifier_liens.sh` : 0 cassé. Deux fichiers parasites à la racine supprimés (`test.txt`, `teste.html`).

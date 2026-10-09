@@ -1,6 +1,6 @@
 # T-004b : Tri du travail en cours restant (lots non bloquants)
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 0 · **Taille** : L · **Dépôt(s)** : backend et frontend · **Domaine** : process · **Type** : chore
+- **Statut** : À vérifier (lots 1 et 2 fusionnés dans `remy` le 2026-10-09 ; lots restants non fusionnés) · **Priorité** : P1 · **Vague** : 0 · **Taille** : L · **Dépôt(s)** : backend et frontend · **Domaine** : process · **Type** : chore
 - **Branche suggérée** : `wip/<date>-<lot>` par lot · **Base de test** : aucune · **Ports** : aucun
 - **Dépendances** : T-004
 - **Décisions requises** : aucune
@@ -36,3 +36,8 @@ Risque de conflit avec les tâches de vague 1 : traité par la règle des fichie
 
 ## Parallélisable avec
 Les tâches de vague 0 et 1, sous réserve de la règle des fichiers chauds.
+
+## Réalisation (lot 5, 2026-10-09)
+- Fusionnés dans `remy` : `docs/T-004b-tri` (tri du travail en cours), `feat/T-004b-lot-2` (Web Push, backend) et `feat/T-004b-lot-1` (composants graphiques, frontend).
+- Revue du lot 2 : le handler `AlertCreated` était synchrone alors que `publish` l'attend ; corrigé (`fix(notifications)`, test ajouté). Écart restant : l'événement est publié avant le commit de `upsert_active_alert` (consigné dans le code).
+- Non fusionnés : les autres lots du tri (`wip/…`). Statut à réviser quand ils le seront.

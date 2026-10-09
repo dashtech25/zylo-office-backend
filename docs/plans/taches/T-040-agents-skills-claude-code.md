@@ -44,3 +44,6 @@ Faible pour le code. Risque : règle perdue ; contrôlé par le tableau de desti
 
 ## Parallélisable avec
 Rien de bloquant ; coordonner avec T-038b sur les fichiers `.github`.
+
+## Fusion (lot 5, 2026-10-09)
+- Fusionnée dans `remy` avec T-017 (`docs/T-017-T-040-docs-agents`). Statut inchangé.

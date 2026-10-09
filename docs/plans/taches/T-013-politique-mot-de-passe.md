@@ -45,3 +45,9 @@ Moyen : l'index unique échoue en présence de doublons (contrôle préalable ob
 
 ## Parallélisable avec
 T-011, T-014, T-015 (après T-012 sur `app/auth/`).
+
+## Réalisation (lot 5, 2026-10-09)
+- Fusionnée dans `remy` (backend, `feat/T-013-politique-mot-de-passe`) et dans le frontend `remy` (validation partagée, reprise par l'écran d'activation de T-024).
+- Critères : (1) une constante de longueur, backend et frontend : tenu ; (3) aucun message n'annonce un envoi : tenu ; (4) index unique `lower(email)` : tenu (migration `c5a1d9e3f7b2`, fusionnée avec `f3a4b5c6d7e8` par `7c2e9a1f4b8d`).
+- (2) Aucun endpoint public ne révèle l'existence d'un e-mail : NON tenu. `POST /auth/register` répond 409 `email_already_used`. Décision ouverte, consignée dans `docs/questions/securite/politique-mot-de-passe.md`.
+- Statut : À vérifier.

@@ -1,6 +1,6 @@
 # T-024 : Frontend : création d'utilisateurs par l'administrateur d'organisation
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : iam · **Type** : feature
+- **Statut** : À vérifier (fusionnée dans le frontend `remy` le 2026-10-09 ; vérification à deux comptes non faite, Playwright suspendu) · **Priorité** : P1 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : iam · **Type** : feature
 - **Branche suggérée** : `feat/T-024-front-creation-utilisateurs` · **Base de test** : `zylo_t024_test` · **Ports** : back 3124, front dev 3224, front prod 3324
 - **Dépendances** : T-013, T-021, T-030
 - **Décisions requises** : aucune (dépend de la validation client de T-021)
@@ -47,3 +47,7 @@ Moyen : la page `users` existe déjà (230 lignes, ARC-013). Retour arrière : r
 
 ## Parallélisable avec
 T-022 et T-049 (backend) ; après T-030 sur `users/page.tsx`.
+
+## Réalisation (lot 5, 2026-10-09)
+- Fusionnée dans `remy` (frontend, `feat/T-024-T-025-ui-utilisateurs-modules`). Écran d'activation repris sur la politique de mot de passe commune (T-013) : 12 caractères, répétition refusée, messages du backend.
+- Critère « vérification à deux comptes » : non fait (manuel, Playwright suspendu). Critère « aucune donnée secrète » : le jeton reste dans le fragment d'URL, le mot de passe n'est pas stocké côté client.

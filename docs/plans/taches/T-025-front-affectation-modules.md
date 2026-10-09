@@ -1,6 +1,6 @@
 # T-025 : Frontend : affecter un utilisateur à un module et aligner la permission affichée
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : iam · **Type** : feature
+- **Statut** : À vérifier (fusionnée dans le frontend `remy` le 2026-10-09 ; vérification par la table des boutons non faite) · **Priorité** : P1 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : iam · **Type** : feature
 - **Branche suggérée** : `feat/T-025-front-affectation-modules` · **Base de test** : `zylo_t025_test` · **Ports** : back 3125, front dev 3225, front prod 3325
 - **Dépendances** : T-022, T-024, T-030
 - **Décisions requises** : aucune
@@ -44,3 +44,7 @@ Moyen : filtrer la navigation peut masquer des écrans pour les comptes existant
 
 ## Parallélisable avec
 T-023 (backend tests) ; après T-030.
+
+## Réalisation (lot 5, 2026-10-09)
+- Fusionnée dans `remy` avec T-024 (écrans d'accès par module, navigation filtrée zylo-liquid et zylo-tanker).
+- Non fait : vérification « aucun bouton sans permission réelle » par la table (manuel, Playwright suspendu).

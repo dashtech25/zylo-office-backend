@@ -56,3 +56,10 @@ T-020, T-023 (fichiers distincts) ; séquencer avec T-018 sur `rbac/service.py`.
 - Garde-fous : dernier propriétaire (409), compte supprimé (401). Non traités : deny sur propriétaire (la règle §5.4 et ses tests l'autorisent : à trancher), quota d'organisation (valeur client), dernier grant `ORGANIZATION_MANAGE`.
 - Suite complète (base zylo_t019_test, commit HEAD de fix/T-019-gardes-routes) : 519 passed, 2 failed. Les 2 échecs (tests/test_zylo_liquid_dev_seed.py) préexistent au commit de départ fc1f83e (MultipleResultsFound dans service.py:_measurement_height_at), hors périmètre.
 - Statut : À vérifier.
+
+## Fusion et contrôles (lot 5, 2026-10-09)
+- Fusionnée dans `remy` (`fix/T-019-gardes-routes`). Conflits résolus : `app/main.py` (hooks d'activation de `remy` conservés), `tests/route_inventory.py` (version T-019), `roles-par-module.md` (section 9 ajoutée), matrice et baseline régénérées et vérifiées par les tests.
+- Contrat import-linter « Location » : deux exceptions ajoutées pour les constantes de permission du routeur (même dépendance que le service).
+- Les trailers `Claude Haiku 5.5` des 3 commits non poussés de la branche ont été réécrits en `Claude Opus 5.5`.
+- Suite complète sur `remy` après fusion (base `zylo_t094_test`) : 596 réussis, 0 échec. Les 2 échecs de `test_zylo_liquid_dev_seed.py` signalés plus haut ne se reproduisent plus.
+- Statut inchangé : À vérifier (deny sur propriétaire non appliqué, quota et `ORGANIZATION_MANAGE` non traités).

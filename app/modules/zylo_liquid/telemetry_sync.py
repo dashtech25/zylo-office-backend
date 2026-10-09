@@ -44,6 +44,7 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.core.field_crypto import lire_champ
 from app.integrations.holykell import client as holykell_client
 from app.modules.zylo_liquid.models import (
     HolykellAccount,
@@ -71,8 +72,11 @@ async def sync_one_account(db, client: httpx.AsyncClient, base_url: str, account
     touchées (pour évaluation alertes/livraison par l'appelant)."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     try:
+        # T-027 : seul endroit où le mot de passe Holykell est déchiffré. Il ne
+        # sort jamais de cette fonction vers les journaux ni vers lastSyncError.
+        mot_de_passe = lire_champ(account.holykellPasswordChiffre, account.holykellPassword)
         access_token, tenant_id = await holykell_client.login(
-            client, base_url, account.holykellUsername, account.holykellPassword
+            client, base_url, account.holykellUsername, mot_de_passe
         )
         readings = await holykell_client.fetch_sensor_readings(client, base_url, access_token, tenant_id)
     except Exception as exc:

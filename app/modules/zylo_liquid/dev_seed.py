@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.field_crypto import chiffrer
 from app.modules.zylo_liquid import service
 from app.modules.zylo_liquid.models import (
     HolykellAccount,
@@ -127,7 +128,7 @@ async def seed_demo_network(
     holykell_account = HolykellAccount(
         organizationId=organization_id,
         holykellUsername="demo-account",
-        holykellPassword="demo-password-not-real",
+        holykellPasswordChiffre=chiffrer("demo-password-not-real"),  # T-027 : jamais en clair
         syncEnabled=True,
         lastSyncAt=_now(),
         lastSyncStatus="success",

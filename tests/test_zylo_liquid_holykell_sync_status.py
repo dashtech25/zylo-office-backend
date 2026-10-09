@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from httpx import AsyncClient
 
 from app.core.database import AsyncSessionLocal
+from app.core.field_crypto import chiffrer
 from app.modules.zylo_liquid.models import HolykellAccount
 
 
@@ -16,7 +17,7 @@ async def _create_holykell_account(organization_id: str, status: str = "success"
         account = HolykellAccount(
             organizationId=uuid.UUID(organization_id),
             holykellUsername="user-sync-test",
-            holykellPassword="secret",
+            holykellPasswordChiffre=chiffrer("secret"),
             lastSyncAt=datetime.now(timezone.utc).replace(tzinfo=None),
             lastSyncStatus=status,
             lastSyncError="Timeout h-smartlink.com" if status == "failed" else None,

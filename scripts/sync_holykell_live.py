@@ -42,6 +42,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 from sqlalchemy import select  # noqa: E402
 
 from app.core.database import AsyncSessionLocal  # noqa: E402
+from app.core.field_crypto import chiffrer  # noqa: E402
 from app.auth import models as _auth_models  # noqa: F401,E402
 from app.billing import models as _billing_models  # noqa: F401,E402
 from app.identity import models as _identity_models  # noqa: F401,E402
@@ -102,7 +103,7 @@ async def provision(db, holy_stations, ss_stations, ss_tanks_by_station, ss_poin
     holy_account = (await db.execute(select(HolykellAccount).where(HolykellAccount.organizationId == ORG_ID))).scalar_one_or_none()
     if holy_account is None:
         holy_account = HolykellAccount(
-            organizationId=ORG_ID, holykellUsername=HOLY_USERNAME, holykellPassword=HOLY_PASSWORD,
+            organizationId=ORG_ID, holykellUsername=HOLY_USERNAME, holykellPasswordChiffre=chiffrer(HOLY_PASSWORD),
             syncEnabled=True, lastSyncStatus="success", lastSyncAt=datetime.now(timezone.utc).replace(tzinfo=None),
         )
         db.add(holy_account)

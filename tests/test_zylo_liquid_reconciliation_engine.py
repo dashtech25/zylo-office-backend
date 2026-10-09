@@ -12,6 +12,7 @@ from httpx import AsyncClient
 
 from app.alerts.models import Alert
 from app.core.database import AsyncSessionLocal
+from app.core.field_crypto import chiffrer
 from app.modules.zylo_liquid.models import DeliveryDetected, HolykellDeviceRegistry, Tank, TankMeasurement, TankSensorMapping
 
 
@@ -126,7 +127,7 @@ async def test_manual_gauging_reconciliation_matched(client: AsyncClient, regist
     async with AsyncSessionLocal() as db:
         from app.modules.zylo_liquid.models import HolykellAccount
 
-        holykell_account = HolykellAccount(organizationId=uuid.UUID(zylo_liquid_organization["id"]), holykellUsername="u", holykellPassword="p")
+        holykell_account = HolykellAccount(organizationId=uuid.UUID(zylo_liquid_organization["id"]), holykellUsername="u", holykellPasswordChiffre=chiffrer("p"))
         db.add(holykell_account)
         await db.flush()
         registry = HolykellDeviceRegistry(

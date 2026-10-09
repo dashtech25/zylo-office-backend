@@ -18,6 +18,7 @@ from app.rbac.models import Role, RolePermission, UserRole
 from app.rbac.permissions import GRANT_MANAGE, ROLE_MANAGE
 from app.rbac.service import get_or_create_permission
 from app.shared.permissions import CURRENCY_MANAGE, CURRENCY_READ, EXCHANGE_RATE_MANAGE, EXCHANGE_RATE_READ, GEO_READ
+from app.shared.storage import organisation_de_la_reference
 
 # Permissions d'administration du socle accordées automatiquement au rôle
 # owner à la création d'une organisation — jamais les permissions d'un futur
@@ -204,6 +205,25 @@ async def update_user_profile(
             raise AppError(
                 code="user_profile_forbidden",
                 message="Vous ne pouvez modifier que votre propre profil, ou celui d'un membre de votre organisation si vous en êtes propriétaire.",
+                status_code=403,
+            )
+
+    # T-014 (IAM-019) : une photo ne peut référencer qu'un fichier écrit par une
+    # organisation dont l'acteur est membre. Sans ce contrôle, une référence d'une
+    # autre organisation (obtenue par énumération ou fuite) serait acceptée.
+    if data.photoStorageReference is not None:
+        organisation = organisation_de_la_reference(data.photoStorageReference)
+        membre = None
+        if organisation is not None:
+            membre = await db.scalar(
+                select(OrganizationUser.id).where(
+                    OrganizationUser.organizationId == organisation, OrganizationUser.userId == actor.id
+                )
+            )
+        if membre is None:
+            raise AppError(
+                code="photo_reference_forbidden",
+                message="Cette photo n'appartient pas à une organisation dont vous êtes membre.",
                 status_code=403,
             )
 

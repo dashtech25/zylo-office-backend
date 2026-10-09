@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,7 +20,13 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     __tablename__ = "user"
-    __table_args__ = {"comment": "Utilisateur du système — identité unique, valable pour toutes les organisations et tous les modules."}
+    # Intention (T-013) : unicité de l'e-mail sans tenir compte de la casse.
+    # L'e-mail est normalisé en minuscules à l'écriture ; cet index bloque aussi
+    # les comptes anciens qui ne différeraient que par la casse.
+    __table_args__ = (
+        Index("uq_user_email_lower", text("lower(email)"), unique=True),
+        {"comment": "Utilisateur du système — identité unique, valable pour toutes les organisations et tous les modules."},
+    )
 
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
     hashedPassword: Mapped[str] = mapped_column(String(255), nullable=False)

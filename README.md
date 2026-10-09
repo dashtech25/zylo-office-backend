@@ -37,6 +37,11 @@ cp .env.example .env   # puis renseigner DATABASE_URL et JWT_SECRET réels
 Le serveur écoute sur `http://localhost:3002`. Documentation interactive :
 `http://localhost:3002/docs`.
 
+Les ports (checkout principal, worktrees de tâche, interdits) sont définis
+dans une seule table : `docs/process/ports.md`. Le frontend dev écoute sur
+3001 et l'autorise par défaut dans CORS ; un autre port se déclare dans
+`CORS_ORIGINS` (`.env`).
+
 ### Base de données locale
 
 ```bash

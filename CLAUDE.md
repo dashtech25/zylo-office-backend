@@ -184,7 +184,7 @@ avec vérification après chaque changement significatif :
 ```bash
 .venv/bin/pytest                      # tests
 .venv/bin/alembic upgrade head        # migrations à jour
-.venv/bin/uvicorn app.main:app --reload --port 3007   # démarrage réel, pas juste une lecture de code
+.venv/bin/uvicorn app.main:app --reload --port 3002   # démarrage réel (port du checkout principal, table dans docs/process/ports.md)
 ```
 
 Ne pas tout refactoriser en un seul changement énorme. Avant un changement

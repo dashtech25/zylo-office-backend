@@ -46,12 +46,17 @@ app = FastAPI(title=settings.APP_NAME, openapi_tags=TAGS_METADATA)
 # dernier).
 app.add_middleware(TimingMiddleware)
 app.add_middleware(RequestIdMiddleware)
+# CORS (T-003) : les origines viennent de CORS_ORIGINS (variable d'environnement,
+# liste JSON ; chaque worktree y déclare son port frontend, voir
+# docs/process/ports.md). Méthodes et en-têtes sont listés explicitement :
+# seuls les verbes utilisés par l'API et les en-têtes envoyés par le frontend
+# sont acceptés en préflight.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Organization-Id", "X-Request-Id", "Accept"],
 )
 
 register_exception_handlers(app)

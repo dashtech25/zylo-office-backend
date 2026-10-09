@@ -1,6 +1,6 @@
 # T-037b : Jetons dans des cookies HttpOnly, partie frontend
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : security · **Type** : security
+- **Statut** : À vérifier (implémentée sur la branche frontend `feat/T-020-T-037-sessions-cookies`, non fusionnée ; vitest, tsc, lint et build verts ; parcours navigateur non fait, Playwright suspendu) · **Priorité** : P1 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : frontend · **Domaine** : security · **Type** : security
 - **Branche suggérée** : `feat/T-037b-cookies-frontend` · **Base de test** : `zylo_t037b_test` · **Ports** : back 3137, front dev 3237, front prod 3337
 - **Dépendances** : T-037a, T-030, T-033b
 - **Décisions requises** : `securite/stockage-jetons.md`

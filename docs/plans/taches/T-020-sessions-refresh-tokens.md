@@ -1,6 +1,6 @@
 # T-020 : Sessions, révocation et réutilisation des refresh tokens
 
-- **Statut** : Planifiée · **Priorité** : P2 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
+- **Statut** : À vérifier (implémentée sur `feat/T-020-T-037-sessions-cookies`, non fusionnée ; pytest et lint-imports verts ; parcours navigateur non fait, Playwright suspendu) · **Priorité** : P2 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
 - **Branche suggérée** : `fix/T-020-sessions` · **Base de test** : `zylo_t020_test` · **Ports** : back 3120
 - **Dépendances** : aucune
 - **Décisions requises** : aucune

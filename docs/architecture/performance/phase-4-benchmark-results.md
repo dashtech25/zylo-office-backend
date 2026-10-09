@@ -4,7 +4,7 @@ Date : 2026-09-11. Fait suite à `phase-3-implementation.md`. Méthodologie : vo
 
 ## 1. Ce qui a été réellement mesuré : avant/après, à l'échelle actuelle (5 stations, 13 cuves)
 
-Toutes les mesures ci-dessous sont des appels HTTP réels (`httpx`) contre le serveur de dev (port 3007), backé par la vraie base Neon, sur l'organisation démo réelle (`ee7ba0dd-a6c1-4c2a-9911-5b6aefcc1b46`, 5 stations, 13 cuves, 17,8K mesures).
+Toutes les mesures ci-dessous sont des appels HTTP réels (`httpx`) contre le serveur de dev (port 3007, ancien port interdit depuis T-003 : voir docs/process/ports.md), backé par la vraie base Neon, sur l'organisation démo réelle (`ee7ba0dd-a6c1-4c2a-9911-5b6aefcc1b46`, 5 stations, 13 cuves, 17,8K mesures).
 
 | Endpoint | Avant (Phase 1, baseline) | Après batching stock | Après batching caisse (v1) | Après batching caisse + `sensor_ids` (v2) |
 |---|---:|---:|---:|---:|

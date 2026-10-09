@@ -45,7 +45,7 @@
 > `zylo_liquid_prototype/prototype.html` (audité réellement, 6881 lignes, ~90
 > sections `<h1>`-`<h3>` recensées). Compatibilité évaluée contre l'état réel
 > du backend au 2026-09-03 : 16 endpoints Niveau 1 tous `TERMINÉ`
-> ([phase-2-api.md](phase-2-api.md)) et le frontend déjà construit
+> ([api/README.md](api/README.md)) et le frontend déjà construit
 > (`zylo-office-frontend`, 4 pages livrées : tableau de bord réseau, liste des
 > stations, détail d'une station, détail d'une cuve — voir PR #10/#12/#14/#15).
 >
@@ -113,7 +113,7 @@
 | 34 | Seuils de niveau de cuve (6282) | Édition des 4 seuils mm | `Tank.heightAlarmMm/heightAlertMm/lowAlarmMm/alertWaterMaxMm` + `PATCH /tanks/{id}` | **IMPLEMENTER** | Partiellement — lecture seule sur la page cuve (onglet technique), édition absente |
 | 35 | Seuils de couverture de stock en jours (6292) | Jours avant rupture | Dépend du point 5 (pas de débit de consommation fiable) | NE PAS IMPLÉMENTER (hors périmètre) | Absent |
 | 36 | Structure organisationnelle, stations et rattachement (6319-6335) | Organisation → stations | `identity` Core + endpoint 2 | **IMPLEMENTER** | Absent — page admin dédiée |
-| 37 | Matrice rôles × vues (6359-6367) | Permissions par rôle, par écran | `rbac` Core (modèle existant), pas d'endpoint HTTP pour lister/éditer les permissions par rôle (confirmé absent, phase-2-api.md §7 "points encore à confirmer") | IMPLEMENTER APRÈS EXTENSION | Absent |
+| 37 | Matrice rôles × vues (6359-6367) | Permissions par rôle, par écran | `rbac` Core (modèle existant), pas d'endpoint HTTP pour lister/éditer les permissions par rôle (confirmé absent, api/README.md §7 "points encore à confirmer") | IMPLEMENTER APRÈS EXTENSION | Absent |
 
 ## Synthèse chiffrée
 

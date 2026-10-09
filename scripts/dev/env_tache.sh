@@ -50,6 +50,10 @@ case "$KIND" in
 esac
 
 n=$((10#$NNN))
+# Intention : la formule de T-003 (back 3100+n, front 3200+n, prod 3300+n) ne
+# produit des plages disjointes que pour n < 100. Au-delà, 3100+n tombe dans
+# la plage front (3200+n) d'un autre numéro. On refuse plutôt que de collisionner.
+[ "$n" -lt 100 ] || die "NNN doit être inférieur à 100 : au-delà, la formule de ports de T-003 collisionne (décision à prendre)"
 PORT_BACK=$((3100 + n))
 PORT_FRONT_DEV=$((3200 + n))
 PORT_FRONT_PROD=$((3300 + n))

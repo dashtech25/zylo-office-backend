@@ -9,4 +9,4 @@
   - C. Service de clés managé (KMS) : dépendance d'infrastructure, hors périmètre actuel.
 - **Suppression de la colonne en clair** : tâche séparée, non planifiée. Elle exige un accord écrit du commanditaire, une période d'observation et une sauvegarde vérifiée.
 - **Recommandation vérifiée** : option A ; suppression différée. Vérification : T-002 déclare la variable et impose sa présence hors développement ; T-027 contient le test de restauration.
-- **État** : En attente de réponse (sauvegarde de la clé à confier à une personne nommée)
+- **État** : Recommandation appliquée provisoirement le 2026-10-09 (T-027 fusionnée dans `remy`) ; statut inchangé. En attente de réponse (sauvegarde de la clé à confier à une personne nommée)

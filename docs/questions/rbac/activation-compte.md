@@ -9,4 +9,4 @@
   - C. Code affiché au créateur et remis de vive voix : même défaut que B.
   - D. Affichage au créateur, compte bloqué jusqu'au choix du mot de passe par le titulaire via un jeton distinct : risque résiduel, à accepter explicitement.
 - **Recommandation vérifiée** : option A, avec la création désactivée tant que l'envoi n'est pas configuré. Vérification : `User.status` accepte déjà `pending` (`app/identity/models.py`, ligne 27, revue REV-A-06) ; aucun fournisseur d'e-mail n'est présent dans le dépôt.
-- **État** : Recommandation implémentée (T-021, T-049, branche `feat/T-021-creation-utilisateurs`) : création désactivée tant que `EMAIL_BACKEND=none`. En attente : choix du fournisseur d'e-mail et validation des droits par le client.
+- **État** : Recommandation appliquée provisoirement le 2026-10-09 (T-021 fusionnée dans `remy`) ; statut inchangé. Recommandation implémentée (T-021, T-049, branche `feat/T-021-creation-utilisateurs`) : création désactivée tant que `EMAIL_BACKEND=none`. En attente : choix du fournisseur d'e-mail et validation des droits par le client.

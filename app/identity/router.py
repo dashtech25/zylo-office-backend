@@ -7,9 +7,20 @@ from app.auth.schemas import UserResponse
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.identity import service
+from app.identity import invitations
 from app.identity.models import Organization, User
-from app.identity.permissions import ORGANIZATION_MANAGE
-from app.identity.schemas import CreateOrganizationRequest, OrganizationResponse, UpdateOrganizationRequest, UpdateUserProfileRequest
+from app.identity.permissions import ORGANIZATION_MANAGE, USER_MANAGE
+from app.identity.schemas import (
+    CreatedUserResponse,
+    CreateOrganizationRequest,
+    CreateUserRequest,
+    OrganizationResponse,
+    ReissuedInvitationResponse,
+    UpdateOrganizationRequest,
+    UpdateUserProfileRequest,
+    UpdateUserStatusRequest,
+    UserStatusResponse,
+)
 from app.rbac.service import require_permission
 
 router = APIRouter()
@@ -69,3 +80,53 @@ async def protected_demo(
     """Endpoint de démonstration Phase 5+6 — prouve qu'un accès est bien refusé
     sans la permission identity.organization.manage et accordé avec elle."""
     return {"status": "accès autorisé", "permission": ORGANIZATION_MANAGE}
+
+
+@router.post(
+    "/{organization_id}/users",
+    response_model=CreatedUserResponse,
+    status_code=201,
+    summary="Créer un utilisateur dans l'organisation (compte en attente, sans mot de passe connu du créateur)",
+)
+async def create_user(
+    organization_id: uuid.UUID,
+    data: CreateUserRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_permission(USER_MANAGE)),
+) -> CreatedUserResponse:
+    """T-021 : le compte est `pending`. Le titulaire active son compte par le lien
+    envoyé hors API (POST /auth/activate). Aucun secret dans la réponse."""
+    return await invitations.create_user_account(db, current_user, organization_id, data)
+
+
+@router.post(
+    "/{organization_id}/users/{user_id}/invitation",
+    response_model=ReissuedInvitationResponse,
+    status_code=201,
+    summary="Réémettre le lien d'activation d'un compte en attente (l'ancien lien est révoqué)",
+)
+async def reissue_user_invitation(
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_permission(USER_MANAGE)),
+) -> ReissuedInvitationResponse:
+    return await invitations.reissue_invitation(db, current_user, organization_id, user_id)
+
+
+@router.patch(
+    "/{organization_id}/users/{user_id}",
+    response_model=UserStatusResponse,
+    summary="Désactiver (suspended) ou réactiver (active) un membre de l'organisation",
+)
+async def update_user_status(
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    data: UpdateUserStatusRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_permission(USER_MANAGE)),
+) -> UserStatusResponse:
+    return await invitations.update_user_status(db, current_user, organization_id, user_id, data.status)

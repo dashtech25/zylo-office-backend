@@ -1,6 +1,6 @@
 # T-034 : Découpe de zylo_liquid/service.py, lot 1 (filet de caractérisation, stations et cuves)
 
-- **Statut** : À vérifier · **Priorité** : P1 · **Vague** : 1 · **Taille** : L · **Dépôt(s)** : backend · **Domaine** : zylo-liquid · **Type** : refactor
+- **Statut** : À vérifier (lot 1 fusionné dans `remy` : `2da78cb`, plage `48187a7..15e6d2f` ; `34e4bc0` et `0a3b246` restent hors fusion ; API inchangée : OpenAPI et matrice de routes identiques ; parcours station et cuve non couverts, Playwright suspendu) · **Priorité** : P1 · **Vague** : 1 · **Taille** : L · **Dépôt(s)** : backend · **Domaine** : zylo-liquid · **Type** : refactor
 - **Branche suggérée** : `refactor/T-034-zl-service-lot1` (branche réelle : `refactor/T-034-zylo-liquid-lot1`, worktree `worktrees/T-034-back`) · **Base de test** : `zylo_t034_test` · **Ports** : back 3134
 - **Dépendances** : aucune
 - **Décisions requises** : aucune

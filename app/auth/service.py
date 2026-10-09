@@ -102,24 +102,59 @@ async def authenticate_user(db: AsyncSession, data: LoginRequest) -> User:
     return user
 
 
-async def issue_tokens(db: AsyncSession, user: User) -> tuple[str, str]:
+async def issue_tokens(db: AsyncSession, user: User, *, famille: uuid.UUID | None = None) -> tuple[str, str]:
+    """Émet un couple de jetons. Sans `famille`, ouvre une nouvelle famille (nouvelle connexion)."""
     access_token = create_access_token(user.id)
     refresh_token = create_refresh_token(user.id)
 
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
-    db.add(RefreshToken(userId=user.id, tokenHash=_hash_token(refresh_token), expiresAt=expires_at))
+    db.add(
+        RefreshToken(
+            userId=user.id,
+            tokenHash=_hash_token(refresh_token),
+            familyId=famille or uuid.uuid4(),
+            expiresAt=expires_at,
+        )
+    )
     await db.commit()
 
     return access_token, refresh_token
 
 
+async def revoque_famille(db: AsyncSession, famille: uuid.UUID) -> None:
+    """Révoque tous les refresh tokens ouverts d'une famille. Ne commite pas."""
+    await db.execute(
+        update(RefreshToken)
+        .where(RefreshToken.familyId == famille, RefreshToken.revokedAt.is_(None))
+        .values(revokedAt=datetime.now(timezone.utc))
+    )
+
+
 async def rotate_refresh_token(db: AsyncSession, refresh_token: str) -> tuple[str, str]:
+    """Rotation : le jeton présenté est révoqué et un nouveau couple est émis dans la même famille.
+
+    Intention (T-020) :
+    - `SELECT ... FOR UPDATE` sérialise deux renouvellements concurrents du même
+      jeton : le second attend le commit du premier, puis voit le jeton révoqué.
+    - Présenter un jeton déjà révoqué est traité comme une réutilisation (jeton
+      volé, rejoué) : toute la famille est révoquée, y compris le jeton légitime
+      suivant. Le commit est fait AVANT de lever l'erreur, pour que la révocation
+      survive au rollback que fait le routeur sur un échec d'identifiants.
+    """
     user_id = decode_token(refresh_token, expected_type="refresh")
     token_hash = _hash_token(refresh_token)
 
-    result = await db.execute(select(RefreshToken).where(RefreshToken.tokenHash == token_hash))
+    result = await db.execute(
+        select(RefreshToken).where(RefreshToken.tokenHash == token_hash).with_for_update()
+    )
     stored = result.scalar_one_or_none()
-    if stored is None or stored.revokedAt is not None or stored.expiresAt < datetime.now(timezone.utc):
+    if stored is None:
+        raise AppError(code="invalid_refresh_token", message="Refresh token invalide, expiré ou révoqué.", status_code=401)
+    if stored.revokedAt is not None:
+        await revoque_famille(db, stored.familyId)
+        await db.commit()
+        raise AppError(code="invalid_refresh_token", message="Refresh token invalide, expiré ou révoqué.", status_code=401)
+    if stored.expiresAt < datetime.now(timezone.utc):
         raise AppError(code="invalid_refresh_token", message="Refresh token invalide, expiré ou révoqué.", status_code=401)
 
     stored.revokedAt = datetime.now(timezone.utc)
@@ -129,7 +164,7 @@ async def rotate_refresh_token(db: AsyncSession, refresh_token: str) -> tuple[st
     if user is None:
         raise AppError(code="invalid_refresh_token", message="Utilisateur introuvable ou inactif.", status_code=401)
 
-    return await issue_tokens(db, user)
+    return await issue_tokens(db, user, famille=stored.familyId)
 
 
 async def revoke_refresh_token(db: AsyncSession, refresh_token: str) -> None:

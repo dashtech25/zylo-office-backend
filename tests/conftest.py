@@ -12,6 +12,10 @@ os.environ["ENVIRONMENT"] = "test"
 os.environ["APP_FIELD_ENCRYPTION_KEY"] = "test-only-field-encryption-key-" + "0123456789abcdef" * 2
 os.environ["JWT_SECRET"] = "test-only-jwt-secret-" + "0123456789abcdef" * 2
 os.environ["STORAGE_SIGNED_URL_SECRET"] = "test-only-storage-secret-" + "fedcba9876543210" * 2
+# T-037a : transition ouverte pour les tests existants (en-tête Authorization et jetons
+# dans le JSON encore acceptés). Les tests de fin de transition la ferment par monkeypatch,
+# pour que la suite ne dépende pas de l'horloge réelle.
+os.environ["AUTH_HEADER_ACCEPTED_UNTIL"] = "2099-01-01T00:00:00+00:00"
 
 # Le throttle de `run_truck_stop_detection` (2026-09-14) suppose des
 # positions réelles espacées dans le temps — en test, des dizaines

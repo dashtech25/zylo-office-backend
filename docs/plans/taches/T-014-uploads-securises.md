@@ -1,6 +1,6 @@
 # T-014 : Uploads sécurisés (liste blanche, lecture bornée, téléchargement forcé)
 
-- **Statut** : À vérifier · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
+- **Statut** : Terminée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
 - **Branche suggérée** : `fix/T-014-uploads` · **Base de test** : `zylo_t014_test` · **Ports** : back 3114
 - **Dépendances** : T-002, T-005
 - **Décisions requises** : `securite/types-fichiers-autorises.md` (recommandation : PDF et images seulement)

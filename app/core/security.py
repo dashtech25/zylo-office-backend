@@ -3,7 +3,9 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
+# PyJWT (T-015) remplace python-jose : format HS256 identique, donc les jetons
+# déjà émis restent valides. Voir docs/architecture/securite/surface-api.md.
+import jwt
 from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,9 +51,11 @@ def create_refresh_token(user_id: uuid.UUID) -> str:
 
 
 def decode_token(token: str, expected_type: str) -> uuid.UUID:
+    # Intention : `algorithms` est toujours explicite (jamais déduit du jeton) ;
+    # c'est la défense contre la confusion d'algorithme (CVE-2024-33663 et suite).
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
-    except JWTError as exc:
+    except jwt.PyJWTError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token invalide.") from exc
     if payload.get("type") != expected_type:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Type de token invalide.")

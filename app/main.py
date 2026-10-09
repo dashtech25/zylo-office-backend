@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import setup_logging
 from app.core.middleware import RequestIdMiddleware, TimingMiddleware
+from app.core.securite_http import EnTetesSecuriteMiddleware, options_documentation
 from app.audit.seed import seed_known_permissions as seed_audit_permissions
 from app.core.database import AsyncSessionLocal
 from app.identity.service import backfill_owner_default_permissions
@@ -35,7 +36,14 @@ TAGS_METADATA = [
     {"name": "exchange-rates", "description": "Taux de change historisés — Core, toujours une insertion, jamais une correction."},
 ]
 
-app = FastAPI(title=settings.APP_NAME, openapi_tags=TAGS_METADATA)
+# Intention (T-015) : Swagger, ReDoc et /openapi.json ne sont montés qu'en
+# ENVIRONMENT=development (voir app/core/securite_http.py). Hors développement,
+# ces routes n'existent pas : 404.
+app = FastAPI(
+    title=settings.APP_NAME,
+    openapi_tags=TAGS_METADATA,
+    **options_documentation(settings.ENVIRONMENT),
+)
 
 # Ordre important : TimingMiddleware doit être ajouté avant RequestIdMiddleware
 # pour s'exécuter à l'intérieur de celui-ci (Starlette empile les middlewares
@@ -46,13 +54,20 @@ app = FastAPI(title=settings.APP_NAME, openapi_tags=TAGS_METADATA)
 # dernier).
 app.add_middleware(TimingMiddleware)
 app.add_middleware(RequestIdMiddleware)
+# CORS (T-015) : méthodes et en-têtes listés explicitement, ceux qu'utilise le
+# frontend (fetch GET/POST/PUT/PATCH/DELETE ; Authorization, Content-Type,
+# X-Organization-Id). Une méthode ou un en-tête non listé est refusé au
+# préflight. Les origines restent lues depuis la configuration (CORS_ORIGINS).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Organization-Id", "Accept"],
 )
+# En-têtes de sécurité (T-015) : ajoutés en dernier, donc les plus externes ;
+# ils couvrent aussi les réponses du préflight CORS.
+app.add_middleware(EnTetesSecuriteMiddleware)
 
 register_exception_handlers(app)
 

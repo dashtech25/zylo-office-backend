@@ -96,6 +96,18 @@ class Settings(BaseSettings):
     VAPID_PRIVATE_KEY: str = ""
     VAPID_CLAIMS_EMAIL: str = "contact@zylo.example"
 
+    # Envoi des messages (invitations T-021/T-049). `none` par défaut : la
+    # création de compte est alors DÉSACTIVÉE (503), tant que l'envoi n'est
+    # pas configuré en production. `console` (journal stdout, contient le lien
+    # d'activation) n'est admis qu'en development ; `memory` (boîte de test)
+    # n'est admis qu'en test. Voir app/shared/email.py.
+    EMAIL_BACKEND: str = "none"
+    # Lien transmis au titulaire : `<base>#token=<jeton>`. Le jeton est dans le
+    # fragment (non envoyé au serveur, absent des journaux d'accès).
+    ACTIVATION_URL_BASE: str = "http://localhost:3001/activer"
+    # Durée de validité d'un jeton d'activation (décision T-049 : 72 heures).
+    USER_INVITATION_TTL_HOURS: int = 72
+
     # Limitation de débit de l'authentification (T-012, docs/questions/securite/
     # limitation-authentification.md). Compteurs d'échecs dans PostgreSQL (table
     # loginAttempt), fenêtre glissante. Verrou par couple (IP, compte) avec backoff
@@ -110,6 +122,21 @@ class Settings(BaseSettings):
     # Adresses des proxys de confiance (reverse proxy). X-Forwarded-For n'est lu
     # que si l'adresse du pair direct figure dans cette liste. Vide = aucun proxy.
     AUTH_RATE_LIMIT_TRUSTED_PROXIES: list[str] = []
+
+    @model_validator(mode="after")
+    def _valide_envoi_des_messages(self) -> "Settings":
+        # Intention : un journal d'activation (qui contient le jeton) ne peut
+        # jamais être actif hors développement, et une boîte mémoire jamais hors test.
+        backends = {"none", "console", "memory"}
+        if self.EMAIL_BACKEND not in backends:
+            raise ConfigurationSecretError(
+                f"EMAIL_BACKEND inconnu : {self.EMAIL_BACKEND!r} (valeurs admises : none, console, memory)."
+            )
+        if self.EMAIL_BACKEND == "console" and self.ENVIRONMENT != ENVIRONMENT_DEVELOPPEMENT:
+            raise ConfigurationSecretError("EMAIL_BACKEND=console n'est admis qu'avec ENVIRONMENT=development.")
+        if self.EMAIL_BACKEND == "memory" and self.ENVIRONMENT != "test":
+            raise ConfigurationSecretError("EMAIL_BACKEND=memory n'est admis qu'avec ENVIRONMENT=test.")
+        return self
 
     @model_validator(mode="after")
     def _refuse_fallback_secrets_hors_development(self) -> "Settings":

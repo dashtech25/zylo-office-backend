@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 # assez longs. Ils écrasent volontairement le .env du worktree (variables
 # d'environnement prioritaires), sans jamais reprendre de valeur réelle.
 os.environ["ENVIRONMENT"] = "test"
+# Envoi d'e-mail : boîte mémoire (app/shared/email.py), jamais de transport réel en test (T-021).
+os.environ["EMAIL_BACKEND"] = "memory"
 os.environ["JWT_SECRET"] = "test-only-jwt-secret-" + "0123456789abcdef" * 2
 os.environ["STORAGE_SIGNED_URL_SECRET"] = "test-only-storage-secret-" + "fedcba9876543210" * 2
 

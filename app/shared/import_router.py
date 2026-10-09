@@ -17,6 +17,12 @@ from app.core.security import get_current_user
 
 import_router = APIRouter()
 
+# T-014 (BCK-012) : limites d'import. Lecture bornée à MAX+1 octets, puis bornes de
+# lignes et de colonnes : une feuille démesurée consomme mémoire et CPU du serveur.
+MAX_IMPORT_BYTES = 5 * 1024 * 1024
+MAX_IMPORT_ROWS = 10_000
+MAX_IMPORT_COLUMNS = 100
+
 
 class ParsedTable(BaseModel):
     rows: list[list[str]]
@@ -24,7 +30,9 @@ class ParsedTable(BaseModel):
 
 @import_router.post("/xlsx", response_model=ParsedTable, dependencies=[Depends(get_current_user)])
 async def parse_xlsx(file: UploadFile) -> ParsedTable:
-    content = await file.read()
+    content = await file.read(MAX_IMPORT_BYTES + 1)
+    if len(content) > MAX_IMPORT_BYTES:
+        raise HTTPException(status_code=413, detail="Fichier XLSX trop volumineux (5 Mo maximum).")
     try:
         workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
     except Exception:
@@ -32,5 +40,11 @@ async def parse_xlsx(file: UploadFile) -> ParsedTable:
     sheet = workbook.active
     if sheet is None:
         return ParsedTable(rows=[])
-    rows = [[("" if cell is None else str(cell)) for cell in row] for row in sheet.iter_rows(values_only=True)]
+    rows: list[list[str]] = []
+    for row in sheet.iter_rows(values_only=True):
+        if len(rows) >= MAX_IMPORT_ROWS:
+            raise HTTPException(status_code=413, detail="Fichier XLSX au-delà de 10 000 lignes.")
+        if len(row) > MAX_IMPORT_COLUMNS:
+            raise HTTPException(status_code=413, detail="Fichier XLSX au-delà de 100 colonnes.")
+        rows.append([("" if cell is None else str(cell)) for cell in row])
     return ParsedTable(rows=rows)

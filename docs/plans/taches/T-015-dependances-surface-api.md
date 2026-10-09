@@ -1,6 +1,6 @@
 # T-015 : Dépendances CVE, OpenAPI désactivé hors développement, CORS restreint
 
-- **Statut** : À vérifier · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
+- **Statut** : Terminée · **Priorité** : P1 · **Vague** : 1 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : security · **Type** : security
 - **Branche suggérée** : `chore/T-015-dependances-api` · **Base de test** : `zylo_t015_test` · **Ports** : back 3115
 - **Dépendances** : T-002, T-005
 - **Décisions requises** : aucune

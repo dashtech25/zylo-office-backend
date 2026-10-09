@@ -1,6 +1,6 @@
 # T-036 : Contrats import-linter complets et découplage du socle
 
-- **Statut** : À vérifier · **Priorité** : P1 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : socle · **Type** : refactor
+- **Statut** : Terminée · **Priorité** : P1 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : socle · **Type** : refactor
 - **Branche suggérée** : `refactor/T-036-contrats` · **Base de test** : `zylo_t036_test` · **Ports** : back 3136
 - **Dépendances** : T-005, T-010
 - **Décisions requises** : `architecture/contrats-importlinter.md` (appliquée)

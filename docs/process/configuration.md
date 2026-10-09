@@ -40,3 +40,21 @@ Pour générer une valeur forte : `openssl rand -hex 32` (64 caractères).
 ## 4. Tests
 
 `tests/conftest.py` fixe `ENVIRONMENT=test` et des secrets de test explicites (longs, non issus des replis) avant tout import de l'application. `tests/test_config_secrets.py` couvre le refus, l'acceptation en `development` et les secrets valides, y compris un démarrage en sous-processus.
+
+## 5. Limitation de débit de l'authentification (T-012)
+
+Source : `app/core/config.py` (préfixe `AUTH_RATE_LIMIT_`), logique dans `app/auth/ratelimit.py`. Décision : `docs/questions/securite/limitation-authentification.md`.
+
+| Variable | Défaut | Effet |
+|---|---|---|
+| `AUTH_RATE_LIMIT_ENABLED` | `true` | `false` désactive le verrouillage (retour arrière sans revert). Les échecs restent enregistrés. |
+| `AUTH_RATE_LIMIT_WINDOW_SECONDS` | `900` | Fenêtre glissante de comptage des échecs. Garder une valeur au moins égale à `AUTH_RATE_LIMIT_LOCK_MAX_SECONDS`. |
+| `AUTH_RATE_LIMIT_MAX_FAILURES_PER_ACCOUNT` | `10` | Échecs pour un couple (IP, compte) avant verrou. |
+| `AUTH_RATE_LIMIT_MAX_FAILURES_PER_IP` | `100` | Échecs pour une IP, tous comptes confondus, avant verrou de l'IP (portée séparée par action). |
+| `AUTH_RATE_LIMIT_LOCK_BASE_SECONDS` | `60` | Premier verrou ; doublé à chaque échec au-delà du seuil. |
+| `AUTH_RATE_LIMIT_LOCK_MAX_SECONDS` | `900` | Plafond de la durée du verrou. |
+| `AUTH_RATE_LIMIT_TRUSTED_PROXIES` | `[]` | Adresses des proxys de confiance. `X-Forwarded-For` n'est lu que si le pair direct y figure. |
+
+Réponse en cas de verrou : HTTP 429, code `rate_limited`, en-tête `Retry-After` (secondes). Le corps ne dépend pas de l'existence du compte.
+
+Migration associée : `a9b8c7d6e5f4` (table `loginAttempt`, additive). Retour arrière de schéma : `alembic downgrade -1`.

@@ -12,11 +12,20 @@ class AppError(Exception):
     sous-classe) plutôt qu'une exception Python brute, pour garantir un format
     de réponse d'erreur unique côté API."""
 
-    def __init__(self, code: str, message: str, status_code: int = status.HTTP_400_BAD_REQUEST, details: list | None = None):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+        details: list | None = None,
+        headers: dict[str, str] | None = None,
+    ):
         self.code = code
         self.message = message
         self.status_code = status_code
         self.details = details or []
+        # En-têtes HTTP additionnels (ex. Retry-After pour un 429) ; None = aucun.
+        self.headers = headers
         super().__init__(message)
 
 
@@ -37,10 +46,13 @@ def _jsonable_validation_errors(errors: list[dict]) -> list[dict]:
     return safe_errors
 
 
-def _error_response(status_code: int, code: str, message: str, details: list | None = None) -> JSONResponse:
+def _error_response(
+    status_code: int, code: str, message: str, details: list | None = None, headers: dict[str, str] | None = None
+) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content={"error": {"code": code, "message": message, "details": details or []}},
+        headers=headers,
     )
 
 
@@ -48,7 +60,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
         logger.warning("app_error", extra={"code": exc.code, "path": request.url.path})
-        return _error_response(exc.status_code, exc.code, exc.message, exc.details)
+        return _error_response(exc.status_code, exc.code, exc.message, exc.details, exc.headers)
 
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:

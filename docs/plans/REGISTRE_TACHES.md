@@ -6,8 +6,8 @@ Statut initial : **Planifiée** (aucune tâche démarrée). **Généré à parti
 
 | ID | Titre | Prio | Vague | Niveau | Taille | Statut | Dépendances | Dépôt(s) | Décision requise | Fiche |
 |---|---|---|---|---|---|---|---|---|---|---|
-| T-001 | Retirer le dump de l'index git et verrouiller les dumps | P0 | 0 | 1 | S | Planifiée | T-004 | backend | `securite/purge-historique-dump.md`, `securite/rotation-credentials.md`, `process/visibilite-depot-requirements.md` | [fiche](taches/T-001-retrait-dump-git.md) |
-| T-002 | Refuser le démarrage hors développement avec des secrets par défaut | P0 | 0 | 1 | S | Planifiée | T-004 | backend | `architecture/environnement-par-defaut.md` | [fiche](taches/T-002-refus-demarrage-secrets.md) |
+| T-001 | Retirer le dump de l'index git et verrouiller les dumps | P0 | 0 | 1 | S | À vérifier | T-004 | backend | `securite/purge-historique-dump.md`, `securite/rotation-credentials.md`, `process/visibilite-depot-requirements.md` | [fiche](taches/T-001-retrait-dump-git.md) |
+| T-002 | Refuser le démarrage hors développement avec des secrets par défaut | P0 | 0 | 1 | S | À vérifier | T-004 | backend | `architecture/environnement-par-defaut.md` | [fiche](taches/T-002-refus-demarrage-secrets.md) |
 | T-003 | Table de ports unique, allocation par worktree, CORS configurable | P1 | 0 | 1 | S | Planifiée | T-004 | backend et frontend | `architecture/ports-canoniques.md` | [fiche](taches/T-003-ports-unifies.md) |
 | T-004 | Base de référence et espace de travail isolé | P0 | 0 | 0 | M | Réalisée (à vérifier) | — | backend et frontend | — | [fiche](taches/T-004-base-de-reference.md) |
 | T-004b | Tri du travail en cours restant (lots non bloquants) | P1 | 0 | 1 | L | Planifiée | T-004 | backend et frontend | — | [fiche](taches/T-004b-tri-travail-restant.md) |
@@ -18,7 +18,7 @@ Statut initial : **Planifiée** (aucune tâche démarrée). **Généré à parti
 | T-009 | Corriger les 10 scénarios Playwright en échec | P1 | 1 | 4 | M | Planifiée | T-046 | frontend (+ backend si la donnée manque) | `tests/holykell-simulateur.md` | [fiche](taches/T-009-playwright-scenarios-en-echec.md) |
 | T-010 | Isolation inter-organisations (IDOR) sur les 13 routes et sur toutes les routes d'organisation | P0 | 1 | 4 | L | Planifiée | T-005, T-038a, T-008 | backend | `rbac/code-http-acces-interdit.md` | [fiche](taches/T-010-isolation-inter-organisations.md) |
 | T-011 | Hygiène frontend (ui-preview, fichiers parasites, route en doublon) | P3 | 1 | 3 | S | Planifiée | T-041, T-008 | frontend | — | [fiche](taches/T-011-hygiene-frontend.md) |
-| T-012 | Limitation de débit et verrouillage progressif de l'authentification | P1 | 1 | 2 | M | Planifiée | T-002, T-005 | backend | `securite/limitation-authentification.md` | [fiche](taches/T-012-rate-limiting-auth.md) |
+| T-012 | Limitation de débit et verrouillage progressif de l'authentification | P1 | 1 | 2 | M | À vérifier | T-002, T-005 | backend | `securite/limitation-authentification.md` | [fiche](taches/T-012-rate-limiting-auth.md) |
 | T-013 | Politique de mot de passe et réponses neutres, sans annoncer d'envoi inexistant | P1 | 1 | 3 | M | Planifiée | T-002, T-012 | backend et frontend | `securite/politique-mot-de-passe.md` | [fiche](taches/T-013-politique-mot-de-passe.md) |
 | T-014 | Uploads sécurisés (liste blanche, lecture bornée, téléchargement forcé) | P1 | 1 | 2 | M | Planifiée | T-002, T-005 | backend | `securite/types-fichiers-autorises.md` | [fiche](taches/T-014-uploads-securises.md) |
 | T-015 | Dépendances CVE, OpenAPI désactivé hors développement, CORS restreint | P1 | 1 | 2 | M | Planifiée | T-002, T-005 | backend | — | [fiche](taches/T-015-dependances-surface-api.md) |

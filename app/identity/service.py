@@ -11,7 +11,7 @@ from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.security import get_current_user
 from app.identity.models import Organization, OrganizationUser, User
-from app.identity.permissions import ORGANIZATION_MANAGE
+from app.identity.permissions import ORGANIZATION_MANAGE, USER_MANAGE
 from app.identity.schemas import CreateOrganizationRequest, UpdateOrganizationRequest, UpdateUserProfileRequest
 from app.modules_registry.permissions import MODULE_MANAGE
 from app.rbac.models import Role, RolePermission, UserRole
@@ -30,6 +30,7 @@ from app.shared.storage import organisation_de_la_reference
 # mécanisme de bootstrap (issue #49).
 OWNER_DEFAULT_PERMISSIONS = [
     (ORGANIZATION_MANAGE, "identity", "Gérer l'organisation (membres, rôles, paramètres)."),
+    (USER_MANAGE, "identity", "Créer des utilisateurs, réémettre une invitation, suspendre et réactiver un membre."),
     (MODULE_MANAGE, "modules_registry", "Activer/désactiver les modules pour l'organisation."),
     (ROLE_MANAGE, "rbac", "Créer des rôles et modifier leurs permissions, attribuer/retirer un rôle."),
     (GRANT_MANAGE, "rbac", "Accorder ou refuser une permission individuelle, révoquer un grant."),

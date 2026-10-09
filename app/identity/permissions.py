@@ -3,3 +3,9 @@ futur module métier : chaque domaine possède son propre fichier permissions.py
 jamais une déclaration centralisée qui coupler tous les modules entre eux."""
 
 ORGANIZATION_MANAGE = "identity.organization.manage"
+
+# Créer, réémettre une invitation et désactiver/réactiver les membres d'une
+# organisation (T-021, T-048). Accordée au propriétaire à la création de
+# l'organisation, et par la migration explicite b3c4d5e6f7a8 aux propriétaires
+# existants (jamais par un backfill au démarrage).
+USER_MANAGE = "identity.user.manage"

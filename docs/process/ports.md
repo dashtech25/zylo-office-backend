@@ -21,7 +21,7 @@
 - Une tâche T-NNN a un numéro n = NNN (3 chiffres). Son worktree prend : backend 3100+n, frontend dev 3200+n, frontend prod 3300+n.
 - Unicité : pour n de 1 à 51, les plages 3101–3151, 3201–3251 et 3301–3351 ne contiennent ni 3001, ni 3002, ni 3003, ni 3055. La formule ne produit des plages disjointes que pour n < 100 ; `scripts/dev/env_tache.sh` refuse NNN >= 100.
 - Les tâches à lettre (T-033a, T-035b…) partagent le numéro n et s'exécutent en chaîne, jamais en parallèle.
-- La base de test d'une tâche suit le même numéro : `zylo_t<NNN>_test` (voir `docs/process/environnement-taches.md`).
+- La base de test d'une tâche suit le même numéro : `zylo_t<NNN>_test` (voir `docs/process/git-workflow.md`, §4).
 
 ## 3. CORS
 

@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import record_audit_event
 from app.auth.models import RefreshToken
+from app.auth.politique_mot_de_passe import PolitiqueMotDePasseErreur, erreur_api, verifie_mot_de_passe
 from app.core.config import settings
 from app.core.errors import AppError
 from app.core.security import hash_password
@@ -253,6 +254,14 @@ async def activate_account(db: AsyncSession, jeton: str, mot_de_passe: str) -> U
         await db.rollback()
         raise invalide
 
+    # Politique commune (T-013), vérifiée une fois le titulaire connu : e-mail et
+    # nom interdits dans le mot de passe. En cas de refus, le rollback annule la
+    # consommation du jeton : le titulaire peut réessayer avec le même lien.
+    try:
+        verifie_mot_de_passe(mot_de_passe, email=user.email, nom_complet=user.fullName)
+    except PolitiqueMotDePasseErreur as exc:
+        await db.rollback()
+        raise erreur_api(exc) from exc
     user.hashedPassword = hash_password(mot_de_passe)
     user.status = "active"
     await db.execute(

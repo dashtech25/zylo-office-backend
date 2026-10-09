@@ -16,6 +16,7 @@ from app.files import service as files_service
 from app.files.schemas import DocumentResponse
 from app.core.security import hash_password
 from app.identity.models import OrganizationUser, User
+from app.auth.service import revoque_sessions
 from app.identity.service import build_user, check_email_available
 from app.rbac.models import UserRole
 from app.rbac.service import assign_role, unassign_role
@@ -6721,7 +6722,7 @@ async def create_station_staff_member(db: AsyncSession, organization_id: uuid.UU
     temporary_password = secrets.token_urlsafe(9)
     full_name = f"{data.firstName} {data.lastName}".strip()
     user = build_user(
-        email=data.email, full_name=full_name, hashed_password=hash_password(temporary_password),
+        email=data.email.lower(), full_name=full_name, hashed_password=hash_password(temporary_password),
         must_change_password=True, first_name=data.firstName, last_name=data.lastName, phone=data.phone,
     )
     if data.photoStorageReference:
@@ -6870,6 +6871,9 @@ async def reset_station_staff_password(
     temporary_password = secrets.token_urlsafe(9)
     user.hashedPassword = hash_password(temporary_password)
     user.mustChangePassword = True
+    # Intention (T-013) : une réinitialisation coupe les sessions ouvertes avec
+    # l'ancien mot de passe ; la personne se reconnecte avec le temporaire.
+    await revoque_sessions(db, user.id)
     await record_audit_event(
         db, organization_id, actor_user_id,
         action="zyloLiquid.stationStaff.passwordReset", entity_type="User", entity_id=user.id,

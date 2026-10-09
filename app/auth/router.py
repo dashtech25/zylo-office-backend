@@ -5,7 +5,7 @@ from app.auth import ratelimit, service
 from app.auth.schemas import ChangePasswordRequest, LoginRequest, RefreshRequest, RegisterRequest, TokenResponse, UserResponse
 from app.core.database import get_db
 from app.core.errors import AppError
-from app.core.security import get_current_user
+from app.core.security import get_current_user_pour_changement_mot_de_passe
 from app.identity import invitations
 from app.identity.models import User
 from app.identity.schemas import AccountActivatedResponse, ActivateAccountRequest
@@ -72,15 +72,21 @@ async def logout(data: RefreshRequest, db: AsyncSession = Depends(get_db)) -> No
 
 
 @router.get("/me", response_model=UserResponse)
-async def me(current_user: User = Depends(get_current_user)) -> User:
+async def me(current_user: User = Depends(get_current_user_pour_changement_mot_de_passe)) -> User:
+    # Accessible même si un changement de mot de passe est requis : le frontend
+    # lit `mustChangePassword` ici pour afficher l'écran de changement.
     return current_user
 
 
 @router.post("/change-password", response_model=UserResponse)
 async def change_password(
-    data: ChangePasswordRequest, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+    data: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user_pour_changement_mot_de_passe),
+    db: AsyncSession = Depends(get_db),
 ) -> User:
-    return await service.change_password(db, current_user, data.currentPassword, data.newPassword)
+    return await service.change_password(
+        db, current_user, data.currentPassword, data.newPassword, refresh_token=data.refreshToken
+    )
 
 
 @router.post("/activate", response_model=AccountActivatedResponse, summary="Activer un compte créé par une organisation (lien à usage unique)")

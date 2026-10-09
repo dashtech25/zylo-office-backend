@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import Depends, Header
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.permissions import AUDIT_LOG_VIEW
@@ -48,7 +48,8 @@ async def check_email_available(db: AsyncSession, email: str) -> None:
     """Même contrôle que `register_user` (app/auth/service.py) — factorisé
     ici pour être réutilisé par tout flux de création de compte (ex. module
     Personnel, un gérant créant un compte pour un employé), jamais dupliqué."""
-    existing = await db.execute(select(User).where(User.email == email))
+    # Insensible à la casse : même règle que l'index unique sur lower(email).
+    existing = await db.execute(select(User).where(func.lower(User.email) == email.lower()))
     if existing.scalar_one_or_none() is not None:
         raise AppError(code="email_already_used", message="Cet email est déjà utilisé.", status_code=409)
 

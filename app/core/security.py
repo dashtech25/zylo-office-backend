@@ -69,7 +69,7 @@ async def get_current_user(
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentification requise.")
     user_id = decode_token(credentials.credentials, expected_type="access")
-    result = await db.execute(select(User).where(User.id == user_id, User.status == "active"))
+    result = await db.execute(select(User).where(User.id == user_id, User.status == "active", User.deletedAt.is_(None)))
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Utilisateur introuvable ou inactif.")

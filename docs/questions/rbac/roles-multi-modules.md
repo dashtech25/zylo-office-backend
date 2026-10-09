@@ -9,3 +9,4 @@
   - C. Rôles multi-modules autorisés : aucune frontière, rejeté.
 - **Recommandation vérifiée** : option A. Vérification : `app/shared/permissions.py` existe (vérifié) et sert de liste de socle ; le type du `resourceId` a été relevé dans `app/rbac/models.py` (revue). La validation client est requise avant fusion de T-018 : ce choix change les droits.
 - **État** : En attente de réponse (validation client exigée avant fusion)
+- **Application provisoire** : appliquée provisoirement le 2026-10-09 (décision du coordinateur : les validations client en attente ne bloquent pas les fusions). Option A fusionnée dans `remy` (`75a1060`, correctifs `c522540`, migration de fusion `b4e1c7d2a9f3`).

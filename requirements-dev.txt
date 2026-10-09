@@ -1,0 +1,7 @@
+# Outillage de développement, de test et d'audit : jamais installé dans l'image de production (Dockerfile).
+-r requirements.txt
+pytest==9.0.3
+pytest-asyncio==1.3.0
+import-linter==2.15
+# Audit des CVE : `pip-audit -r requirements.txt` (voir docs/architecture/securite/surface-api.md).
+pip-audit==2.10.1

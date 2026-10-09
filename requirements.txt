@@ -2,23 +2,23 @@ fastapi==0.141.1
 uvicorn[standard]==0.52.4
 pydantic==2.13.5
 pydantic-settings==2.15.0
-python-dotenv==1.0.1
+python-dotenv==1.2.2
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
 alembic==1.14.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
-python-jose[cryptography]==3.3.0
+# Remplace python-jose (T-015) : python-jose 3.5.0 garde CVE-2026-85394 sans correctif,
+# et tire ecdsa (PYSEC-2026-1325, sans correctif). PyJWT est maintenu et n'a pas ces dépendances.
+PyJWT==2.15.1
 email-validator==2.2.0
-pytest==8.3.4
-pytest-asyncio==0.25.2
 httpx==0.28.1
 psycopg2-binary==2.9.12
 boto3==1.35.99
-Pillow==11.0.0
+# Montée de version (T-015) : CVE corrigées jusqu'à 12.3.0 (pip-audit).
+Pillow==12.3.0
 python-multipart==0.0.32
 reportlab==4.2.5
 python-docx==1.1.2
 openpyxl==3.1.5
-import-linter==2.15
 pywebpush==2.0.3

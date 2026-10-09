@@ -248,13 +248,13 @@ async def test_cross_organization_role_and_member_are_refused(client: AsyncClien
     assert res.json()["error"]["code"] == "role_not_found"
 
     # ... ni utiliser le chemin de A avec l'en-tête de B (défaut IAM-001 : refusé ici).
+    # Chemin et en-tête incohérents : réponse uniforme 404 (T-010, organisation_cible),
+    # déclenchée avant la garde locale _ensure_path_matches_header de T-018.
     res = await client.post(
         f"/api/v1/rbac/organizations/{org_a}/module-roles/assignments",
         json={"userId": member["id"], "roleId": role_b["id"]},
         headers=_h(other["token"], org_b),
     )
-    # Depuis T-010 (404 uniforme, code-http-acces-interdit) : un chemin et un
-    # en-tête incohérents répondent comme une organisation inexistante.
     assert res.status_code == 404
     assert res.json()["error"]["code"] == "organization_not_found"
 

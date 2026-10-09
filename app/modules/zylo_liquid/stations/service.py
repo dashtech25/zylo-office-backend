@@ -28,7 +28,7 @@ from app.modules.zylo_liquid.models import (
     StationService,
     Tank,
 )
-from app.modules.zylo_liquid.schemas import (
+from app.modules.zylo_liquid.stations.schemas import (
     CreateFuelProductRequest,
     CreateStationFuelProductRequest,
     CreateStationRequest,

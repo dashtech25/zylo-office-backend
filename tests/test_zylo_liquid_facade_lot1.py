@@ -10,6 +10,7 @@ est couvert par les tests HTTP existants (`test_zylo_liquid_stations.py`,
 Ce fichier ne couvre pas la logique métier : il ne remplace pas ces tests.
 """
 import inspect
+import re
 
 import pytest
 
@@ -55,10 +56,20 @@ SIGNATURES_LOT_1 = [
 ]
 
 
+def _sans_chemin_de_module(texte: str) -> str:
+    """Retire les qualifiants de module (`app.modules.zylo_liquid.schemas.`) des annotations.
+
+    Le découpage déplace les schémas et modèles vers des sous-paquets : le nom de la classe
+    et la signature restent identiques, seul le chemin de module change. Le test vise l'API
+    (noms, ordre, types), pas l'emplacement du fichier.
+    """
+    return re.sub(r"\b(?:[a-z_][a-z0-9_]*\.)+", "", texte)
+
+
 @pytest.mark.parametrize(("nom", "signature"), SIGNATURES_LOT_1)
 def test_facade_expose_la_signature_d_origine(nom: str, signature: str) -> None:
     fonction = getattr(service, nom)
-    assert str(inspect.signature(fonction)) == signature
+    assert _sans_chemin_de_module(str(inspect.signature(fonction))) == _sans_chemin_de_module(signature)
 
 
 @pytest.mark.parametrize(("nom", "signature"), SIGNATURES_LOT_1)

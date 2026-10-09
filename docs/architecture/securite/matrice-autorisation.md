@@ -9,6 +9,7 @@ Source : les dépendances FastAPI des routes (`tests/route_inventory.py`).
 |---|---|
 | `billing.subscription.manage` | `POST /api/v1/billing/organizations/{organization_id}/subscriptions` |
 | `identity.organization.manage` | `GET /api/v1/modules/organizations/{organization_id}/zylo-liquid/protected-demo`<br>`PATCH /api/v1/organizations/{organization_id}`<br>`GET /api/v1/organizations/{organization_id}/protected-demo` |
+| `identity.user.manage` | `POST /api/v1/organizations/{organization_id}/users`<br>`PATCH /api/v1/organizations/{organization_id}/users/{user_id}`<br>`POST /api/v1/organizations/{organization_id}/users/{user_id}/invitation` |
 | `modules.module.manage` | `POST /api/v1/modules/organizations/{organization_id}/activate`<br>`POST /api/v1/modules/organizations/{organization_id}/deactivate` |
 | `rbac.grant.manage` | `POST /api/v1/rbac/organizations/{organization_id}/grants`<br>`DELETE /api/v1/rbac/organizations/{organization_id}/grants/{grant_id}`<br>`GET /api/v1/rbac/organizations/{organization_id}/users/{user_id}/grants` |
 | `rbac.role.manage` | `POST /api/v1/rbac/organizations/{organization_id}/module-roles`<br>`POST /api/v1/rbac/organizations/{organization_id}/module-roles/assignments`<br>`DELETE /api/v1/rbac/organizations/{organization_id}/module-roles/assignments/{assignment_id}`<br>`GET /api/v1/rbac/organizations/{organization_id}/modules/{module_code}/members`<br>`DELETE /api/v1/rbac/organizations/{organization_id}/modules/{module_code}/users/{user_id}/role`<br>`PUT /api/v1/rbac/organizations/{organization_id}/modules/{module_code}/users/{user_id}/role`<br>`GET /api/v1/rbac/organizations/{organization_id}/modules/{module_code}/users/{user_id}/role-preview`<br>`POST /api/v1/rbac/organizations/{organization_id}/roles`<br>`PUT /api/v1/rbac/organizations/{organization_id}/roles/{role_id}/permissions`<br>`POST /api/v1/rbac/organizations/{organization_id}/user-roles`<br>`DELETE /api/v1/rbac/organizations/{organization_id}/user-roles/{assignment_id}` |
@@ -19,31 +20,103 @@ Source : les dépendances FastAPI des routes (`tests/route_inventory.py`).
 | `shared.geo.read` | `GET /api/v1/cities`<br>`GET /api/v1/countries` |
 | `zyloLiquid.alert.acknowledge` | `POST /api/v1/zylo-liquid/alerts/{alert_id}/acknowledge` |
 | `zyloLiquid.alert.manage` | `PATCH /api/v1/zylo-liquid/alerts/{alert_id}` |
-| `zyloLiquid.alert.read` | `GET /api/v1/zylo-liquid/alerts/{alert_id}` |
+| `zyloLiquid.alert.read` | `GET /api/v1/zylo-liquid/alerts`<br>`GET /api/v1/zylo-liquid/alerts/{alert_id}` |
+| `zyloLiquid.carrier.manage` | `POST /api/v1/zylo-liquid/carriers`<br>`PATCH /api/v1/zylo-liquid/carriers/{carrier_id}` |
+| `zyloLiquid.carrier.read` | `GET /api/v1/zylo-liquid/carriers` |
 | `zyloLiquid.cash.read` | `GET /api/v1/zylo-liquid/cash/network-summary`<br>`GET /api/v1/zylo-liquid/cash/stations/{station_id}`<br>`GET /api/v1/zylo-liquid/cash/tanks/{tank_id}` |
-| `zyloLiquid.delivery.read` | `GET /api/v1/zylo-liquid/deliveries-in-progress`<br>`GET /api/v1/zylo-liquid/deliveries/{delivery_id}` |
+| `zyloLiquid.commercialAccount.manage` | `POST /api/v1/zylo-liquid/authorizations`<br>`POST /api/v1/zylo-liquid/commercial-accounts`<br>`PATCH /api/v1/zylo-liquid/commercial-accounts/{account_id}`<br>`POST /api/v1/zylo-liquid/drivers`<br>`POST /api/v1/zylo-liquid/vehicles` |
+| `zyloLiquid.commercialAccount.read` | `GET /api/v1/zylo-liquid/commercial-accounts` |
+| `zyloLiquid.declaration.lock` | `POST /api/v1/zylo-liquid/delivery-declarations/{declaration_id}/lock`<br>`POST /api/v1/zylo-liquid/incident-declarations/{declaration_id}/lock`<br>`POST /api/v1/zylo-liquid/leak-test-declarations/{declaration_id}/lock`<br>`POST /api/v1/zylo-liquid/manual-gauging-declarations/{declaration_id}/lock`<br>`POST /api/v1/zylo-liquid/quality-check-declarations/{declaration_id}/lock`<br>`POST /api/v1/zylo-liquid/shift-cash-declarations/{declaration_id}/lock` |
+| `zyloLiquid.delivery.read` | `GET /api/v1/zylo-liquid/deliveries`<br>`GET /api/v1/zylo-liquid/deliveries-in-progress`<br>`GET /api/v1/zylo-liquid/deliveries/{delivery_id}` |
+| `zyloLiquid.deliveryDeclaration.create` | `POST /api/v1/zylo-liquid/delivery-declarations`<br>`POST /api/v1/zylo-liquid/delivery-declarations/correct-lines`<br>`PATCH /api/v1/zylo-liquid/delivery-declarations/{declaration_id}` |
+| `zyloLiquid.deliveryDeclaration.read` | `GET /api/v1/zylo-liquid/delivery-declarations` |
+| `zyloLiquid.document.create` | `POST /api/v1/zylo-liquid/document-links`<br>`POST /api/v1/zylo-liquid/documents` |
+| `zyloLiquid.document.delete` | `DELETE /api/v1/zylo-liquid/documents/{document_id}` |
+| `zyloLiquid.document.read` | `GET /api/v1/zylo-liquid/documents/by-entity`<br>`GET /api/v1/zylo-liquid/documents/counts-by-entity`<br>`GET /api/v1/zylo-liquid/documents/{document_id}/download-url` |
+| `zyloLiquid.equipment.manage` | `POST /api/v1/zylo-liquid/equipment`<br>`PATCH /api/v1/zylo-liquid/equipment/{equipment_id}` |
+| `zyloLiquid.equipment.read` | `GET /api/v1/zylo-liquid/equipment` |
 | `zyloLiquid.fuelProduct.manage` | `POST /api/v1/zylo-liquid/fuel-products`<br>`PATCH /api/v1/zylo-liquid/fuel-products/{fuel_product_id}` |
 | `zyloLiquid.fuelProduct.read` | `GET /api/v1/zylo-liquid/fuel-products`<br>`GET /api/v1/zylo-liquid/fuel-products/{fuel_product_id}` |
+| `zyloLiquid.gpsDevice.manage` | `POST /api/v1/zylo-liquid/gps-devices`<br>`PATCH /api/v1/zylo-liquid/gps-devices/{gps_device_id}`<br>`POST /api/v1/zylo-liquid/gps-devices/{gps_device_id}/unassign`<br>`GET /api/v1/zylo-liquid/gps-ingest-credential`<br>`POST /api/v1/zylo-liquid/gps-ingest-credential/regenerate`<br>`POST /api/v1/zylo-tanker/gps-devices`<br>`PATCH /api/v1/zylo-tanker/gps-devices/{gps_device_id}`<br>`POST /api/v1/zylo-tanker/gps-devices/{gps_device_id}/unassign`<br>`GET /api/v1/zylo-tanker/gps-ingest-credential`<br>`POST /api/v1/zylo-tanker/gps-ingest-credential/regenerate` |
+| `zyloLiquid.gpsDevice.read` | `GET /api/v1/zylo-liquid/gps-devices`<br>`GET /api/v1/zylo-liquid/gps-devices/from-traccar`<br>`GET /api/v1/zylo-tanker/gps-devices`<br>`GET /api/v1/zylo-tanker/gps-devices/from-traccar` |
 | `zyloLiquid.holykellAccount.read` | `GET /api/v1/zylo-liquid/holykell-accounts`<br>`GET /api/v1/zylo-liquid/holykell-accounts/{account_id}/sync-status` |
-| `zyloLiquid.leakEvent.read` | `GET /api/v1/zylo-liquid/leak-events/{leak_event_id}` |
-| `zyloLiquid.priceHistory.create` | `PATCH /api/v1/zylo-liquid/prices/{price_id}` |
-| `zyloLiquid.priceHistory.read` | `GET /api/v1/zylo-liquid/prices/{price_id}` |
+| `zyloLiquid.incidentDeclaration.create` | `POST /api/v1/zylo-liquid/incident-declarations`<br>`PATCH /api/v1/zylo-liquid/incident-declarations/{declaration_id}` |
+| `zyloLiquid.incidentDeclaration.read` | `GET /api/v1/zylo-liquid/incident-declarations` |
+| `zyloLiquid.intervention.assign` | `POST /api/v1/zylo-liquid/interventions/{intervention_id}/assign` |
+| `zyloLiquid.intervention.close` | `POST /api/v1/zylo-liquid/interventions/{intervention_id}/close` |
+| `zyloLiquid.intervention.create` | `POST /api/v1/zylo-liquid/interventions` |
+| `zyloLiquid.intervention.read` | `GET /api/v1/zylo-liquid/interventions` |
+| `zyloLiquid.leakEvent.read` | `GET /api/v1/zylo-liquid/leak-events`<br>`GET /api/v1/zylo-liquid/leak-events/{leak_event_id}` |
+| `zyloLiquid.leakTestDeclaration.create` | `POST /api/v1/zylo-liquid/leak-test-declarations`<br>`PATCH /api/v1/zylo-liquid/leak-test-declarations/{declaration_id}` |
+| `zyloLiquid.leakTestDeclaration.read` | `GET /api/v1/zylo-liquid/leak-test-declarations` |
+| `zyloLiquid.manualGaugingDeclaration.create` | `POST /api/v1/zylo-liquid/manual-gauging-declarations`<br>`PATCH /api/v1/zylo-liquid/manual-gauging-declarations/{declaration_id}` |
+| `zyloLiquid.manualGaugingDeclaration.read` | `GET /api/v1/zylo-liquid/manual-gauging-declarations` |
+| `zyloLiquid.payment.create` | `POST /api/v1/zylo-liquid/payments` |
+| `zyloLiquid.payment.read` | `GET /api/v1/zylo-liquid/payments` |
+| `zyloLiquid.priceHistory.create` | `POST /api/v1/zylo-liquid/prices`<br>`PATCH /api/v1/zylo-liquid/prices/{price_id}` |
+| `zyloLiquid.priceHistory.read` | `GET /api/v1/zylo-liquid/prices`<br>`GET /api/v1/zylo-liquid/prices/{price_id}` |
+| `zyloLiquid.pricingPolicy.manage` | `PATCH /api/v1/zylo-liquid/station-product-pricing-policy` |
+| `zyloLiquid.pricingPolicy.read` | `GET /api/v1/zylo-liquid/station-product-pricing-policy` |
+| `zyloLiquid.productSale.cancel` | `POST /api/v1/zylo-liquid/product-sales/{transaction_id}/cancel` |
+| `zyloLiquid.productSale.create` | `POST /api/v1/zylo-liquid/product-sales` |
+| `zyloLiquid.productSale.read` | `GET /api/v1/zylo-liquid/product-sales` |
 | `zyloLiquid.pump.manage` | `POST /api/v1/zylo-liquid/pumps`<br>`PATCH /api/v1/zylo-liquid/pumps/{pump_id}` |
-| `zyloLiquid.pump.read` | `GET /api/v1/zylo-liquid/pumps/{pump_id}` |
+| `zyloLiquid.pump.read` | `GET /api/v1/zylo-liquid/pumps`<br>`GET /api/v1/zylo-liquid/pumps/{pump_id}` |
+| `zyloLiquid.purchaseOrder.manage` | `POST /api/v1/zylo-liquid/purchase-orders`<br>`POST /api/v1/zylo-liquid/purchase-orders/{purchase_order_id}/generate-document` |
+| `zyloLiquid.purchaseOrder.read` | `GET /api/v1/zylo-liquid/purchase-orders`<br>`GET /api/v1/zylo-liquid/purchase-orders/{purchase_order_id}`<br>`GET /api/v1/zylo-liquid/purchase-orders/{purchase_order_id}/trucks` |
+| `zyloLiquid.qualityCheckDeclaration.create` | `POST /api/v1/zylo-liquid/quality-check-declarations`<br>`PATCH /api/v1/zylo-liquid/quality-check-declarations/{declaration_id}` |
+| `zyloLiquid.qualityCheckDeclaration.read` | `GET /api/v1/zylo-liquid/quality-check-declarations` |
+| `zyloLiquid.receivable.read` | `GET /api/v1/zylo-liquid/receivables` |
+| `zyloLiquid.reconciliation.read` | `POST /api/v1/zylo-liquid/delivery-declaration-lines/{line_id}/reconcile-manual`<br>`GET /api/v1/zylo-liquid/delivery-declaration-lines/{line_id}/reconciliation-candidates`<br>`POST /api/v1/zylo-liquid/delivery-declarations/{declaration_id}/reconcile`<br>`POST /api/v1/zylo-liquid/manual-gauging-declarations/{declaration_id}/reconcile`<br>`POST /api/v1/zylo-liquid/quality-check-declarations/{declaration_id}/reconcile`<br>`GET /api/v1/zylo-liquid/reconciliation-records`<br>`POST /api/v1/zylo-liquid/tanks/{tank_id}/reconcile-stock` |
+| `zyloLiquid.reconciliationSettings.manage` | `GET /api/v1/zylo-liquid/stations/{station_id}/reconciliation-settings`<br>`PUT /api/v1/zylo-liquid/stations/{station_id}/reconciliation-settings` |
+| `zyloLiquid.regulatoryDeclaration.read` | `GET /api/v1/zylo-liquid/regulatory-declarations` |
+| `zyloLiquid.regulatoryDocument.create` | `POST /api/v1/zylo-liquid/regulatory-declarations`<br>`POST /api/v1/zylo-liquid/regulatory-documents` |
+| `zyloLiquid.regulatoryDocument.manage` | `PATCH /api/v1/zylo-liquid/regulatory-documents/{document_id}`<br>`POST /api/v1/zylo-liquid/regulatory-documents/{document_id}/renew` |
+| `zyloLiquid.regulatoryDocument.read` | `GET /api/v1/zylo-liquid/regulatory-documents` |
+| `zyloLiquid.sale.create` | `POST /api/v1/zylo-liquid/sales`<br>`POST /api/v1/zylo-liquid/sales/bulk-import` |
+| `zyloLiquid.sale.read` | `GET /api/v1/zylo-liquid/sales` |
+| `zyloLiquid.securityEquipment.manage` | `POST /api/v1/zylo-liquid/security-equipment`<br>`PATCH /api/v1/zylo-liquid/security-equipment/{security_equipment_id}` |
+| `zyloLiquid.securityEquipment.read` | `GET /api/v1/zylo-liquid/security-equipment` |
+| `zyloLiquid.sellableProduct.manage` | `PATCH /api/v1/zylo-liquid/sellable-product-prices/{price_id}`<br>`POST /api/v1/zylo-liquid/sellable-products`<br>`POST /api/v1/zylo-liquid/sellable-products/bulk-import`<br>`PATCH /api/v1/zylo-liquid/sellable-products/{product_id}`<br>`POST /api/v1/zylo-liquid/sellable-products/{product_id}/prices` |
+| `zyloLiquid.sellableProduct.read` | `GET /api/v1/zylo-liquid/sellable-products`<br>`GET /api/v1/zylo-liquid/sellable-products/{product_id}/prices` |
+| `zyloLiquid.shiftCashDeclaration.create` | `POST /api/v1/zylo-liquid/shift-cash-declarations`<br>`PATCH /api/v1/zylo-liquid/shift-cash-declarations/{declaration_id}` |
+| `zyloLiquid.shiftCashDeclaration.read` | `GET /api/v1/zylo-liquid/shift-cash-declarations` |
 | `zyloLiquid.station.manage` | `POST /api/v1/zylo-liquid/stations`<br>`PATCH /api/v1/zylo-liquid/stations/{station_id}`<br>`POST /api/v1/zylo-liquid/stations/{station_id}/deactivate`<br>`POST /api/v1/zylo-liquid/stations/{station_id}/reactivate` |
-| `zyloLiquid.station.read` | `GET /api/v1/zylo-liquid/network/snapshot`<br>`GET /api/v1/zylo-liquid/network/summary`<br>`GET /api/v1/zylo-liquid/stations/{station_id}`<br>`GET /api/v1/zylo-liquid/stations/{station_id}/current-state` |
-| `zyloLiquid.stationFuelProduct.manage` | `POST /api/v1/zylo-liquid/station-fuel-products`<br>`PATCH /api/v1/zylo-liquid/station-fuel-products/{association_id}` |
-| `zyloLiquid.stationFuelProduct.read` | `GET /api/v1/zylo-liquid/station-fuel-products` |
+| `zyloLiquid.station.read` | `GET /api/v1/zylo-liquid/network/snapshot`<br>`GET /api/v1/zylo-liquid/network/summary`<br>`GET /api/v1/zylo-liquid/stations`<br>`GET /api/v1/zylo-liquid/stations/{station_id}`<br>`GET /api/v1/zylo-liquid/stations/{station_id}/current-state` |
+| `zyloLiquid.stationFinancial.manage` | `PATCH /api/v1/zylo-liquid/stations/{station_id}/financial` |
+| `zyloLiquid.stationFinancial.read` | `GET /api/v1/zylo-liquid/stations/{station_id}/financial` |
+| `zyloLiquid.stationFuelProduct.manage` | `POST /api/v1/zylo-liquid/station-fuel-products`<br>`PATCH /api/v1/zylo-liquid/station-fuel-products/{association_id}`<br>`PATCH /api/v1/zylo-liquid/station-fuel-products/{association_id}/thresholds` |
+| `zyloLiquid.stationFuelProduct.read` | `GET /api/v1/zylo-liquid/station-fuel-products`<br>`GET /api/v1/zylo-liquid/stations/{station_id}/fuel-products-overview` |
+| `zyloLiquid.stationService.manage` | `POST /api/v1/zylo-liquid/station-services`<br>`PATCH /api/v1/zylo-liquid/station-services/{service_id}` |
+| `zyloLiquid.stationService.read` | `GET /api/v1/zylo-liquid/station-services` |
+| `zyloLiquid.stationStaff.manage` | `POST /api/v1/zylo-liquid/station-staff`<br>`PATCH /api/v1/zylo-liquid/station-staff/{user_id}`<br>`POST /api/v1/zylo-liquid/station-staff/{user_id}/deactivate`<br>`POST /api/v1/zylo-liquid/station-staff/{user_id}/reset-password`<br>`PUT /api/v1/zylo-liquid/station-staff/{user_id}/role` |
+| `zyloLiquid.stationStaff.read` | `GET /api/v1/zylo-liquid/station-staff` |
+| `zyloLiquid.stationSupplier.manage` | `POST /api/v1/zylo-liquid/station-suppliers`<br>`PATCH /api/v1/zylo-liquid/station-suppliers/{station_supplier_id}` |
+| `zyloLiquid.stationSupplier.read` | `GET /api/v1/zylo-liquid/station-suppliers` |
+| `zyloLiquid.supplier.manage` | `POST /api/v1/zylo-liquid/suppliers`<br>`PATCH /api/v1/zylo-liquid/suppliers/{supplier_id}` |
+| `zyloLiquid.supplier.read` | `GET /api/v1/zylo-liquid/suppliers` |
 | `zyloLiquid.tank.manage` | `POST /api/v1/zylo-liquid/tanks`<br>`PATCH /api/v1/zylo-liquid/tanks/{tank_id}` |
-| `zyloLiquid.tank.read` | `GET /api/v1/zylo-liquid/tanks/{tank_id}`<br>`GET /api/v1/zylo-liquid/tanks/{tank_id}/current-state`<br>`GET /api/v1/zylo-liquid/tanks/{tank_id}/measurements` |
+| `zyloLiquid.tank.read` | `GET /api/v1/zylo-liquid/tanks`<br>`GET /api/v1/zylo-liquid/tanks/{tank_id}`<br>`GET /api/v1/zylo-liquid/tanks/{tank_id}/current-state`<br>`GET /api/v1/zylo-liquid/tanks/{tank_id}/measurements` |
 | `zyloLiquid.tankCalibration.manage` | `PUT /api/v1/zylo-liquid/tanks/{tank_id}/calibration-points` |
 | `zyloLiquid.tankCalibration.read` | `GET /api/v1/zylo-liquid/tanks/{tank_id}/calibration-points` |
 | `zyloLiquid.tankSensorMapping.manage` | `POST /api/v1/zylo-liquid/tank-sensor-mappings`<br>`POST /api/v1/zylo-liquid/tank-sensor-mappings/{mapping_id}/close` |
 | `zyloLiquid.tankSensorMapping.read` | `GET /api/v1/zylo-liquid/tank-sensor-mappings` |
+| `zyloLiquid.technician.manage` | `POST /api/v1/zylo-liquid/technicians` |
+| `zyloLiquid.technician.read` | `GET /api/v1/zylo-liquid/technicians` |
+| `zyloLiquid.traccarConnection.manage` | `GET /api/v1/zylo-liquid/traccar-connection`<br>`POST /api/v1/zylo-liquid/traccar-connection`<br>`GET /api/v1/zylo-tanker/traccar-connection`<br>`POST /api/v1/zylo-tanker/traccar-connection` |
+| `zyloLiquid.trackingLocation.manage` | `POST /api/v1/zylo-liquid/tracking-locations`<br>`DELETE /api/v1/zylo-liquid/tracking-locations/{location_id}`<br>`PATCH /api/v1/zylo-liquid/tracking-locations/{location_id}`<br>`POST /api/v1/zylo-liquid/truck-stop-reconciliations/{reconciliation_id}/resolve`<br>`POST /api/v1/zylo-liquid/vessel-stop-reconciliations/{reconciliation_id}/resolve`<br>`POST /api/v1/zylo-tanker/tracking-locations`<br>`DELETE /api/v1/zylo-tanker/tracking-locations/{location_id}`<br>`PATCH /api/v1/zylo-tanker/tracking-locations/{location_id}`<br>`POST /api/v1/zylo-tanker/truck-stop-reconciliations/{reconciliation_id}/resolve`<br>`POST /api/v1/zylo-tanker/vessel-stop-reconciliations/{reconciliation_id}/resolve` |
+| `zyloLiquid.trackingLocation.read` | `GET /api/v1/zylo-liquid/tracking-locations`<br>`GET /api/v1/zylo-liquid/truck-stop-reconciliations`<br>`GET /api/v1/zylo-liquid/vessel-stop-reconciliations`<br>`GET /api/v1/zylo-tanker/tracking-locations`<br>`GET /api/v1/zylo-tanker/truck-stop-reconciliations`<br>`GET /api/v1/zylo-tanker/vessel-stop-reconciliations` |
+| `zyloLiquid.trackingSettings.manage` | `PATCH /api/v1/zylo-liquid/tracking-settings`<br>`PATCH /api/v1/zylo-tanker/tracking-settings` |
+| `zyloLiquid.truck.manage` | `POST /api/v1/zylo-liquid/trucks`<br>`PATCH /api/v1/zylo-liquid/trucks/{truck_id}` |
+| `zyloLiquid.truck.read` | `GET /api/v1/zylo-liquid/tracking-settings`<br>`DELETE /api/v1/zylo-liquid/truck-stop-comments/{comment_id}`<br>`PATCH /api/v1/zylo-liquid/truck-stop-comments/{comment_id}`<br>`GET /api/v1/zylo-liquid/truck-stops/{stop_id}/comments`<br>`POST /api/v1/zylo-liquid/truck-stops/{stop_id}/comments`<br>`GET /api/v1/zylo-liquid/trucks`<br>`GET /api/v1/zylo-liquid/trucks/current-positions`<br>`GET /api/v1/zylo-liquid/trucks/live-positions`<br>`GET /api/v1/zylo-liquid/trucks/{truck_id}/orders`<br>`GET /api/v1/zylo-liquid/trucks/{truck_id}/positions`<br>`GET /api/v1/zylo-liquid/trucks/{truck_id}/stops`<br>`GET /api/v1/zylo-tanker/tracking-settings`<br>`DELETE /api/v1/zylo-tanker/truck-stop-comments/{comment_id}`<br>`PATCH /api/v1/zylo-tanker/truck-stop-comments/{comment_id}`<br>`GET /api/v1/zylo-tanker/truck-stops/{stop_id}/comments`<br>`POST /api/v1/zylo-tanker/truck-stops/{stop_id}/comments`<br>`GET /api/v1/zylo-tanker/trucks/current-positions`<br>`GET /api/v1/zylo-tanker/trucks/live-positions`<br>`GET /api/v1/zylo-tanker/trucks/{truck_id}/positions`<br>`GET /api/v1/zylo-tanker/trucks/{truck_id}/stops` |
+| `zyloLiquid.truckOrderAssignment.manage` | `POST /api/v1/zylo-liquid/purchase-orders/{purchase_order_id}/trucks`<br>`DELETE /api/v1/zylo-liquid/purchase-orders/{purchase_order_id}/trucks/{truck_id}` |
+| `zyloTanker.vessel.manage` | `POST /api/v1/zylo-tanker/vessels`<br>`DELETE /api/v1/zylo-tanker/vessels/{vessel_id}/destination`<br>`PUT /api/v1/zylo-tanker/vessels/{vessel_id}/destination` |
+| `zyloTanker.vessel.read` | `GET /api/v1/zylo-liquid/tracking-settings`<br>`DELETE /api/v1/zylo-liquid/vessel-stop-comments/{comment_id}`<br>`PATCH /api/v1/zylo-liquid/vessel-stop-comments/{comment_id}`<br>`GET /api/v1/zylo-liquid/vessel-stops/{stop_id}/comments`<br>`POST /api/v1/zylo-liquid/vessel-stops/{stop_id}/comments`<br>`GET /api/v1/zylo-liquid/vessels/current-positions`<br>`GET /api/v1/zylo-liquid/vessels/live-positions`<br>`GET /api/v1/zylo-liquid/vessels/{vessel_id}/positions`<br>`GET /api/v1/zylo-liquid/vessels/{vessel_id}/stops`<br>`GET /api/v1/zylo-tanker/tracking-settings`<br>`DELETE /api/v1/zylo-tanker/vessel-stop-comments/{comment_id}`<br>`PATCH /api/v1/zylo-tanker/vessel-stop-comments/{comment_id}`<br>`GET /api/v1/zylo-tanker/vessel-stops/{stop_id}/comments`<br>`POST /api/v1/zylo-tanker/vessel-stops/{stop_id}/comments`<br>`GET /api/v1/zylo-tanker/vessels`<br>`GET /api/v1/zylo-tanker/vessels/current-positions`<br>`GET /api/v1/zylo-tanker/vessels/live-positions`<br>`GET /api/v1/zylo-tanker/vessels/{vessel_id}`<br>`GET /api/v1/zylo-tanker/vessels/{vessel_id}/positions`<br>`GET /api/v1/zylo-tanker/vessels/{vessel_id}/stops` |
 
 ## Routes sans permission ni appartenance
 
 - `GET /`
+- `POST /api/v1/auth/activate`
 - `POST /api/v1/auth/change-password`
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/logout`
@@ -51,7 +124,6 @@ Source : les dépendances FastAPI des routes (`tests/route_inventory.py`).
 - `POST /api/v1/auth/refresh`
 - `POST /api/v1/auth/register`
 - `GET /api/v1/billing/plans`
-- `POST /api/v1/billing/plans`
 - `POST /api/v1/export/docx`
 - `POST /api/v1/export/xlsx`
 - `GET /api/v1/health`

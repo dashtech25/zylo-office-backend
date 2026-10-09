@@ -31,6 +31,9 @@ from app.shared.schemas import Page
 # Files/Location, ce comportement est vérifié par un test existant
 # (`test_list_alerts_without_permission_is_denied`), donc préservé tel
 # quel plutôt que silencieusement abandonné par le déplacement de code.
+# T-019 : gardes de permission des routes
+from app.rbac.service import require_permission_any_scope
+
 router = APIRouter(dependencies=[Depends(require_module_active("zylo_liquid"))])
 
 
@@ -47,6 +50,7 @@ async def _alert_station_scope(db: AsyncSession, organization_id: uuid.UUID, pat
     response_model=Page[AlertResponse],
     summary="Lister les alertes",
     description="Liste paginée des alertes (fuites suspectées, seuils de niveau, écarts de réconciliation, etc.), filtrable par station, cuve, camion, type et statut sur une plage de dates.",
+    dependencies=[Depends(require_permission_any_scope(ALERT_READ))],
 )
 async def list_alerts(
     pagination: PaginationParams = Depends(),

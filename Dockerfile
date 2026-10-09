@@ -2,8 +2,11 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# ENVIRONMENT=production explicite (T-002) : sans cette ligne, le défaut de
+# app/core/config.py s'appliquerait ; le contrat de l'image reste strict.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    ENVIRONMENT=production \
     PORT=3002
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl \

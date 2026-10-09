@@ -262,6 +262,11 @@ ignore_imports =
     app.location.service -> app.modules.zylo_liquid.permissions
     app.location.service -> app.modules.zylo_tanker.models
     app.location.service -> app.modules.zylo_tanker.permissions
+    # T-019 (gardes de permission des routes de localisation) : le routeur
+    # applique les mêmes constantes de permission que le service (TRUCK_READ,
+    # VESSEL_READ). Seules ces deux constantes sont importées, jamais les modèles.
+    app.location.router -> app.modules.zylo_liquid.permissions
+    app.location.router -> app.modules.zylo_tanker.permissions
 
 # T-036 (ARC-007) — contrat « Notifications ne dépend jamais de zylo_liquid »
 # NON posé ici : import-linter échoue (« Module 'app.notifications' does not

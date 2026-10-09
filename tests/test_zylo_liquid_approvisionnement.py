@@ -47,12 +47,14 @@ async def _create_supplier(client: AsyncClient, headers: dict, name: str) -> dic
     return res.json()
 
 
-async def _create_order(client: AsyncClient, headers: dict, station_id: str, tank_id: str, supplier_id: str, reference: str, volume: int) -> dict:
+async def _create_order(client: AsyncClient, headers: dict, station_id: str, fuel_product_id: str, supplier_id: str, reference: str, volume: int) -> dict:
+    # Contrat multi-produits (refonte 2026-09-17) : la commande porte ses lignes,
+    # une par produit ; la cuve est choisie à la livraison, pas à la commande.
     res = await client.post(
         "/api/v1/zylo-liquid/purchase-orders",
         json={
-            "stationId": station_id, "tankId": tank_id, "supplierId": supplier_id,
-            "orderReference": reference, "orderedVolumeLiters": volume,
+            "stationId": station_id, "supplierId": supplier_id, "orderReference": reference,
+            "lines": [{"fuelProductId": fuel_product_id, "orderedVolumeLiters": volume}],
         },
         headers=headers,
     )
@@ -107,17 +109,21 @@ async def test_truck_plate_unique_per_organization(client: AsyncClient, register
 async def test_purchase_order_requires_active_supplier(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
     headers = _headers(registered_user, zylo_liquid_organization)
     suffix = uuid.uuid4().hex[:8]
-    station_id, fuel_product_id, tank_id = await _setup_station_product_tank(client, headers, suffix)
+    station_id, fuel_product_id, _tank_id = await _setup_station_product_tank(client, headers, suffix)
     supplier = await _create_supplier(client, headers, f"Fournisseur inactif {suffix}")
 
     patch_res = await client.patch(f"/api/v1/zylo-liquid/suppliers/{supplier['id']}", json={"active": False}, headers=headers)
     assert patch_res.status_code == 200
 
+    # Décision zylo-liquid/ordre-validation-fournisseur.md, option A : la commande
+    # est complète (une ligne), le schéma passe, et seul le contrôle fournisseur
+    # peut donc refuser la commande. Le test ne doit pas s'appuyer sur une
+    # commande vide, que le schéma refuse désormais.
     res = await client.post(
         "/api/v1/zylo-liquid/purchase-orders",
         json={
-            "stationId": station_id, "tankId": tank_id, "supplierId": supplier["id"],
-            "orderReference": "PO-INACTIF", "orderedVolumeLiters": 5000,
+            "stationId": station_id, "supplierId": supplier["id"], "orderReference": "PO-INACTIF",
+            "lines": [{"fuelProductId": fuel_product_id, "orderedVolumeLiters": 5000}],
         },
         headers=headers,
     )
@@ -132,20 +138,32 @@ async def test_delivery_link_coherence_controls(client: AsyncClient, registered_
     supplier_a = await _create_supplier(client, headers, f"Fournisseur A {suffix}")
     supplier_b = await _create_supplier(client, headers, f"Fournisseur B {suffix}")
 
-    # Second produit carburant : la cuve ne porte que le premier.
+    # Second produit carburant, avec sa propre cuve sur la même station : la
+    # cuve de la ligne de livraison doit porter un produit différent de la
+    # ligne de commande pour déclencher le contrôle de produit.
     fp2_res = await client.post(
         "/api/v1/zylo-liquid/fuel-products", json={"name": f"Produit autre {suffix}", "code": f"Q{suffix[:8]}"}, headers=headers
     )
     other_product_id = fp2_res.json()["id"]
+    other_tank_res = await client.post(
+        "/api/v1/zylo-liquid/tanks",
+        json={
+            "stationId": station_id, "fuelProductId": other_product_id, "tankNumber": 2, "displayName": f"Cuve autre {suffix}",
+            "capacityLiters": 20000, "tankHeightMm": 3000, "heightAlarmMm": 2800, "heightAlertMm": 2600, "lowAlarmMm": 300,
+        },
+        headers=headers,
+    )
+    other_tank_id = other_tank_res.json()["id"]
 
-    order = await _create_order(client, headers, station_id, tank_id, supplier_a["id"], "PO-COHERENCE", 5000)
+    order = await _create_order(client, headers, station_id, fuel_product_id, supplier_a["id"], "PO-COHERENCE", 5000)
+    order_line_id = order["lines"][0]["id"]
 
-    # Produit différent de celui de la cuve visée par la commande.
+    # Cuve d'un produit différent de celui de la ligne de commande.
     wrong_product = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
         json={
-            "stationId": station_id, "fuelProductId": other_product_id, "eventAt": "2026-02-01T08:00:00",
-            "declaredVolumeLiters": 1000, "purchaseOrderId": order["id"],
+            "stationId": station_id, "eventAt": "2026-02-01T08:00:00",
+            "lines": [{"tankId": other_tank_id, "volumeLiters": 1000, "purchaseOrderLineId": order_line_id}],
         },
         headers=headers,
     )
@@ -156,8 +174,8 @@ async def test_delivery_link_coherence_controls(client: AsyncClient, registered_
     wrong_supplier = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
         json={
-            "stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": "2026-02-01T08:00:00",
-            "declaredVolumeLiters": 1000, "supplierId": supplier_b["id"], "purchaseOrderId": order["id"],
+            "stationId": station_id, "eventAt": "2026-02-01T08:00:00", "supplierId": supplier_b["id"],
+            "lines": [{"tankId": tank_id, "volumeLiters": 1000, "purchaseOrderLineId": order_line_id}],
         },
         headers=headers,
     )
@@ -168,8 +186,8 @@ async def test_delivery_link_coherence_controls(client: AsyncClient, registered_
     unknown_truck = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
         json={
-            "stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": "2026-02-01T08:00:00",
-            "declaredVolumeLiters": 1000, "truckId": str(uuid.uuid4()),
+            "stationId": station_id, "eventAt": "2026-02-01T08:00:00", "truckId": str(uuid.uuid4()),
+            "lines": [{"tankId": tank_id, "volumeLiters": 1000}],
         },
         headers=headers,
     )
@@ -181,15 +199,17 @@ async def test_delivery_link_coherence_controls(client: AsyncClient, registered_
     ok = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
         json={
-            "stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": "2026-02-01T08:00:00",
-            "declaredVolumeLiters": 1000, "supplierId": supplier_a["id"], "purchaseOrderId": order["id"],
+            "stationId": station_id, "eventAt": "2026-02-01T08:00:00", "supplierId": supplier_a["id"],
+            "lines": [{"tankId": tank_id, "volumeLiters": 1000, "purchaseOrderLineId": order_line_id}],
         },
         headers=headers,
     )
     assert ok.status_code == 201, ok.text
     assert ok.json()["supplierName"] == supplier_a["name"]
     assert ok.json()["supplierId"] == supplier_a["id"]
-    assert ok.json()["purchaseOrderId"] == order["id"]
+    # Le rattachement à la commande porte désormais sur la ligne de livraison
+    # (et non plus sur l'en-tête) : c'est là que le contrat le place.
+    assert ok.json()["lines"][0]["purchaseOrderLineId"] == order_line_id
 
 
 async def test_order_received_only_on_completing_lock(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
@@ -200,13 +220,14 @@ async def test_order_received_only_on_completing_lock(client: AsyncClient, regis
     suffix = uuid.uuid4().hex[:8]
     station_id, fuel_product_id, tank_id = await _setup_station_product_tank(client, headers, suffix)
     supplier = await _create_supplier(client, headers, f"Fournisseur {suffix}")
-    order = await _create_order(client, headers, station_id, tank_id, supplier["id"], "PO-PARTIEL", 10000)
+    order = await _create_order(client, headers, station_id, fuel_product_id, supplier["id"], "PO-PARTIEL", 10000)
+    order_line_id = order["lines"][0]["id"]
 
     first_res = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
         json={
-            "stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": "2026-02-01T08:00:00",
-            "declaredVolumeLiters": 3000, "supplierId": supplier["id"], "purchaseOrderId": order["id"],
+            "stationId": station_id, "eventAt": "2026-02-01T08:00:00", "supplierId": supplier["id"],
+            "lines": [{"tankId": tank_id, "volumeLiters": 3000, "purchaseOrderLineId": order_line_id}],
         },
         headers=headers,
     )
@@ -218,46 +239,51 @@ async def test_order_received_only_on_completing_lock(client: AsyncClient, regis
 
     lock_first = await client.post(f"/api/v1/zylo-liquid/delivery-declarations/{first_id}/lock", headers=headers)
     assert lock_first.status_code == 200, lock_first.text
+    # Réception partielle (3000 L sur 10000 L) : statut 'partially_received' du
+    # modèle, jamais 'received' tant que le volume commandé n'est pas atteint.
     still_open = await client.get(f"/api/v1/zylo-liquid/purchase-orders/{order['id']}", headers=headers)
-    assert still_open.json()["status"] == "open"
+    assert still_open.json()["status"] == "partially_received"
 
     second_res = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
         json={
-            "stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": "2026-02-01T16:00:00",
-            "declaredVolumeLiters": 7000, "supplierId": supplier["id"], "purchaseOrderId": order["id"],
+            "stationId": station_id, "eventAt": "2026-02-01T16:00:00", "supplierId": supplier["id"],
+            "lines": [{"tankId": tank_id, "volumeLiters": 7000, "purchaseOrderLineId": order_line_id}],
         },
         headers=headers,
     )
     second_id = second_res.json()["id"]
+    second_line_id = second_res.json()["lines"][0]["id"]
     lock_second = await client.post(f"/api/v1/zylo-liquid/delivery-declarations/{second_id}/lock", headers=headers)
     assert lock_second.status_code == 200, lock_second.text
 
     received = await client.get(f"/api/v1/zylo-liquid/purchase-orders/{order['id']}", headers=headers)
     assert received.json()["status"] == "received"
 
-    # Plus aucune nouvelle réception sur cette commande — mais une
-    # déclaration CORRECTIVE de la dernière livraison reste possible : elle
-    # reproduit le rattachement d'origine, elle ne crée aucun volume nouveau.
+    # Plus aucune nouvelle réception sur cette ligne de commande : le refus porte
+    # le code de la ligne (`purchase_order_line_received`, refonte 2026-09-17).
     extra = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
         json={
-            "stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": "2026-02-02T08:00:00",
-            "declaredVolumeLiters": 7000, "supplierId": supplier["id"], "purchaseOrderId": order["id"],
+            "stationId": station_id, "eventAt": "2026-02-02T08:00:00", "supplierId": supplier["id"],
+            "lines": [{"tankId": tank_id, "volumeLiters": 7000, "purchaseOrderLineId": order_line_id}],
         },
         headers=headers,
     )
     assert extra.status_code == 409
-    assert extra.json()["error"]["code"] == "purchase_order_received"
+    assert extra.json()["error"]["code"] == "purchase_order_line_received"
 
+    # Une correction CIBLÉE de la dernière livraison reste possible sur la ligne
+    # réceptionnée : elle passe par `correct-lines` (seul chemin qui tolère une
+    # ligne déjà réceptionnée) et ne crée aucun volume nouveau.
     correction = await client.post(
-        "/api/v1/zylo-liquid/delivery-declarations",
+        "/api/v1/zylo-liquid/delivery-declarations/correct-lines",
         json={
-            "stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": "2026-02-01T16:00:00",
-            "declaredVolumeLiters": 6900, "supplierId": supplier["id"], "purchaseOrderId": order["id"],
-            "correctsDeclarationId": second_id, "changeReason": "Écart de comptage corrigé",
+            "declarationId": second_id,
+            "changeReason": "Écart de comptage corrigé",
+            "lines": [{"correctsLineId": second_line_id, "tankId": tank_id, "volumeLiters": 6900, "purchaseOrderLineId": order_line_id}],
         },
         headers=headers,
     )
     assert correction.status_code == 201, correction.text
-    assert correction.json()["correctsDeclarationId"] == second_id
+    assert correction.json()["lines"][0]["correctsLineId"] == second_line_id

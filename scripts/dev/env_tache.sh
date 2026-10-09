@@ -117,6 +117,10 @@ if [ "$CMD" = "creer" ]; then
     # Le backend lit .env (app/core/config.py) ; conftest.py lit TEST_DATABASE_URL.
     umask 077
     {
+      # T-002 : hors development, config.py refuse les secrets de repli ; le worktree
+      # est un environnement local, donc ENVIRONMENT=development est posé explicitement
+      # (sinon alembic upgrade head échouerait à l'import de app.core.config).
+      echo "ENVIRONMENT=development"
       echo "PORT=$PORT_BACK"
       echo "CORS_ORIGINS=[\"http://localhost:$PORT_FRONT_DEV\",\"http://127.0.0.1:$PORT_FRONT_DEV\"]"
       echo "DATABASE_URL=$(url_base_test)"

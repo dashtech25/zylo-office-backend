@@ -2005,6 +2005,7 @@ class ShiftReportTankLine(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint("reportId", "tankId", name="uq_zlShiftReportTankLine_report_tank"),
         CheckConstraint("\"openingStockSource\" IN ('previous_real_stock','initial')", name="ck_zlShiftReportTankLine_openingStockSource"),
         CheckConstraint("\"openingStockLiters\" >= 0", name="ck_zlShiftReportTankLine_openingStock_positive"),
+        CheckConstraint("\"realStockSource\" IS NULL OR \"realStockSource\" IN ('calibration_table','paper_table')", name="ck_zlShiftReportTankLine_realStockSource"),
         {"comment": "Ligne de cuve d'un rapport de tour : stock d'ouverture en litres (reporté ou initial) et instantané des libellés de la cuve."},
     )
 
@@ -2020,6 +2021,27 @@ class ShiftReportTankLine(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReportTankLine.id", ondelete="SET NULL"), nullable=True, comment="Ligne de cuve du tour précédent reportée ; nulle si initial."
     )
     closingRealStockLiters: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True, comment="Stock réel de fermeture en litres : RÉSERVÉ à D2 (non écrit par B3) ; source du report du tour suivant.")
+    # --- D2 : jaugeage de fermeture (la colonne closingRealStockLiters ci-dessus est celle de B3, non recréée) ---
+    gaugingDeclarationId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidManualGaugingDeclaration.id", ondelete="SET NULL"), nullable=True, comment="D2 : ManualGaugingDeclaration COURANTE de la cuve pour ce tour (la hauteur, la méthode et le rapprochement restent portés par la déclaration)."
+    )
+    gaugingHeightMm: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True, comment="D2 : copie de declaredHeightMm (toujours lue à la règle, même si les litres viennent de la table papier) pour la lecture rapide du rapport.")
+    gaugedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="D2 : heure de la mesure (UTC) ; = eventAt de la déclaration.")
+    realStockSource: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="D2 : calibration_table (hauteur convertie par la table de jaugeage) | paper_table (litres lus sur la table papier, table absente).")
+    paperTableReference: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="D2 : référence du document papier, obligatoire si realStockSource = paper_table.")
+    measuredByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, comment="D2 : préleveur (déclaratif).")
+    assistedByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, comment="D2 : aide à la règle (facultatif, déclaratif).")
+    receivedLiters: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True, comment="D2 : litres reçus (réceptions DÉCLARÉES depuis l'ouverture) figés à l'enregistrement ; jamais la télémétrie.")
+    soldOutLiters: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="D2 : litres vendus par les pompes de la cuve (D1) figés à l'enregistrement ; nul si D1 pas encore enregistré.")
+    nonSaleOutLiters: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="D2 : sorties hors vente nettes (somme exits - retours en cuve des pompes, D1) ; nul si D1 pas encore enregistré.")
+    theoreticalStockLiters: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="D2 : ouverture + reçu - vendu - sorties hors vente nettes ; nul tant que D1 n'est pas enregistré (jamais inventé).")
+    stockVarianceLiters: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="D2 : écart de stock = réel - théorique, signé (positif = excédent, négatif = manquant).")
+    basedOnClosingVersion: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="D2 : version de la fermeture des pompes (D1) sur laquelle repose le calcul ; différente de l'actuelle = ligne à recalculer.")
+    gaugingVersion: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", comment="D2 : verrou optimiste du bloc jaugeage (identique sur toutes les lignes du rapport, incrémenté à chaque enregistrement).")
+    gaugingUpdatedByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, comment="D2 : dernier utilisateur ayant enregistré le jaugeage (message de conflit de version).")
+    gaugingUpdatedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="D2 : horodatage (UTC) du dernier enregistrement du jaugeage.")
+    varianceNote: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="D2 : explication facultative de l'écart de stock.")
+    lastCorrectionInitialedByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, comment="D2 : « paraphé par » de la dernière rature (correction d'une mesure enregistrée).")
 
 
 class ShiftPumpAssignmentSheet(UUIDPrimaryKeyMixin, TimestampMixin, Base):

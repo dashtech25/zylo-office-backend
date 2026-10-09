@@ -47,6 +47,7 @@ from app.modules.zylo_liquid.exploitation.schemas_personnel import StationStaffL
 from app.modules.zylo_liquid.permissions import HOLYKELL_ACCOUNT_MANAGE
 from app.modules.zylo_liquid.rotes.shifts import router as shifts_router
 from app.modules.zylo_liquid.rotes.pumps import router as pumps_router
+from app.modules.zylo_liquid.rotes.jauge import router as jauge_router
 from app.modules.zylo_liquid.rotes.caisse import router as caisse_router
 from app.modules.zylo_liquid.rotes.rapport import router as rapport_router
 from app.modules.zylo_liquid.rotes.personnel import router as personnel_router
@@ -2320,6 +2321,7 @@ async def reconcile_stock(
 # Incluses ici pour hériter de la dépendance `require_module_active("zylo_liquid")` de `router`.
 router.include_router(shifts_router)
 router.include_router(pumps_router)
+router.include_router(jauge_router)
 router.include_router(caisse_router)
 router.include_router(rapport_router)
 router.include_router(personnel_router)

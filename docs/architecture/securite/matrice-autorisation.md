@@ -122,6 +122,8 @@ Source : les dépendances FastAPI des routes (`tests/route_inventory.py`).
 | `zyloLiquid.tank.read` | `GET /api/v1/zylo-liquid/tanks`<br>`GET /api/v1/zylo-liquid/tanks/{tank_id}`<br>`GET /api/v1/zylo-liquid/tanks/{tank_id}/current-state`<br>`GET /api/v1/zylo-liquid/tanks/{tank_id}/measurements` |
 | `zyloLiquid.tankCalibration.manage` | `PUT /api/v1/zylo-liquid/tanks/{tank_id}/calibration-points` |
 | `zyloLiquid.tankCalibration.read` | `GET /api/v1/zylo-liquid/tanks/{tank_id}/calibration-points` |
+| `zyloLiquid.tankGauging.manage` | `PUT /api/v1/zylo-liquid/shift-reports/{report_id}/closing-gauging` |
+| `zyloLiquid.tankGauging.read` | `GET /api/v1/zylo-liquid/shift-reports/{report_id}/closing-gauging` |
 | `zyloLiquid.tankSensorMapping.manage` | `POST /api/v1/zylo-liquid/tank-sensor-mappings`<br>`POST /api/v1/zylo-liquid/tank-sensor-mappings/{mapping_id}/close` |
 | `zyloLiquid.tankSensorMapping.read` | `GET /api/v1/zylo-liquid/tank-sensor-mappings` |
 | `zyloLiquid.technician.manage` | `POST /api/v1/zylo-liquid/technicians` |

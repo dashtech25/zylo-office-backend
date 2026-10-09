@@ -32,3 +32,9 @@ Option 2. Vérifié : `remy` contient déjà `require_permission` et les tests `
 ## État d'avancement
 
 - Aucun changement fait sur `remy` ni sur les branches wip.
+
+## État d'application (2026-10-09)
+
+- Non modifié par le lot B-L2/B-L3 (`app/rbac/service.py`, `currency_router`, `geo_router`, `permissions` du lot B-L5 : hors périmètre).
+- Le lot exploitation n'ajoute que des routes gardées par `require_permission`, `require_permission_scoped_via*` (définies dans `zylo_liquid/scopes.py`) et, pour `/my-shift-assignment` et la liste des membres, `require_permission_any_scope` déjà présent dans `rbac/service.py`.
+- Les gardes `require_permission_scoped_via_body` et `_query` sont copiées dans `zylo_liquid/scopes.py` (même logique que la version du snapshot) pour ne pas toucher `rbac/service.py`. À fusionner dans `rbac` lors de l'intégration de B-L5.

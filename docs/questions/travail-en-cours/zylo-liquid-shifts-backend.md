@@ -30,3 +30,12 @@ Option 1, après fusion de T-018 (sinon les permissions du lot seront réécrite
 
 - Valider l'option (1, 2 ou 3).
 - Valider le mécanisme de remise du mot de passe temporaire des salariés.
+
+## État d'application (2026-10-09)
+
+- **Recommandation appliquée** : option 1 (sous-lots), après T-018 (fusionnée). Branche `feat/T-004b-lot-liquid`, à partir de `remy` (T-034 déjà fusionnée : `783e9c6`).
+- **Intégré** : B-L4 (règles pures, commit `f123de3`), B-L2 (commit `b028af6`), B-L3 (jaugeage et migration `c8d0e2f4a516`, commit suivant).
+- **Corrigé à l'intégration** : mot de passe Holykell écrit chiffré (T-027) ; plus aucun mot de passe temporaire dans les réponses (T-021) ; `assign_role(commit=False)` non repris (lot B-L5).
+- **Non repris** : B-L6 (démonstrations, seeds archivés) ; B-L5 (`require_permission_any_scope` et gardes de portée, `currency_router`, `geo_router`).
+- **Points ouverts** : [base de test](base-test-t097.md) (bloque l'exécution des tests), [personnel et accès](personnel-acces.md), [rôles du lot](roles-b-l2.md).
+- **Tests** : non exécutés à ce stade (base absente). Vérifiés : import, lint-imports, inventaire des routes, migrations hors ligne, collecte de 883 tests.

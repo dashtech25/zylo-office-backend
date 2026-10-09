@@ -9,3 +9,9 @@
 - [api/](api/README.md)
 - [database/](database/README.md)
 - [validation/](validation/README.md)
+
+## Exploitation de station (T-004b, lots B-L2 à B-L4)
+
+- [Exploitation de station](exploitation.md) : tours, pompes, caisse, rapport, périmètre et dépendances.
+- [Personnel et accès](personnel-et-acces.md) : création, lot et réinvitation sans mot de passe (T-021).
+- [Jaugeage des cuves](jaugeage.md) : index et jaugeage de fermeture (D2).

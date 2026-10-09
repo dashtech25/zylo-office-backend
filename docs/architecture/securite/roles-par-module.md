@@ -81,3 +81,10 @@ codes par message d'erreur).
   Les retirer changerait les droits des utilisateurs existants : non appliqué, à trancher.
 - Un utilisateur ne peut recevoir qu'un rôle par module, comme demandé. Un cumul éventuel demanderait
   une décision distincte.
+
+## 8. Affectation par module (T-022)
+
+- Routes de membre par module : `GET .../modules/{code}/members`, `PUT .../modules/{code}/users/{userId}/role`,
+  `DELETE .../modules/{code}/users/{userId}/role`, `GET .../modules/{code}/users/{userId}/role-preview`.
+- Flux, résolution et garde-fous : `docs/modules/affectation-par-module/`.
+- Le remplacement d'un rôle est atomique ; le dernier administrateur du module ne peut pas être retiré (409).

@@ -1,6 +1,6 @@
 # T-022 : Affecter un utilisateur à un module avec ses droits propres (API)
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : iam · **Type** : feature
+- **Statut** : À vérifier · **Priorité** : P1 · **Vague** : 3 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : iam · **Type** : feature
 - **Branche suggérée** : `feat/T-022-affectation-module` · **Base de test** : `zylo_t022_test` · **Ports** : back 3122
 - **Dépendances** : T-018, T-019, T-021
 - **Décisions requises** : aucune (dépend de T-018, validé par le client)

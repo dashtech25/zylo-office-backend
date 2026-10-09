@@ -1,6 +1,6 @@
 # T-019 : Garde-fous IAM (dernier propriétaire, appartenance, deny, plans, soft-delete)
 
-- **Statut** : Planifiée · **Priorité** : P1 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : iam · **Type** : security
+- **Statut** : À vérifier · **Priorité** : P1 · **Vague** : 2 · **Taille** : M · **Dépôt(s)** : backend · **Domaine** : iam · **Type** : security
 - **Branche suggérée** : `fix/T-019-garde-fous-iam` · **Base de test** : `zylo_t019_test` · **Ports** : back 3119
 - **Dépendances** : T-010
 - **Décisions requises** : `rbac/creation-organisation.md` (en attente, valeur du quota)

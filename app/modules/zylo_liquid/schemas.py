@@ -857,6 +857,8 @@ class AuthorizationResponse(BaseModel):
 
 class CreateSaleRequest(BaseModel):
     stationId: uuid.UUID
+    # Début de shift — optionnel : ventes d'avant l'ajout de ce champ sans valeur.
+    shiftStart: datetime | None = None
     eventAt: datetime
     fuelProductId: uuid.UUID
     quantityLiters: float = Field(gt=0)
@@ -882,6 +884,7 @@ class SaleResponse(BaseModel):
     id: uuid.UUID
     stationId: uuid.UUID
     authorUserId: uuid.UUID
+    shiftStart: datetime | None
     eventAt: datetime
     fuelProductId: uuid.UUID
     quantityLiters: float
@@ -1355,17 +1358,26 @@ class StationStaffResponse(BaseModel):
     assignedStationId: uuid.UUID | None
     directManagerUserId: uuid.UUID | None
     assignedAt: date
+    # A4 : poste sur la station d'affectation (attribution de rôle scopée
+    # station), libellé fourni par le backend. Tous nuls = aucun rôle sur la
+    # station (jamais un poste inventé).
+    roleId: uuid.UUID | None = None
+    roleCode: str | None = None
+    roleName: str | None = None
+    positionLabel: str | None = None
+    hierarchyLevel: int | None = None
+    directManagerName: str | None = None
 
     model_config = {"from_attributes": True}
 
 
 class CreateStationStaffResponse(BaseModel):
-    """Le mot de passe temporaire n'apparaît QUE dans cette réponse, une
-    seule fois, à la création — jamais stocké en clair, jamais rejoué par
-    aucun autre endpoint (StationStaffResponse ne le porte pas)."""
+    """T-021 : aucun mot de passe dans la réponse. Le compte est créé en
+    attente ; la personne active son accès par le lien reçu par e-mail, dont
+    l'échéance est donnée ici."""
 
     staff: StationStaffResponse
-    temporaryPassword: str
+    invitationExpiresAt: datetime
 
 
 class ChangeStationStaffRoleRequest(BaseModel):
@@ -1379,11 +1391,11 @@ class ChangeStationStaffRoleRequest(BaseModel):
 
 
 class ResetStationStaffPasswordResponse(BaseModel):
-    """Même contrat que `CreateStationStaffResponse.temporaryPassword` : le
-    mot de passe temporaire n'apparaît qu'ici, une seule fois, jamais stocké
-    en clair ni rejouable ensuite."""
+    """T-021 : pas de mot de passe renvoyé. Seul un nouveau lien d'activation
+    (compte en attente) est émis, par e-mail."""
 
-    temporaryPassword: str
+    userId: uuid.UUID
+    invitationExpiresAt: datetime
 
 
 # ================================================================
@@ -1818,3 +1830,8 @@ class RegulatoryDeclarationResponse(BaseModel):
     reserve: str | None
 
     model_config = {"from_attributes": True}
+
+
+class CreateHolykellAccountRequest(BaseModel):
+    holykellUsername: str = Field(min_length=1, max_length=100)
+    holykellPassword: str = Field(min_length=1, max_length=255)

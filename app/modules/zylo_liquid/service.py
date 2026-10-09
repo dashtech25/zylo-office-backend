@@ -3,6 +3,7 @@ import secrets
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 
+import httpx
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +12,11 @@ logger = logging.getLogger(__name__)
 
 from app.alerts import service as alerts_service
 from app.audit.service import record_audit_event
+from app.core.config import settings
 from app.core.errors import AppError
+from app.core.field_crypto import chiffrer
+from app.integrations.holykell import client as holykell_client
+from app.integrations.holykell.client import HolykellApiError, HolykellAuthError
 from app.files import service as files_service
 from app.files.schemas import DocumentResponse
 from app.core.security import hash_password
@@ -23,6 +28,9 @@ from app.rbac.service import assign_role, unassign_role
 from app.shared.simple_cache import TTLCache
 from app.shared.storage import get_storage_backend
 
+from app.modules.zylo_liquid.nommage_pompes import _resync_pump_names  # noqa: E402
+from app.modules.zylo_liquid.algorithms import SENSOR_STALE_THRESHOLD_MINUTES  # noqa: E402
+from app.modules.zylo_liquid.schemas import CreateHolykellAccountRequest  # noqa: E402
 from app.modules.zylo_liquid.permissions import (
     CARRIER_MANAGE,
     CARRIER_READ,
@@ -320,7 +328,7 @@ from app.shared.schemas import Page, PageMeta
 # Façade (T-034, lot 1) : stations, cuves et helpers partagés vivent dans `stations/`,
 # `tanks/` et `common.py`. Ces réexports gardent les anciens chemins (router, dev_seed,
 # tests) inchangés. Ne pas ajouter de logique ici.
-from app.modules.zylo_liquid.common import fuel_product_list_cache, _check_declaration_scope  # noqa: F401
+from app.modules.zylo_liquid.common import fuel_product_list_cache, _check_declaration_scope, _check_org_scope  # noqa: F401
 from app.modules.zylo_liquid.stations.service import (  # noqa: F401
     create_fuel_product,
     get_fuel_product,
@@ -383,12 +391,18 @@ async def update_fuel_product(
     db: AsyncSession, organization_id: uuid.UUID, fuel_product_id: uuid.UUID, data: UpdateFuelProductRequest
 ) -> FuelProduct:
     fuel_product = await get_fuel_product(db, organization_id, fuel_product_id)
-    for field, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+    for field, value in updates.items():
         setattr(fuel_product, field, value)
+    if "name" in updates:
+        # Le nom des pompes embarque le nom du produit (figé en base) :
+        # resynchronisé dans la même transaction que le renommage.
+        await _resync_pump_names(db, fuel_product_id=fuel_product.id)
     await db.commit()
     await db.refresh(fuel_product)
     fuel_product_list_cache.invalidate_prefix(f"org:{organization_id}:")
     return fuel_product
+
 
 
 # ================================================================
@@ -631,7 +645,18 @@ def _build_tank_current_state(
             lastMeasurementAt=None,
         )
 
-    sensor_status = "online" if product_level.hkLastStatus == 1 else "offline"
+    # "online" exige à la fois le dernier statut connu ET une valeur reçue
+    # récemment — sans ce second critère, une synchronisation totalement
+    # arrêtée (compte désactivé, panne API) laisse `hkLastStatus` figé à sa
+    # dernière valeur pour toujours, affichant "connectée" indéfiniment
+    # (constat terrain, badge "sonde connectée" sur une cuve muette depuis
+    # 2 jours).
+    is_stale = (
+        product_level.lastValueAt is None
+        or datetime.now(timezone.utc).replace(tzinfo=None) - product_level.lastValueAt
+        > timedelta(minutes=SENSOR_STALE_THRESHOLD_MINUTES)
+    )
+    sensor_status = "online" if product_level.hkLastStatus == 1 and not is_stale else "offline"
     height_mm = float(product_level.lastValue)
 
     volume_brut = interpolate_height_to_volume(calibration_points, height_mm) if calibration_points else None
@@ -698,6 +723,7 @@ def _build_tank_current_state(
         emptyVolumeLiters=empty_volume,
         lastMeasurementAt=product_level.lastValueAt,
     )
+
 
 
 async def get_tanks_current_state_batch(db: AsyncSession, tanks: list[Tank]) -> dict[uuid.UUID, TankCurrentStateResponse]:
@@ -1088,16 +1114,25 @@ async def get_delivery_in_progress_for_tank(db: AsyncSession, tank_id: uuid.UUID
     return {**candidate, "startVolumeLiters": start_volume, "currentVolumeLiters": current_volume}
 
 
-async def list_deliveries_in_progress(db: AsyncSession, organization_id: uuid.UUID) -> list[DeliveryInProgressResponse]:
-    """Balaie toutes les cuves actives de l'organisation — coût raisonnable
-    à l'échelle d'un réseau de stations (dizaines de cuves), chaque
-    recherche étant bornée à `lookback_minutes` plutôt qu'à tout
+async def list_deliveries_in_progress(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID) -> list[DeliveryInProgressResponse]:
+    """Balaie toutes les cuves actives VISIBLES de l'utilisateur — coût
+    raisonnable à l'échelle d'un réseau de stations (dizaines de cuves),
+    chaque recherche étant bornée à `lookback_minutes` plutôt qu'à tout
     l'historique. Jamais une deuxième source de vérité : une cuve dont la
     hausse vient de se stabiliser disparaîtra d'ici (elle devient une vraie
-    `DeliveryDetected` au prochain cycle de `run_delivery_detection_for_tank`)."""
-    tanks_result = await db.execute(
-        select(Tank).join(Station, Station.id == Tank.stationId).where(Station.organizationId == organization_id, Tank.active)
-    )
+    `DeliveryDetected` au prochain cycle de `run_delivery_detection_for_tank`).
+    Filtrage par portée ajouté le 2026-09-27 (même principe que
+    `list_deliveries`/`list_stations`) — un Gérant scopé à sa station ne
+    voit ici que les cuves de celle-ci, jamais un 403 sur tout l'endpoint
+    ni les cuves des autres stations."""
+    sees_all, visible_station_ids = await list_visible_resource_ids(db, actor_user_id, organization_id, DELIVERY_READ, "station")
+    if not sees_all and not visible_station_ids:
+        raise AppError(code="permission_denied", message=f"Permission manquante : {DELIVERY_READ}.", status_code=403)
+
+    stmt = select(Tank).join(Station, Station.id == Tank.stationId).where(Station.organizationId == organization_id, Tank.active)
+    if not sees_all:
+        stmt = stmt.where(Tank.stationId.in_(visible_station_ids))
+    tanks_result = await db.execute(stmt)
     tanks = list(tanks_result.scalars().all())
 
     results: list[DeliveryInProgressResponse] = []
@@ -1118,6 +1153,7 @@ async def list_deliveries_in_progress(db: AsyncSession, organization_id: uuid.UU
             )
         )
     return results
+
 
 
 def _delivery_to_response(delivery: DeliveryDetected, tank: Tank) -> DeliveryDetectedResponse:
@@ -2184,6 +2220,46 @@ async def get_holykell_account_sync_status(db: AsyncSession, organization_id: uu
     account = result.scalar_one_or_none()
     if account is None:
         raise AppError(code="holykell_account_not_found", message="Compte Holykell introuvable.", status_code=404)
+    return account
+
+
+async def create_holykell_account(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateHolykellAccountRequest
+) -> HolykellAccount:
+    """Connecte l'organisation à un compte Holykell réel. Les identifiants sont vérifiés en
+    se connectant AVANT tout enregistrement (jamais un compte qui échouerait en silence à chaque
+    cycle de synchro). Le mot de passe n'est écrit que chiffré (T-027, `holykellPasswordChiffre`) ;
+    `tenantId` vient de l'API Holykell au login, jamais de la saisie."""
+    if settings.HOLYKELL_SYNC_BASE_URL is None:
+        raise AppError(
+            code="holykell_sync_not_configured",
+            message="Aucune URL Holykell n'est configurée pour cet environnement (HOLYKELL_SYNC_BASE_URL).",
+            status_code=503,
+        )
+    async with httpx.AsyncClient() as client:
+        try:
+            _, tenant_id = await holykell_client.login(client, settings.HOLYKELL_SYNC_BASE_URL, data.holykellUsername, data.holykellPassword)
+        except HolykellAuthError:
+            raise AppError(code="holykell_login_failed", message="Identifiant ou mot de passe Holykell incorrect.", status_code=422)
+        except HolykellApiError:
+            raise AppError(code="holykell_unreachable", message="Impossible de joindre l'API Holykell — réessayer plus tard.", status_code=502)
+
+    account = HolykellAccount(
+        organizationId=organization_id,
+        holykellUsername=data.holykellUsername,
+        holykellPasswordChiffre=chiffrer(data.holykellPassword),
+        holykellPassword=None,
+        holykellTenantId=tenant_id,
+        syncEnabled=True,
+    )
+    db.add(account)
+    await db.flush()
+    await record_audit_event(
+        db, organization_id=organization_id, actor_user_id=actor_user_id, action="zyloLiquid.holykellAccount.create",
+        entity_type="HolykellAccount", entity_id=account.id, summary=f"Connexion au compte Holykell {data.holykellUsername}",
+    )
+    await db.commit()
+    await db.refresh(account)
     return account
 
 
@@ -4094,12 +4170,6 @@ async def _receive_purchase_order_line_if_complete(db: AsyncSession, purchase_or
 # ================================================================
 
 
-async def _check_org_scope(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, permission_code: str) -> None:
-    allowed = await user_has_permission(db, actor_user_id, organization_id, permission_code)
-    if not allowed:
-        raise AppError(code="permission_denied", message=f"Permission manquante : {permission_code}.", status_code=403)
-
-
 async def _get_commercial_account_or_404(db: AsyncSession, organization_id: uuid.UUID, account_id: uuid.UUID) -> CommercialAccount:
     account = await db.get(CommercialAccount, account_id)
     if account is None or account.organizationId != organization_id:
@@ -4221,10 +4291,17 @@ async def create_sale(db: AsyncSession, organization_id: uuid.UUID, actor_user_i
         pump = await db.get(Pump, data.pumpId)
         if pump is None or pump.stationId != station.id:
             raise AppError(code="pump_not_found", message="Pompe introuvable pour cette station.", status_code=404)
+        if not pump.active:
+            raise AppError(
+                code="pump_inactive",
+                message=f"La pompe « {pump.name} » est désactivée : réactivez-la dans la configuration de la station avant d'y déclarer une vente.",
+                status_code=422,
+            )
 
     sale = Sale(
         stationId=station.id,
         authorUserId=actor_user_id,
+        shiftStart=_to_naive_utc(data.shiftStart) if data.shiftStart is not None else None,
         eventAt=_to_naive_utc(data.eventAt),
         fuelProductId=data.fuelProductId,
         quantityLiters=data.quantityLiters,
@@ -4258,6 +4335,7 @@ async def create_sale(db: AsyncSession, organization_id: uuid.UUID, actor_user_i
             logger.exception("Échec du déclenchement de l'alerte stock_declared_discrepancy après create_sale (sale=%s)", sale.id)
 
     return SaleResponse.model_validate(sale)
+
 
 
 async def bulk_import_sales(
@@ -4308,6 +4386,14 @@ async def bulk_import_sales(
             continue
         if pump.stationId != station.id:
             errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="Cette pompe n'appartient pas à la station indiquée."))
+            continue
+        if not pump.active:
+            errors.append(
+                BulkImportRowError(
+                    rowNumber=row.rowNumber,
+                    message=f"La pompe « {pump.name} » est désactivée : réactivez-la dans la configuration de la station avant d'y déclarer une vente. (pump_inactive)",
+                )
+            )
             continue
 
         tank = await db.get(Tank, pump.tankId)
@@ -4385,6 +4471,7 @@ async def bulk_import_sales(
             logger.exception("Échec du déclenchement de l'alerte stock_declared_discrepancy après bulk_import_sales (tank=%s, day=%s)", tank.id, day)
 
     return BulkImportSalesResponse(createdCount=created_count, errors=errors)
+
 
 
 async def list_sales(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, pagination: PaginationParams, station_id: uuid.UUID | None) -> Page:
@@ -4898,6 +4985,13 @@ async def evaluate_manual_gauging_declaration_reconciliation(db: AsyncSession, o
     declaration = await _get_declaration_or_404(db, ManualGaugingDeclaration, organization_id, declaration_id)
     station = await db.get(Station, declaration.stationId)
     await _check_declaration_scope(db, organization_id, actor_user_id, station, RECONCILIATION_READ)
+    return await _evaluate_manual_gauging_declaration_reconciliation_core(db, declaration)
+
+
+async def _evaluate_manual_gauging_declaration_reconciliation_core(db: AsyncSession, declaration: ManualGaugingDeclaration) -> ReconciliationRecordResponse:
+    """Coeur du rapprochement jaugeage manuel <-> télémétrie, SANS contrôle de
+    permission. Extrait pour le jaugeage de fermeture (D2) : celui-ci est protégé
+    par `tankGauging.manage`, pas par `reconciliation.read`. Commit interne."""
     tank = await db.get(Tank, declaration.tankId)
 
     settings = await _get_reconciliation_settings(db, declaration.stationId)
@@ -5891,217 +5985,6 @@ async def update_station_financial(db: AsyncSession, organization_id: uuid.UUID,
     await db.commit()
     await db.refresh(station)
     return _station_financial_response(station)
-
-
-# ================================================================
-# Module Personnel — création de compte + profil de poste pour un membre du
-# personnel d'une station (mockup emalioration/personnel/). Le rôle
-# lui-même reste géré par le RBAC existant (assign_role), jamais dupliqué.
-# ================================================================
-
-
-def _station_staff_response(profile: StationStaffProfile, user: User) -> StationStaffResponse:
-    photo_url = None
-    if user.photoStorageReference:
-        from app.shared.storage import get_storage_backend
-
-        photo_url = get_storage_backend().get_download_url(user.photoStorageReference)
-    return StationStaffResponse(
-        id=profile.id, userId=user.id, organizationId=profile.organizationId,
-        email=user.email, fullName=user.fullName, firstName=user.firstName, lastName=user.lastName,
-        phone=user.phone, photoUrl=photo_url, status=user.status,
-        employeeNumber=profile.employeeNumber, contractType=profile.contractType,
-        assignedStationId=profile.assignedStationId, directManagerUserId=profile.directManagerUserId,
-        assignedAt=profile.assignedAt,
-    )
-
-
-async def create_station_staff_member(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateStationStaffRequest) -> CreateStationStaffResponse:
-    station = await get_station(db, organization_id, data.stationId)
-    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_MANAGE)
-    await check_email_available(db, data.email)
-
-    # Mot de passe temporaire — généré côté serveur, jamais choisi par la
-    # personne (aucune infrastructure d'invitation par email aujourd'hui,
-    # décision validée avec le commanditaire). Affiché UNE SEULE fois dans
-    # cette réponse, jamais stocké en clair, jamais rejoué ailleurs.
-    temporary_password = secrets.token_urlsafe(9)
-    full_name = f"{data.firstName} {data.lastName}".strip()
-    user = build_user(
-        email=data.email.lower(), full_name=full_name, hashed_password=hash_password(temporary_password),
-        must_change_password=True, first_name=data.firstName, last_name=data.lastName, phone=data.phone,
-    )
-    if data.photoStorageReference:
-        user.photoStorageReference = data.photoStorageReference
-    db.add(user)
-    await db.flush()
-
-    db.add(OrganizationUser(organizationId=organization_id, userId=user.id))
-    profile = StationStaffProfile(
-        organizationId=organization_id, userId=user.id, employeeNumber=data.employeeNumber,
-        contractType=data.contractType, assignedStationId=data.stationId,
-        directManagerUserId=data.directManagerUserId, assignedAt=date.today(),
-    )
-    db.add(profile)
-    await record_audit_event(
-        db, organization_id, actor_user_id,
-        action="zyloLiquid.stationStaff.create", entity_type="User", entity_id=user.id,
-        summary=f"Création du membre du personnel {full_name} ({data.email})",
-        scope_resource_type="station", scope_resource_id=data.stationId,
-    )
-    await db.commit()
-    await db.refresh(user)
-    await db.refresh(profile)
-
-    if data.roleId is not None:
-        # Étape distincte, déjà auditée par `assign_role` lui-même — jamais
-        # une logique d'assignation dupliquée ici.
-        await assign_role(db, organization_id, actor_user_id, user.id, data.roleId, resource_type="station", resource_id=data.stationId)
-
-    return CreateStationStaffResponse(staff=_station_staff_response(profile, user), temporaryPassword=temporary_password)
-
-
-async def _get_station_staff_or_404(db: AsyncSession, organization_id: uuid.UUID, user_id: uuid.UUID) -> tuple[StationStaffProfile, User]:
-    result = await db.execute(select(StationStaffProfile).where(StationStaffProfile.organizationId == organization_id, StationStaffProfile.userId == user_id))
-    profile = result.scalar_one_or_none()
-    if profile is None:
-        raise AppError(code="station_staff_not_found", message="Membre du personnel introuvable.", status_code=404)
-    user = await db.get(User, user_id)
-    if user is None:
-        raise AppError(code="station_staff_not_found", message="Membre du personnel introuvable.", status_code=404)
-    return profile, user
-
-
-async def update_station_staff_profile(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, user_id: uuid.UUID, data: UpdateStationStaffRequest) -> StationStaffResponse:
-    profile, user = await _get_station_staff_or_404(db, organization_id, user_id)
-    # Portée : la station ACTUELLEMENT affectée (avant modification) — un
-    # gérant ne peut modifier que le personnel de sa propre station, y
-    # compris pour le réaffecter ailleurs.
-    if profile.assignedStationId is not None:
-        station = await get_station(db, organization_id, profile.assignedStationId)
-        await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_MANAGE)
-    else:
-        await _check_org_scope(db, organization_id, actor_user_id, STATION_STAFF_MANAGE)
-
-    updates = data.model_dump(exclude_unset=True)
-    name_changed = "firstName" in updates or "lastName" in updates
-    for field in ("firstName", "lastName", "phone", "photoStorageReference"):
-        if field in updates:
-            setattr(user, field, updates.pop(field))
-    if name_changed:
-        # `fullName` reste le nom affiché ailleurs dans l'app (audit,
-        # sélecteurs) — toujours recalculé depuis prénom/nom à jour.
-        user.fullName = f"{user.firstName or ''} {user.lastName or ''}".strip() or user.fullName
-    for field, value in updates.items():
-        setattr(profile, field, value)
-    await db.commit()
-    await db.refresh(profile)
-    await db.refresh(user)
-    return _station_staff_response(profile, user)
-
-
-async def deactivate_station_staff_access(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, user_id: uuid.UUID) -> StationStaffResponse:
-    profile, user = await _get_station_staff_or_404(db, organization_id, user_id)
-    if profile.assignedStationId is not None:
-        station = await get_station(db, organization_id, profile.assignedStationId)
-        await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_MANAGE)
-    else:
-        await _check_org_scope(db, organization_id, actor_user_id, STATION_STAFF_MANAGE)
-    user.status = "suspended"
-    await record_audit_event(
-        db, organization_id, actor_user_id,
-        action="zyloLiquid.stationStaff.deactivate", entity_type="User", entity_id=user.id,
-        summary=f"Désactivation de l'accès de {user.fullName}",
-        scope_resource_type="station", scope_resource_id=profile.assignedStationId,
-    )
-    await db.commit()
-    await db.refresh(profile)
-    await db.refresh(user)
-    return _station_staff_response(profile, user)
-
-
-async def change_station_staff_role(
-    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, user_id: uuid.UUID, data: ChangeStationStaffRoleRequest
-) -> StationStaffResponse:
-    """Remplace l'attribution de rôle de ce membre du personnel, scopée à sa
-    station d'affectation (mission « fiche Personnel — gestion des droits »,
-    2026-09-16). Contourne volontairement les endpoints RBAC génériques
-    (`POST /rbac/.../user-roles`), qui exigent `ROLE_MANAGE` organisation
-    entière et sont donc inutilisables par un gérant de station — même
-    pattern que `create_station_staff_member` : `assign_role` est appelé
-    directement en tant que fonction de service, après vérification de
-    `STATION_STAFF_MANAGE` scopée à la station. La protection anti-escalade
-    de privilèges d'`assign_role` (`_assert_no_privilege_escalation`)
-    s'applique sans changement : un gérant ne peut jamais attribuer un rôle
-    plus puissant que le sien sur cette même station."""
-    profile, user = await _get_station_staff_or_404(db, organization_id, user_id)
-    if profile.assignedStationId is None:
-        raise AppError(code="station_staff_not_assigned", message="Ce membre du personnel n'est rattaché à aucune station.", status_code=422)
-    station = await get_station(db, organization_id, profile.assignedStationId)
-    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_MANAGE)
-
-    result = await db.execute(
-        select(UserRole).where(
-            UserRole.organizationId == organization_id,
-            UserRole.userId == user_id,
-            UserRole.resourceType == "station",
-            UserRole.resourceId == profile.assignedStationId,
-        )
-    )
-    for existing_assignment in result.scalars().all():
-        await unassign_role(db, organization_id, actor_user_id, existing_assignment.id)
-
-    await assign_role(db, organization_id, actor_user_id, user_id, data.roleId, resource_type="station", resource_id=profile.assignedStationId)
-    await db.refresh(profile)
-    await db.refresh(user)
-    return _station_staff_response(profile, user)
-
-
-async def reset_station_staff_password(
-    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, user_id: uuid.UUID
-) -> str:
-    """Réinitialisation d'un mot de passe PAR UN TIERS (fiche Personnel) —
-    distinct de `change_password` (libre-service, exige l'ancien mot de
-    passe). Même mécanisme que la création d'un membre du personnel
-    (`create_station_staff_member`) : mot de passe temporaire généré côté
-    serveur, jamais choisi par la personne, retourné en clair une seule fois
-    dans cette réponse, jamais stocké ni rejouable ensuite — force un
-    changement via `POST /auth/change-password` à la prochaine connexion."""
-    profile, user = await _get_station_staff_or_404(db, organization_id, user_id)
-    if profile.assignedStationId is not None:
-        station = await get_station(db, organization_id, profile.assignedStationId)
-        await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_MANAGE)
-    else:
-        await _check_org_scope(db, organization_id, actor_user_id, STATION_STAFF_MANAGE)
-
-    temporary_password = secrets.token_urlsafe(9)
-    user.hashedPassword = hash_password(temporary_password)
-    user.mustChangePassword = True
-    # Intention (T-013) : une réinitialisation coupe les sessions ouvertes avec
-    # l'ancien mot de passe ; la personne se reconnecte avec le temporaire.
-    await revoque_sessions(db, user.id)
-    await record_audit_event(
-        db, organization_id, actor_user_id,
-        action="zyloLiquid.stationStaff.passwordReset", entity_type="User", entity_id=user.id,
-        summary=f"Réinitialisation du mot de passe de {user.fullName}",
-        scope_resource_type="station", scope_resource_id=profile.assignedStationId,
-    )
-    await db.commit()
-    return temporary_password
-
-
-async def list_station_staff_profiles(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_id: uuid.UUID) -> list[StationStaffResponse]:
-    station = await get_station(db, organization_id, station_id)
-    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_READ)
-    result = await db.execute(
-        select(StationStaffProfile, User)
-        .join(User, User.id == StationStaffProfile.userId)
-        .where(StationStaffProfile.organizationId == organization_id, StationStaffProfile.assignedStationId == station_id)
-        .order_by(User.fullName)
-    )
-    return [_station_staff_response(profile, user) for profile, user in result.all()]
-
-
 async def create_intervention(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateInterventionRequest) -> InterventionResponse:
     equipment = await db.get(Equipment, data.equipmentId)
     if equipment is None or equipment.stationId != data.stationId:

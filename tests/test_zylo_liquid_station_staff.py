@@ -16,7 +16,34 @@ Couvre :
 
 import uuid
 
+import pytest
 from httpx import AsyncClient
+
+
+# T-021 : un membre du personnel n'a pas de mot de passe temporaire. Son compte est activé
+# par le lien reçu par e-mail (boîte mémoire du test), comme pour tout compte créé par une organisation.
+import re as _re
+from app.core.config import settings as _settings
+from app.shared.email import memory_outbox as _memory_outbox
+
+_REGEX_JETON = _re.compile(r"#token=([A-Za-z0-9_\-]+)")
+MOT_DE_PASSE_MEMBRE = "NouveauMotDePasse-42"
+
+
+@pytest.fixture(autouse=True)
+def _boite_de_test(monkeypatch):
+    monkeypatch.setattr(_settings, "EMAIL_BACKEND", "memory")
+    _memory_outbox().clear()
+    yield
+    _memory_outbox().clear()
+
+
+async def _activer_membre(client, email: str, mot_de_passe: str = MOT_DE_PASSE_MEMBRE):
+    message = [m for m in _memory_outbox() if m.to == email][-1]
+    jeton = _REGEX_JETON.search(message.body).group(1)
+    res = await client.post("/api/v1/auth/activate", json={"token": jeton, "password": mot_de_passe})
+    assert res.status_code == 200, res.text
+    return res
 
 
 def _headers(user: dict, organization: dict) -> dict:
@@ -29,7 +56,7 @@ async def _create_station(client: AsyncClient, headers: dict, suffix: str) -> st
     return res.json()["id"]
 
 
-async def test_create_station_staff_temporary_password_flow(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
+async def test_create_station_staff_invitation_flow(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
     headers = _headers(registered_user, zylo_liquid_organization)
     suffix = uuid.uuid4().hex[:8]
     station_id = await _create_station(client, headers, suffix)
@@ -45,41 +72,28 @@ async def test_create_station_staff_temporary_password_flow(client: AsyncClient,
     )
     assert created.status_code == 201, created.text
     body = created.json()
-    temp_password = body["temporaryPassword"]
-    assert temp_password
+    # T-021 : pas de mot de passe dans la réponse, une échéance d'invitation.
+    assert "temporaryPassword" not in body and body["invitationExpiresAt"]
     staff = body["staff"]
     assert staff["fullName"] == "Paul Atangana"
     assert staff["email"] == email
     assert staff["employeeNumber"] == "EMP-001"
     assert staff["status"] == "active"
 
-    # Le mot de passe temporaire permet de se connecter, avec l'obligation
-    # de le changer immédiatement.
-    login = await client.post("/api/v1/auth/login", json={"email": email, "password": temp_password})
+    # Le compte est activé par le lien reçu par e-mail, puis la connexion fonctionne.
+    await _activer_membre(client, email)
+    login = await client.post("/api/v1/auth/login", json={"email": email, "password": MOT_DE_PASSE_MEMBRE})
     assert login.status_code == 200, login.text
     new_access = login.json()["accessToken"]
 
     me = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {new_access}"})
     assert me.status_code == 200
-    assert me.json()["mustChangePassword"] is True
+    assert me.json()["mustChangePassword"] is False
 
-    changed = await client.post(
-        "/api/v1/auth/change-password",
-        json={"currentPassword": temp_password, "newPassword": "NouveauMotDePasse123!"},
-        headers={"Authorization": f"Bearer {new_access}"},
-    )
-    assert changed.status_code == 200, changed.text
-    assert changed.json()["mustChangePassword"] is False
-
-    # L'ancien mot de passe temporaire ne fonctionne plus, le nouveau oui,
-    # et le flag reste levé.
-    old_login = await client.post("/api/v1/auth/login", json={"email": email, "password": temp_password})
-    assert old_login.status_code == 401
-
-    relogin = await client.post("/api/v1/auth/login", json={"email": email, "password": "NouveauMotDePasse123!"})
-    assert relogin.status_code == 200
-    me2 = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {relogin.json()['accessToken']}"})
-    assert me2.json()["mustChangePassword"] is False
+    # Le lien d'activation ne sert qu'une fois : le réutiliser est refusé.
+    jeton_reutilise = _REGEX_JETON.search([m for m in _memory_outbox() if m.to == email][-1].body).group(1)
+    reuse = await client.post("/api/v1/auth/activate", json={"token": jeton_reutilise, "password": "AutreMotDePasse-43"})
+    assert reuse.status_code in (400, 404, 409, 422), reuse.text
 
 
 async def test_create_station_staff_duplicate_email_rejected(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
@@ -133,16 +147,16 @@ async def test_deactivate_station_staff_blocks_login(client: AsyncClient, regist
         headers=headers,
     )
     user_id = created.json()["staff"]["userId"]
-    temp_password = created.json()["temporaryPassword"]
+    await _activer_membre(client, email)
 
-    ok_login = await client.post("/api/v1/auth/login", json={"email": email, "password": temp_password})
+    ok_login = await client.post("/api/v1/auth/login", json={"email": email, "password": MOT_DE_PASSE_MEMBRE})
     assert ok_login.status_code == 200
 
     deactivate = await client.post(f"/api/v1/zylo-liquid/station-staff/{user_id}/deactivate", headers=headers)
     assert deactivate.status_code == 200, deactivate.text
     assert deactivate.json()["status"] == "suspended"
 
-    blocked_login = await client.post("/api/v1/auth/login", json={"email": email, "password": temp_password})
+    blocked_login = await client.post("/api/v1/auth/login", json={"email": email, "password": MOT_DE_PASSE_MEMBRE})
     assert blocked_login.status_code == 403
     assert blocked_login.json()["error"]["code"] == "account_inactive"
 

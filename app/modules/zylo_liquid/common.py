@@ -25,3 +25,9 @@ async def _check_declaration_scope(db: AsyncSession, organization_id: uuid.UUID,
     allowed = await user_has_permission(db, actor_user_id, organization_id, permission_code, "station", station.id)
     if not allowed:
         raise AppError(code="permission_denied", message=f"Permission manquante : {permission_code}.", status_code=403)
+
+
+async def _check_org_scope(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, permission_code: str) -> None:
+    allowed = await user_has_permission(db, actor_user_id, organization_id, permission_code)
+    if not allowed:
+        raise AppError(code="permission_denied", message=f"Permission manquante : {permission_code}.", status_code=403)

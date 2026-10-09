@@ -43,6 +43,16 @@ from app.modules.zylo_liquid.permissions import (
     TANK_SENSOR_MAPPING_MANAGE,
     TANK_SENSOR_MAPPING_READ,
 )
+from app.modules.zylo_liquid.exploitation.schemas_personnel import StationStaffListItem
+from app.modules.zylo_liquid.permissions import HOLYKELL_ACCOUNT_MANAGE
+from app.modules.zylo_liquid.rotes.shifts import router as shifts_router
+from app.modules.zylo_liquid.rotes.pumps import router as pumps_router
+from app.modules.zylo_liquid.rotes.caisse import router as caisse_router
+from app.modules.zylo_liquid.rotes.rapport import router as rapport_router
+from app.modules.zylo_liquid.rotes.personnel import router as personnel_router
+from app.modules.zylo_liquid.exploitation import personnel_service
+from app.modules.zylo_liquid.scopes import _tank_station_scope, _pump_station_scope, _delivery_station_scope, _leak_event_station_scope, _price_station_scope
+from app.modules.zylo_liquid.schemas import CreateHolykellAccountRequest
 from app.modules.zylo_liquid.schemas import (
     AuthorizationResponse,
     CarrierResponse,
@@ -185,59 +195,8 @@ from app.shared.pagination import PaginationParams, paginate
 from app.shared.schemas import Page
 
 
-async def _tank_station_scope(db: AsyncSession, organization_id: uuid.UUID, path_params: dict) -> tuple[str | None, uuid.UUID | None]:
-    """Une cuve n'a pas de portée propre dans le modèle de grants (§10.3 du
-    document d'architecture RBAC) : la portée utile est celle de SA station
-    (ex. « le chef d'équipe reçoit Cuve Diesel » = un grant scopé à la
-    station qui la contient), jamais la cuve isolément."""
-    raw_id = path_params.get("tank_id")
-    if raw_id is None:
-        return None, None
-    tank = await service.get_tank(db, organization_id, uuid.UUID(str(raw_id)))
-    return "station", tank.stationId
-
-
-async def _pump_station_scope(db: AsyncSession, organization_id: uuid.UUID, path_params: dict) -> tuple[str | None, uuid.UUID | None]:
-    """Une pompe n'a pas de portée propre : même principe que `_tank_station_scope`."""
-    raw_id = path_params.get("pump_id")
-    if raw_id is None:
-        return None, None
-    pump = await service.get_pump(db, organization_id, uuid.UUID(str(raw_id)))
-    return "station", pump.stationId
-
-
 # _alert_station_scope — déplacée vers `app/alerts/router.py` (2026-09-15,
 # Phase 3), avec les routes /alerts* qu'elle scope.
-
-
-async def _delivery_station_scope(db: AsyncSession, organization_id: uuid.UUID, path_params: dict) -> tuple[str | None, uuid.UUID | None]:
-    raw_id = path_params.get("delivery_id")
-    if raw_id is None:
-        return None, None
-    delivery = await service.get_delivery(db, organization_id, uuid.UUID(str(raw_id)))
-    return "station", delivery.stationId
-
-
-async def _leak_event_station_scope(db: AsyncSession, organization_id: uuid.UUID, path_params: dict) -> tuple[str | None, uuid.UUID | None]:
-    raw_id = path_params.get("leak_event_id")
-    if raw_id is None:
-        return None, None
-    leak_event = await service.get_leak_event(db, organization_id, uuid.UUID(str(raw_id)))
-    return "station", leak_event.stationId
-
-
-async def _price_station_scope(db: AsyncSession, organization_id: uuid.UUID, path_params: dict) -> tuple[str | None, uuid.UUID | None]:
-    """Un prix par défaut réseau (`stationId IS NULL`, Phase 1 §1.3 de
-    refonte-configuration-zylo-liquid.md) n'a pas de station à laquelle
-    rattacher la portée — `(None, None)` équivaut alors à une vérification
-    org entière (comportement inchangé pour ces lignes)."""
-    raw_id = path_params.get("price_id")
-    if raw_id is None:
-        return None, None
-    price = await service._get_price_history_and_station(db, organization_id, uuid.UUID(str(raw_id)))
-    if price.stationId is None:
-        return None, None
-    return "station", price.stationId
 
 
 # T-019 : gardes de permission des routes
@@ -913,9 +872,10 @@ async def get_delivery(
 )
 async def list_deliveries_in_progress(
     organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[DeliveryInProgressResponse]:
-    return await service.list_deliveries_in_progress(db, organization_id)
+    return await service.list_deliveries_in_progress(db, organization_id, current_user.id)
 
 
 @router.get(
@@ -1021,6 +981,23 @@ async def update_price_history(
     db: AsyncSession = Depends(get_db),
 ) -> PriceHistoryResponse:
     return await service.update_price_history(db, organization_id, current_user.id, price_id, data)
+
+
+@router.post(
+    "/holykell-accounts",
+    response_model=HolykellAccountSyncStatusResponse,
+    status_code=201,
+    dependencies=[Depends(require_permission(HOLYKELL_ACCOUNT_MANAGE))],
+)
+async def create_holykell_account(
+    data: CreateHolykellAccountRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> HolykellAccount:
+    """Connexion à un compte Holykell : identifiants vérifiés AVANT enregistrement.
+    Le mot de passe n'est stocké que chiffré (T-027) et jamais renvoyé."""
+    return await service.create_holykell_account(db, organization_id, current_user.id, data)
 
 
 @router.get(
@@ -2039,7 +2016,7 @@ async def create_station_staff_member(
     organization_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ) -> CreateStationStaffResponse:
-    return await service.create_station_staff_member(db, organization_id, current_user.id, data)
+    return await personnel_service.create_station_staff_member(db, organization_id, current_user.id, data)
 
 
 @router.patch("/station-staff/{user_id}", response_model=StationStaffResponse, dependencies=[Depends(require_permission_any_scope(STATION_STAFF_MANAGE))])
@@ -2050,7 +2027,7 @@ async def update_station_staff_member(
     organization_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ) -> StationStaffResponse:
-    return await service.update_station_staff_profile(db, organization_id, current_user.id, user_id, data)
+    return await personnel_service.update_station_staff_profile(db, organization_id, current_user.id, user_id, data)
 
 
 @router.post("/station-staff/{user_id}/deactivate", response_model=StationStaffResponse, dependencies=[Depends(require_permission_any_scope(STATION_STAFF_MANAGE))])
@@ -2060,7 +2037,7 @@ async def deactivate_station_staff_member(
     organization_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ) -> StationStaffResponse:
-    return await service.deactivate_station_staff_access(db, organization_id, current_user.id, user_id)
+    return await personnel_service.deactivate_station_staff_access(db, organization_id, current_user.id, user_id)
 
 
 @router.put("/station-staff/{user_id}/role", response_model=StationStaffResponse, dependencies=[Depends(require_permission_any_scope(STATION_STAFF_MANAGE))])
@@ -2071,7 +2048,7 @@ async def change_station_staff_member_role(
     organization_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ) -> StationStaffResponse:
-    return await service.change_station_staff_role(db, organization_id, current_user.id, user_id, data)
+    return await personnel_service.change_station_staff_role(db, organization_id, current_user.id, user_id, data)
 
 
 @router.post("/station-staff/{user_id}/reset-password", response_model=ResetStationStaffPasswordResponse, dependencies=[Depends(require_permission_any_scope(STATION_STAFF_MANAGE))])
@@ -2081,18 +2058,18 @@ async def reset_station_staff_member_password(
     organization_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ) -> ResetStationStaffPasswordResponse:
-    temporary_password = await service.reset_station_staff_password(db, organization_id, current_user.id, user_id)
-    return ResetStationStaffPasswordResponse(temporaryPassword=temporary_password)
+    invitation = await personnel_service.reset_station_staff_password(db, organization_id, current_user.id, user_id)
+    return ResetStationStaffPasswordResponse(userId=invitation.userId, invitationExpiresAt=invitation.invitationExpiresAt)
 
 
-@router.get("/station-staff", response_model=list[StationStaffResponse], dependencies=[Depends(require_permission_any_scope(STATION_STAFF_READ))])
+@router.get("/station-staff", response_model=list[StationStaffListItem], dependencies=[Depends(require_permission_any_scope(STATION_STAFF_READ))])
 async def list_station_staff_members(
     stationId: uuid.UUID,
     current_user: User = Depends(get_current_user),
     organization_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
-) -> list[StationStaffResponse]:
-    return await service.list_station_staff_profiles(db, organization_id, current_user.id, stationId)
+) -> list[StationStaffListItem]:
+    return await personnel_service.list_station_staff_profiles(db, organization_id, current_user.id, stationId)
 
 
 @router.post("/interventions", response_model=InterventionResponse, status_code=201, dependencies=[Depends(require_permission_any_scope(INTERVENTION_CREATE))])
@@ -2337,3 +2314,12 @@ async def reconcile_stock(
     db: AsyncSession = Depends(get_db),
 ) -> ReconciliationRecordResponse:
     return await service.evaluate_stock_reconciliation(db, organization_id, current_user.id, tank_id, day)
+
+
+# Routes des sous-domaines (T-004b lot B-L2) : chacune garde sa permission dans son routeur.
+# Incluses ici pour hériter de la dépendance `require_module_active("zylo_liquid")` de `router`.
+router.include_router(shifts_router)
+router.include_router(pumps_router)
+router.include_router(caisse_router)
+router.include_router(rapport_router)
+router.include_router(personnel_router)

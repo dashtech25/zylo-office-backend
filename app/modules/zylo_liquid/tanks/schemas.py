@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 class CreateTankRequest(BaseModel):
     stationId: uuid.UUID
-    tankNumber: int = Field(gt=0)
+    tankNumber: int | None = Field(default=None, gt=0, description="Numéro de cuve au sein de la station — optionnel : si absent, le système attribue automatiquement le prochain numéro disponible (jamais à l'utilisateur de le deviner par essai-erreur). Fourni explicitement seulement pour un usage programmatique/import qui a besoin d'imposer un numéro précis.")
     displayName: str = Field(min_length=1, max_length=100)
     capacityLiters: float = Field(gt=0)
     tankHeightMm: float = Field(gt=0)
@@ -63,14 +63,24 @@ class TankResponse(BaseModel):
 
 
 class CreatePumpRequest(BaseModel):
+    """Le nom n'est jamais saisi : il est généré par le backend (« Pompe N°
+    {pumpNumber} – {produit de la cuve} »). Sans `pumpNumber`, le prochain
+    numéro libre de la station est attribué."""
+
     stationId: uuid.UUID
     tankId: uuid.UUID
-    name: str = Field(min_length=1, max_length=100)
+    pumpNumber: int | None = Field(default=None, gt=0, le=32767)
+    brand: str | None = Field(default=None, max_length=100)
+    serialNumber: str | None = Field(default=None, max_length=100)
+    installedOn: date | None = None
 
 
 class UpdatePumpRequest(BaseModel):
     tankId: uuid.UUID | None = None
-    name: str | None = Field(default=None, min_length=1, max_length=100)
+    pumpNumber: int | None = Field(default=None, gt=0, le=32767)
+    brand: str | None = Field(default=None, max_length=100)
+    serialNumber: str | None = Field(default=None, max_length=100)
+    installedOn: date | None = None
     active: bool | None = None
 
 
@@ -80,8 +90,12 @@ class PumpResponse(BaseModel):
     tankId: uuid.UUID
     name: str
     active: bool
-
-    model_config = {"from_attributes": True}
+    pumpNumber: int
+    brand: str | None = None
+    serialNumber: str | None = None
+    installedOn: date | None = None
+    fuelProductId: uuid.UUID
+    fuelProductName: str
 
 
 class CreateTankSensorMappingRequest(BaseModel):

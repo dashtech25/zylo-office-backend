@@ -8,40 +8,27 @@ from app.files.permissions import DOCUMENT_CREATE, DOCUMENT_DELETE, DOCUMENT_MAN
 from app.location.permissions import GPS_DEVICE_READ, TRACKING_LOCATION_READ
 from app.modules.zylo_liquid.permissions import (
     CARRIER_READ,
+    CASH_COLLECTION_MANAGE,
+    CASH_COLLECTION_READ,
     CASH_READ,
+    CASH_SUMMARY_MANAGE,
+    CASH_SUMMARY_READ,
     COMMERCIAL_ACCOUNT_MANAGE,
     COMMERCIAL_ACCOUNT_READ,
     DECLARATION_LOCK,
-    EQUIPMENT_MANAGE,
-    EQUIPMENT_READ,
-    INTERVENTION_ASSIGN,
-    INTERVENTION_CLOSE,
-    INTERVENTION_CREATE,
-    INTERVENTION_READ,
-    PRODUCT_SALE_CANCEL,
-    PRODUCT_SALE_CREATE,
-    PRODUCT_SALE_READ,
-    PUMP_MANAGE,
-    PUMP_READ,
-    REGULATORY_DECLARATION_MANAGE,
-    REGULATORY_DECLARATION_READ,
-    REGULATORY_DOCUMENT_ARCHIVE,
-    REGULATORY_DOCUMENT_CREATE,
-    REGULATORY_DOCUMENT_MANAGE,
-    REGULATORY_DOCUMENT_READ,
-    RECONCILIATION_READ,
-    RECONCILIATION_SETTINGS_MANAGE,
-    SELLABLE_PRODUCT_MANAGE,
-    SELLABLE_PRODUCT_READ,
-    TECHNICIAN_MANAGE,
-    TECHNICIAN_READ,
     DELIVERY_DECLARATION_CREATE,
     DELIVERY_DECLARATION_READ,
     DELIVERY_READ,
+    EQUIPMENT_MANAGE,
+    EQUIPMENT_READ,
     FUEL_PRODUCT_READ,
     HOLYKELL_ACCOUNT_READ,
     INCIDENT_DECLARATION_CREATE,
     INCIDENT_DECLARATION_READ,
+    INTERVENTION_ASSIGN,
+    INTERVENTION_CLOSE,
+    INTERVENTION_CREATE,
+    INTERVENTION_READ,
     LEAK_EVENT_READ,
     LEAK_TEST_DECLARATION_CREATE,
     LEAK_TEST_DECLARATION_READ,
@@ -51,38 +38,75 @@ from app.modules.zylo_liquid.permissions import (
     PAYMENT_READ,
     PRICE_HISTORY_CREATE,
     PRICE_HISTORY_READ,
+    PRICING_POLICY_MANAGE,
+    PRICING_POLICY_READ,
+    PRODUCT_SALE_CANCEL,
+    PRODUCT_SALE_CREATE,
+    PRODUCT_SALE_READ,
+    PUMP_ASSIGNMENT_MANAGE,
+    PUMP_ASSIGNMENT_READ,
+    PUMP_CLOSING_MANAGE,
+    PUMP_CLOSING_READ,
+    PUMP_MANAGE,
+    PUMP_READ,
     PURCHASE_ORDER_MANAGE,
     PURCHASE_ORDER_READ,
     QUALITY_CHECK_DECLARATION_CREATE,
     QUALITY_CHECK_DECLARATION_READ,
     RECEIVABLE_MANAGE,
     RECEIVABLE_READ,
+    RECONCILIATION_READ,
+    RECONCILIATION_SETTINGS_MANAGE,
+    REGULATORY_DECLARATION_MANAGE,
+    REGULATORY_DECLARATION_READ,
+    REGULATORY_DOCUMENT_ARCHIVE,
+    REGULATORY_DOCUMENT_CREATE,
+    REGULATORY_DOCUMENT_MANAGE,
+    REGULATORY_DOCUMENT_READ,
+    REPORT_SECTIONS_MANAGE,
+    REPORT_SECTIONS_READ,
     SALE_CREATE,
     SALE_READ,
+    SECURITY_EQUIPMENT_MANAGE,
+    SECURITY_EQUIPMENT_READ,
+    SELLABLE_PRODUCT_MANAGE,
+    SELLABLE_PRODUCT_READ,
+    SHIFT_ATTENDANCE_MANAGE,
+    SHIFT_ATTENDANCE_READ,
     SHIFT_CASH_DECLARATION_CREATE,
     SHIFT_CASH_DECLARATION_READ,
+    SHIFT_DEFINITION_MANAGE,
+    SHIFT_DEFINITION_READ,
+    SHIFT_HANDOVER_MANAGE,
+    SHIFT_HANDOVER_READ,
+    SHIFT_PLANNING_MANAGE,
+    SHIFT_PLANNING_READ,
+    SHIFT_REPLACEMENT_MANAGE,
+    SHIFT_REPLACEMENT_READ,
+    SHIFT_REPORT_MANAGE,
+    SHIFT_REPORT_READ,
     STATION_FUEL_PRODUCT_MANAGE,
     STATION_FUEL_PRODUCT_READ,
     STATION_MANAGE,
     STATION_READ,
+    STATION_SERVICE_MANAGE,
+    STATION_SERVICE_READ,
+    STATION_STAFF_MANAGE,
+    STATION_STAFF_READ,
+    STATION_SUPPLIER_MANAGE,
+    STATION_SUPPLIER_READ,
     SUPPLIER_READ,
     TANK_CALIBRATION_MANAGE,
     TANK_CALIBRATION_READ,
+    TANK_GAUGING_MANAGE,
+    TANK_GAUGING_READ,
     TANK_MANAGE,
     TANK_READ,
     TANK_SENSOR_MAPPING_MANAGE,
     TANK_SENSOR_MAPPING_READ,
+    TECHNICIAN_MANAGE,
+    TECHNICIAN_READ,
     TRUCK_READ,
-    SECURITY_EQUIPMENT_READ,
-    SECURITY_EQUIPMENT_MANAGE,
-    STATION_SUPPLIER_READ,
-    STATION_SUPPLIER_MANAGE,
-    STATION_STAFF_READ,
-    STATION_STAFF_MANAGE,
-    STATION_SERVICE_READ,
-    STATION_SERVICE_MANAGE,
-    PRICING_POLICY_READ,
-    PRICING_POLICY_MANAGE,
 )
 
 # Les 6 permissions "create" de la couche déclarative, accordées ensemble au
@@ -260,8 +284,7 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
             STATION_SERVICE_READ,
             STATION_SERVICE_MANAGE,
             PRICING_POLICY_READ,
-            PRICING_POLICY_MANAGE,
-        ],
+            PRICING_POLICY_MANAGE, SHIFT_DEFINITION_READ, SHIFT_DEFINITION_MANAGE, SHIFT_PLANNING_READ, PUMP_ASSIGNMENT_READ, PUMP_ASSIGNMENT_MANAGE, SHIFT_PLANNING_MANAGE, SHIFT_ATTENDANCE_READ, SHIFT_ATTENDANCE_MANAGE, SHIFT_HANDOVER_READ, SHIFT_REPORT_READ, TANK_GAUGING_READ, PUMP_CLOSING_READ, SHIFT_REPORT_MANAGE, TANK_GAUGING_MANAGE, PUMP_CLOSING_MANAGE, CASH_COLLECTION_READ, CASH_COLLECTION_MANAGE, REPORT_SECTIONS_READ, REPORT_SECTIONS_MANAGE, CASH_SUMMARY_READ, CASH_SUMMARY_MANAGE, SHIFT_HANDOVER_MANAGE, SHIFT_REPLACEMENT_READ, SHIFT_REPLACEMENT_MANAGE],
     ),
     (
         "zylo_liquid_team_lead",
@@ -286,7 +309,69 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
             *_STATION_SUPPLIER_READ_PERMISSIONS,
             *_STATION_STAFF_READ_PERMISSIONS,
             *_STATION_SERVICE_READ_PERMISSIONS,
+            *_PRICING_POLICY_READ_PERMISSIONS, SHIFT_DEFINITION_READ, SHIFT_PLANNING_READ, PUMP_ASSIGNMENT_READ, SHIFT_REPORT_READ, TANK_GAUGING_READ, PUMP_CLOSING_READ, REPORT_SECTIONS_READ, SHIFT_REPLACEMENT_READ],
+    ),
+    (
+        # Scénario A4 §4.4 : « Responsable de tour » (niveau 3 de la
+        # hiérarchie terrain, entre gérant et chef d'équipe). Principe : tout
+        # ce que le cahier lui fait déjà faire, RIEN de plus. Il remplit et
+        # signe le rapport de tour (déclarations + verrouillage), contrôle la
+        # caisse en lecture seule (jamais SALE_CREATE : la qualification des
+        # ventes reste au gérant/caissier, comme pour le pompiste).
+        # Jamais accordé : *_MANAGE des référentiels, STATION_STAFF_MANAGE,
+        # PRICE_HISTORY_CREATE, PURCHASE_ORDER_MANAGE, validation (E1) — le
+        # RT ne valide pas son propre rapport. Les permissions de pointage/
+        # passation/ouverture de tour/rapport (B1-B3, D4-D8) s'ajouteront
+        # ICI dans leurs scénarios ; le gérant doit toujours en posséder
+        # l'ensemble (anti-élévation de privilège de assign_role).
+        "zylo_liquid_shift_manager",
+        "Responsable de tour",
+        [
+            STATION_READ,
+            TANK_READ,
+            PUMP_READ,
+            SHIFT_DEFINITION_READ,
+            SHIFT_PLANNING_READ,
+            # B4 : le RT saisit et confirme l'affectation réelle des pompistes.
+            PUMP_ASSIGNMENT_READ,
+            PUMP_ASSIGNMENT_MANAGE,
+            # B1 pointage et B2 passation : le RT écrit et lit (ni CE, ni pompiste, ni caissier).
+            SHIFT_ATTENDANCE_READ,
+            SHIFT_ATTENDANCE_MANAGE,
+            SHIFT_HANDOVER_READ,
+            # B3 : le RT ouvre le tour et lit le rapport.
+            SHIFT_REPORT_READ,
+            TANK_GAUGING_READ,  # D2
+            PUMP_CLOSING_READ,  # D1
+            SHIFT_REPORT_MANAGE,
+            TANK_GAUGING_MANAGE,  # D2 : jaugeage (gérant ⊇ RT)
+            PUMP_CLOSING_MANAGE,  # D1 : index de fermeture (gérant ⊇ RT)
+            CASH_COLLECTION_READ,  # D3 : caisse par pompiste (RT et gérant ; JAMAIS le chef d'équipe, PC-22)
+            CASH_COLLECTION_MANAGE,  # D3 (gérant ⊇ RT)
+            REPORT_SECTIONS_READ,  # D4 : rubriques 2 à 7 (gérant ⊇ RT)
+            REPORT_SECTIONS_MANAGE,
+            CASH_SUMMARY_READ,  # D5 : calcul de la caisse A à H et NOTA (RT et gérant ; JAMAIS le chef d'équipe)
+            CASH_SUMMARY_MANAGE,  # D5 (gérant ⊇ RT)
+            SHIFT_HANDOVER_MANAGE,
+            # B5 : mouvements de personnel en cours de tour (gérant ⊇ RT).
+            SHIFT_REPLACEMENT_READ,
+            SHIFT_REPLACEMENT_MANAGE,
+            *_DECLARATION_CREATE_PERMISSIONS,
+            *_DECLARATION_READ_PERMISSIONS,
+            DECLARATION_LOCK,
+            SALE_READ,
+            PAYMENT_READ,
+            CASH_READ,
+            ALERT_READ,
+            ALERT_ACKNOWLEDGE,
+            *_STATION_STAFF_READ_PERMISSIONS,
+            *_MAINTENANCE_READ_PERMISSIONS,
+            INTERVENTION_CREATE,
+            *_DOCUMENT_PERMISSIONS,
+            *_REGULATORY_READ_PERMISSIONS,
+            *_SECURITY_READ_PERMISSIONS,
             *_PRICING_POLICY_READ_PERMISSIONS,
+            PRICE_HISTORY_READ,
         ],
     ),
     (
@@ -303,8 +388,7 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
             *_APPRO_READ_PERMISSIONS,
             *_COMMERCIAL_SALE_PERMISSIONS,
             *_PRODUCT_SALE_PERMISSIONS,
-            *_DOCUMENT_PERMISSIONS,
-        ],
+            *_DOCUMENT_PERMISSIONS, SHIFT_DEFINITION_READ, SHIFT_PLANNING_READ, PUMP_ASSIGNMENT_READ, SHIFT_REPORT_READ, TANK_GAUGING_READ, PUMP_CLOSING_READ, CASH_COLLECTION_READ, CASH_SUMMARY_READ, SHIFT_REPLACEMENT_READ],
     ),
     (
         # Aligné strictement sur le prototype validé (prototype.html,
@@ -325,7 +409,7 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
         # terrain à constater une fuite ou un niveau bas, il doit pouvoir
         # signaler qu'il s'en occupe sans avoir ALERT_MANAGE (résolution
         # manuelle justifiée, réservée aux rôles de pilotage).
-        [ALERT_READ, ALERT_ACKNOWLEDGE, SHIFT_CASH_DECLARATION_READ, SHIFT_CASH_DECLARATION_CREATE, DECLARATION_LOCK],
+        [ALERT_READ, ALERT_ACKNOWLEDGE, SHIFT_CASH_DECLARATION_READ, SHIFT_CASH_DECLARATION_CREATE, DECLARATION_LOCK, PUMP_READ, SHIFT_DEFINITION_READ, SHIFT_PLANNING_READ, PUMP_ASSIGNMENT_READ],
     ),
     (
         "zylo_liquid_fleet_coordinator",
@@ -375,8 +459,7 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
             *_STATION_SUPPLIER_READ_PERMISSIONS,
             *_STATION_STAFF_READ_PERMISSIONS,
             *_STATION_SERVICE_READ_PERMISSIONS,
-            *_PRICING_POLICY_READ_PERMISSIONS,
-        ],
+            *_PRICING_POLICY_READ_PERMISSIONS, SHIFT_DEFINITION_READ, SHIFT_PLANNING_READ, PUMP_ASSIGNMENT_READ, SHIFT_ATTENDANCE_READ, SHIFT_HANDOVER_READ, SHIFT_REPORT_READ, TANK_GAUGING_READ, PUMP_CLOSING_READ, CASH_COLLECTION_READ, REPORT_SECTIONS_READ, CASH_SUMMARY_READ, SHIFT_REPLACEMENT_READ],
     ),
     (
         # Phase 6 §1.1 — reprend directement le profil `dashHse` du prototype :
@@ -401,8 +484,7 @@ DEFAULT_ROLES: list[tuple[str, str, list[str]]] = [
             # domaine Sécurité (extincteurs, ATEX) relève directement du
             # rôle HSE.
             SECURITY_EQUIPMENT_READ,
-            SECURITY_EQUIPMENT_MANAGE,
-        ],
+            SECURITY_EQUIPMENT_MANAGE, SHIFT_DEFINITION_READ],
     ),
 ]
 

@@ -146,6 +146,19 @@ async def list_station_fuel_products(
     return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
 
 
+async def get_station_fuel_product(db: AsyncSession, organization_id: uuid.UUID, association_id: uuid.UUID) -> StationFuelProduct:
+    """Association station/produit de l'organisation (404 sinon) : sert aux gardes de portée des routes."""
+    result = await db.execute(
+        select(StationFuelProduct)
+        .join(Station, Station.id == StationFuelProduct.stationId)
+        .where(StationFuelProduct.id == association_id, Station.organizationId == organization_id)
+    )
+    association = result.scalar_one_or_none()
+    if association is None:
+        raise AppError(code="station_fuel_product_not_found", message="Association station/produit introuvable.", status_code=404)
+    return association
+
+
 async def update_station_fuel_product(
     db: AsyncSession, organization_id: uuid.UUID, association_id: uuid.UUID, data: UpdateStationFuelProductRequest
 ) -> StationFuelProduct:

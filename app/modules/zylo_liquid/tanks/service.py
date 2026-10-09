@@ -9,12 +9,21 @@ N'y appartiennent pas : état courant et mesures des cuves, livraisons, fuites, 
 import uuid
 from datetime import date, datetime, timezone
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.service import record_audit_event
 from app.core.errors import AppError
 from app.modules.zylo_liquid.permissions import TANK_READ, PUMP_READ
+from app.modules.zylo_liquid.nommage_pompes import (
+    _assert_pump_number_free,
+    _generated_pump_name,
+    _next_free_pump_number,
+    _resync_pump_names,
+)
+from app.modules.zylo_liquid.garde_tours import assert_pump_can_be_deactivated, assert_pump_tank_can_change, get_open_shift_for_tank
 from app.rbac.service import list_visible_resource_ids
 from app.modules.zylo_liquid.models import (
+    FuelProduct,
     HolykellDeviceRegistry,
     Pump,
     Station,
@@ -52,15 +61,26 @@ async def create_tank(db: AsyncSession, organization_id: uuid.UUID, actor_user_i
             status_code=422,
         )
 
-    existing = await db.execute(
-        select(Tank).where(Tank.stationId == data.stationId, Tank.tankNumber == data.tankNumber)
-    )
-    if existing.scalar_one_or_none() is not None:
-        raise AppError(
-            code="tank_number_already_used",
-            message=f"Le numéro de cuve {data.tankNumber} est déjà utilisé dans cette station.",
-            status_code=409,
+    tank_number = data.tankNumber
+    if tank_number is None:
+        # Attribution automatique — jamais à l'utilisateur de deviner un numéro
+        # libre par essai-erreur (constat terrain : 1 pris, 2 pris, 3 accepté).
+        # Prochain numéro = max existant + 1 dans cette station, jamais un
+        # numéro recyclé (une cuve désactivée garde son numéro).
+        max_number_result = await db.execute(
+            select(func.max(Tank.tankNumber)).where(Tank.stationId == data.stationId)
         )
+        tank_number = (max_number_result.scalar_one_or_none() or 0) + 1
+    else:
+        existing = await db.execute(
+            select(Tank).where(Tank.stationId == data.stationId, Tank.tankNumber == tank_number)
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise AppError(
+                code="tank_number_already_used",
+                message=f"Le numéro de cuve {tank_number} est déjà utilisé dans cette station.",
+                status_code=409,
+            )
 
     if has_existing_product:
         fuel_product = await get_fuel_product(db, organization_id, data.fuelProductId)
@@ -75,8 +95,8 @@ async def create_tank(db: AsyncSession, organization_id: uuid.UUID, actor_user_i
             db, organization_id, CreateFuelProductRequest(name=data.newFuelProductName, code=data.newFuelProductCode)
         )
 
-    tank_fields = data.model_dump(exclude={"fuelProductId", "newFuelProductName", "newFuelProductCode"})
-    tank = Tank(fuelProductId=fuel_product.id, **tank_fields)
+    tank_fields = data.model_dump(exclude={"fuelProductId", "newFuelProductName", "newFuelProductCode", "tankNumber"})
+    tank = Tank(fuelProductId=fuel_product.id, tankNumber=tank_number, **tank_fields)
     db.add(tank)
     await db.flush()
     await record_audit_event(
@@ -93,6 +113,7 @@ async def create_tank(db: AsyncSession, organization_id: uuid.UUID, actor_user_i
     await db.commit()
     await db.refresh(tank)
     return tank
+
 
 
 async def _assert_tank_station_in_organization(db: AsyncSession, organization_id: uuid.UUID, tank: Tank) -> None:
@@ -120,6 +141,16 @@ async def update_tank(
 ) -> Tank:
     tank = await get_tank(db, organization_id, tank_id)
     updates = data.model_dump(exclude_unset=True, exclude=_TANK_PRODUCT_UPDATE_FIELDS)
+    # B3 : une cuve dont un tour OUVERT a une ligne (stock d'ouverture) ne se désactive pas.
+    if updates.get("active") is False and tank.active:
+        open_occurrence = await get_open_shift_for_tank(db, tank.id)
+        if open_occurrence is not None:
+            raise AppError(
+                code="tank_in_open_shift",
+                message=f"La cuve {tank.tankNumber} est utilisée par le tour « {open_occurrence.name} » ouvert. Fermez le tour avant de la désactiver.",
+                status_code=409,
+                details=[{"occurrenceId": str(open_occurrence.id), "tankId": str(tank.id)}],
+            )
     before = {field: getattr(tank, field) for field in updates}
     for field, value in updates.items():
         setattr(tank, field, value)
@@ -157,6 +188,9 @@ async def update_tank(
             updates["fuelProductId"] = fuel_product.id
             tank.fuelProductId = fuel_product.id
             tank.productSince = date.today()
+            # Le nom des pompes de la cuve embarque le produit : régénéré
+            # dans la même transaction que le changement de produit.
+            await _resync_pump_names(db, tank_id=tank.id)
 
     await record_audit_event(
         db,
@@ -173,6 +207,7 @@ async def update_tank(
     await db.commit()
     await db.refresh(tank)
     return tank
+
 
 
 async def list_tanks(
@@ -210,19 +245,37 @@ async def list_tanks(
     return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
 
 
-async def create_pump(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreatePumpRequest) -> Pump:
+async def create_pump(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreatePumpRequest) -> PumpResponse:
     await get_station(db, organization_id, data.stationId)  # lève station_not_found si hors périmètre
-    tank = await get_tank(db, organization_id, data.tankId)
-    if tank.stationId != data.stationId:
-        raise AppError(
-            code="pump_tank_station_mismatch",
-            message="La cuve sélectionnée n'appartient pas à la station de la pompe.",
-            status_code=422,
-        )
+    tank, product_name = await _tank_with_product_name(db, organization_id, data.tankId, data.stationId)
 
-    pump = Pump(stationId=data.stationId, tankId=data.tankId, name=data.name)
+    if data.pumpNumber is None:
+        pump_number = await _next_free_pump_number(db, data.stationId)
+    else:
+        pump_number = data.pumpNumber
+        await _assert_pump_number_free(db, data.stationId, pump_number)
+
+    pump = Pump(
+        stationId=data.stationId,
+        tankId=data.tankId,
+        pumpNumber=pump_number,
+        name=_generated_pump_name(pump_number, product_name),
+        brand=data.brand,
+        serialNumber=data.serialNumber,
+        installedOn=data.installedOn,
+    )
     db.add(pump)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        # Course entre deux créations simultanées (ou nom hérité identique) :
+        # la contrainte unique en base reste le dernier garde-fou.
+        await db.rollback()
+        raise AppError(
+            code="pump_number_taken",
+            message=f"Le numéro {pump_number} est déjà utilisé dans cette station. Choisissez un autre numéro.",
+            status_code=409,
+        )
     await record_audit_event(
         db,
         organization_id,
@@ -236,7 +289,8 @@ async def create_pump(db: AsyncSession, organization_id: uuid.UUID, actor_user_i
     )
     await db.commit()
     await db.refresh(pump)
-    return pump
+    return _pump_response(pump, tank.fuelProductId, product_name)
+
 
 
 async def _assert_pump_station_in_organization(db: AsyncSession, organization_id: uuid.UUID, pump: Pump) -> None:
@@ -258,23 +312,47 @@ async def get_pump(db: AsyncSession, organization_id: uuid.UUID, pump_id: uuid.U
 
 async def update_pump(
     db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, pump_id: uuid.UUID, data: UpdatePumpRequest
-) -> Pump:
+) -> PumpResponse:
     pump = await get_pump(db, organization_id, pump_id)
     updates = data.model_dump(exclude_unset=True)
+    # Colonnes non nullables : un null explicite signifie « inchangé », jamais « effacer ».
+    for non_nullable in ("tankId", "pumpNumber", "active"):
+        if non_nullable in updates and updates[non_nullable] is None:
+            del updates[non_nullable]
 
-    if "tankId" in updates and updates["tankId"] is not None:
-        tank = await get_tank(db, organization_id, updates["tankId"])
-        if tank.stationId != pump.stationId:
-            raise AppError(
-                code="pump_tank_station_mismatch",
-                message="La cuve sélectionnée n'appartient pas à la station de la pompe.",
-                status_code=422,
-            )
+    new_tank_id = updates.get("tankId", pump.tankId)
+    new_number = updates.get("pumpNumber", pump.pumpNumber)
+    _, product_name = await _tank_with_product_name(db, organization_id, new_tank_id, pump.stationId)
+    if new_number != pump.pumpNumber:
+        await _assert_pump_number_free(db, pump.stationId, new_number, exclude_pump_id=pump.id)
+    # B3 (règles reportées d'A1/D3) : pas de désactivation ni de changement de cuve tant qu'un tour OUVERT utilise la pompe.
+    if updates.get("active") is False and pump.active:
+        await assert_pump_can_be_deactivated(db, pump)
+    if new_tank_id != pump.tankId:
+        await assert_pump_tank_can_change(db, pump)
 
     before = {field: getattr(pump, field) for field in updates}
     for field, value in updates.items():
         setattr(pump, field, value)
 
+    # Nom régénéré dans la même transaction quand la cuve (donc le produit)
+    # ou le numéro change ; sinon le nom existant est laissé intact.
+    if "tankId" in updates or "pumpNumber" in updates:
+        new_name = _generated_pump_name(new_number, product_name)
+        if new_name != pump.name:
+            before["name"] = pump.name
+            updates["name"] = new_name
+            pump.name = new_name
+
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise AppError(
+            code="pump_number_taken",
+            message="Ce numéro ou ce nom de pompe est déjà utilisé dans cette station. Choisissez un autre numéro.",
+            status_code=409,
+        )
     await record_audit_event(
         db,
         organization_id,
@@ -289,7 +367,8 @@ async def update_pump(
     )
     await db.commit()
     await db.refresh(pump)
-    return pump
+    return (await _pump_responses(db, [pump]))[0]
+
 
 
 async def list_pumps(
@@ -313,13 +392,14 @@ async def list_pumps(
         stmt = stmt.where(Pump.stationId == station_id)
     if active is not None:
         stmt = stmt.where(Pump.active.is_(active))
-    stmt = stmt.order_by(Pump.name)
+    stmt = stmt.order_by(Pump.pumpNumber, Pump.name)
 
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
     result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
-    pumps = result.scalars().all()
-    data = [PumpResponse.model_validate(pump) for pump in pumps]
+    pumps = list(result.scalars().all())
+    data = await _pump_responses(db, pumps)
     return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
+
 
 
 async def create_tank_sensor_mapping(
@@ -486,3 +566,45 @@ async def list_tank_calibration_points(db: AsyncSession, organization_id: uuid.U
         select(TankCalibrationPoint).where(TankCalibrationPoint.tankId == tank_id).order_by(TankCalibrationPoint.heightMm)
     )
     return list(result.scalars().all())
+
+
+async def _tank_with_product_name(db: AsyncSession, organization_id: uuid.UUID, tank_id: uuid.UUID, station_id: uuid.UUID) -> tuple[Tank, str]:
+    tank = await get_tank(db, organization_id, tank_id)
+    if tank.stationId != station_id:
+        raise AppError(
+            code="pump_tank_station_mismatch",
+            message="La cuve sélectionnée n'appartient pas à la station de la pompe.",
+            status_code=422,
+        )
+    product_name = await db.scalar(select(FuelProduct.name).where(FuelProduct.id == tank.fuelProductId))
+    return tank, product_name
+
+
+def _pump_response(pump: Pump, fuel_product_id: uuid.UUID, fuel_product_name: str) -> PumpResponse:
+    return PumpResponse(
+        id=pump.id,
+        stationId=pump.stationId,
+        tankId=pump.tankId,
+        name=pump.name,
+        active=pump.active,
+        pumpNumber=pump.pumpNumber,
+        brand=pump.brand,
+        serialNumber=pump.serialNumber,
+        installedOn=pump.installedOn,
+        fuelProductId=fuel_product_id,
+        fuelProductName=fuel_product_name,
+    )
+
+
+async def _pump_responses(db: AsyncSession, pumps: list[Pump]) -> list[PumpResponse]:
+    """Le produit d'une pompe vient de sa cuve (Tank → FuelProduct) : calculé
+    ici côté serveur par jointure, le front n'a jamais à le deviner."""
+    if not pumps:
+        return []
+    rows = await db.execute(
+        select(Tank.id, FuelProduct.id, FuelProduct.name)
+        .join(FuelProduct, FuelProduct.id == Tank.fuelProductId)
+        .where(Tank.id.in_({pump.tankId for pump in pumps}))
+    )
+    products = {tank_id: (product_id, product_name) for tank_id, product_id, product_name in rows.all()}
+    return [_pump_response(pump, *products[pump.tankId]) for pump in pumps]

@@ -94,6 +94,11 @@ forbidden_modules =
     app.modules.zylo_liquid.stations
     app.modules.zylo_liquid.tanks
     app.modules.zylo_liquid.common
+    app.modules.zylo_liquid.exploitation
+    app.modules.zylo_liquid.rotes
+    app.modules.zylo_liquid.scopes
+    app.modules.zylo_liquid.garde_tours
+    app.modules.zylo_liquid.nommage_pompes
     app.modules.zylo_tanker.service
     app.modules.zylo_tanker.router
     app.modules.zylo_tanker.schemas
@@ -141,6 +146,11 @@ forbidden_modules =
     app.modules.zylo_liquid.stations
     app.modules.zylo_liquid.tanks
     app.modules.zylo_liquid.common
+    app.modules.zylo_liquid.exploitation
+    app.modules.zylo_liquid.rotes
+    app.modules.zylo_liquid.scopes
+    app.modules.zylo_liquid.garde_tours
+    app.modules.zylo_liquid.nommage_pompes
     app.modules.zylo_tanker.service
     app.modules.zylo_tanker.router
     app.modules.zylo_tanker.schemas

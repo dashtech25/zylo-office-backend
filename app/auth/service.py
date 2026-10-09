@@ -1,6 +1,8 @@
 import hashlib
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,10 +44,24 @@ async def change_password(db: AsyncSession, user: User, current_password: str, n
     return user
 
 
+@lru_cache(maxsize=1)
+def _hachage_factice() -> str:
+    """Hachage d'un mot de passe aléatoire jamais communiqué.
+
+    Intention (T-012, IAM-015) : compte inconnu et mauvais mot de passe doivent
+    prendre le même temps de réponse. Sans cela, l'absence de hachage pour un
+    email inconnu révèle l'existence du compte par la latence.
+    """
+    return hash_password(secrets.token_urlsafe(32))
+
+
 async def authenticate_user(db: AsyncSession, data: LoginRequest) -> User:
     result = await db.execute(select(User).where(User.email == data.email))
     user = result.scalar_one_or_none()
-    if user is None or not verify_password(data.password, user.hashedPassword):
+    if user is None:
+        verify_password(data.password, _hachage_factice())
+        raise AppError(code="invalid_credentials", message="Email ou mot de passe incorrect.", status_code=401)
+    if not verify_password(data.password, user.hashedPassword):
         raise AppError(code="invalid_credentials", message="Email ou mot de passe incorrect.", status_code=401)
     if user.status != "active":
         raise AppError(code="account_inactive", message="Ce compte n'est pas actif.", status_code=403)

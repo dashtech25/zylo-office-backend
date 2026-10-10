@@ -49,3 +49,17 @@
 
 - **3006 et 3007** : anciens ports de la documentation et de la baseline de tests. Ils ne doivent apparaître dans aucun fichier de configuration. `scripts/check_ports.sh` le vérifie.
 - Un port occupé par un autre processus fait échouer `scripts/dev/env_tache.sh creer` (préflight).
+
+## 6. Copies locales de main-local et des issues (parallélisme local)
+
+Source : `implementation/scripts/parallelisme.env` (procédure : `implementation/PARALLELISME-LOCAL.md`, section 1.5). Port = base + emplacement. L'emplacement 0 est réservé à la branche `main-local` ; les copies prennent les emplacements 1 à `COPIES_MAX` (6 par défaut, maximum technique 99).
+
+| Usage | Backend | Frontend dev | Frontend e2e (Playwright) |
+|---|---|---|---|
+| Branche main-local (emplacement 0) | 3400 | 3500 | 3600 |
+| Copie de l'emplacement s (1 à `COPIES_MAX`) | 3400 + s (3401+) | 3500 + s (3501+) | 3600 + s (3601+) |
+
+- Disjonction : les plages 3401 à 3699 ne contiennent ni 3001, ni 3002, ni 3003, ni 3055, ni 3006, ni 3007, et ne recouvrent pas les plages T-NNN (3101 à 3399).
+- Le numéro d'emplacement, et non le numéro de l'issue, pilote les ports.
+- CORS : le `.env` de chaque copie autorise les origines du frontend dev et du frontend e2e de son emplacement (les deux ports).
+- `E2E_PORT` (frontend) : à ajouter à la table de la section 1 pour les copies ; le repli 3055 reste pour le checkout principal.

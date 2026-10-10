@@ -17,3 +17,9 @@ Tous les travaux Playwright sont suspendus (tests e2e, configurations, smoke sur
 - Le comportement non couvert par un test automatisé est listé dans chaque fiche suspendue.
 - Reprise seulement si les quatre conditions du document de décision sont réunies. Les fiches T-008, T-009, T-026, T-041 (partie smoke) et T-046 sont suspendues.
 - Les branches `test/T-008-playwright-prod` et `chore/t041-retirer-storybook` sont conservées comme point de départ documenté.
+
+## Mise à jour (2026-10-10)
+
+- Décision du 2026-10-09 ci-dessus : repris le 2026-10-10 : un test par issue, écrit d'abord, en local.
+- Portée : la reprise vaut pour les issues d'implémentation (cycle `implementation-issue`), exécutées dans les copies locales (`implementation/PARALLELISME-LOCAL.md`). Elle ne réécrit pas l'historique : les fiches et journaux antérieurs gardent la mention « Playwright suspendu ».
+- Sources de la reprise : instruction de l'utilisateur du 2026-10-10 (procédure d'implémentation). Les conditions du document de décision restent à confirmer par écrit par le client.

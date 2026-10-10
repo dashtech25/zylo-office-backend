@@ -71,7 +71,7 @@ Réutiliser avant de créer : `shared/` (pagination, schémas, devises, géo), p
 
 ## Décisions en vigueur
 
-- Playwright est suspendu ([ADR 0006](docs/architecture/decisions/0006-playwright-suspendu.md)). Les critères sont remplacés par pytest, tsc, lint et build locaux.
+- Playwright est suspendu ([ADR 0006](docs/architecture/decisions/0006-playwright-suspendu.md)) ; repris le 2026-10-10 : un test par issue, écrit d'abord, en local. Hors issues, les critères restent pytest, tsc, lint et build locaux.
 - Storybook est retiré du frontend ([ADR 0007](docs/architecture/decisions/0007-storybook-retire.md)).
 - Ports : [ADR 0008](docs/architecture/decisions/0008-table-ports-unique.md).
 - Rôles par module : [ADR 0002](docs/architecture/decisions/0002-roles-par-module.md).

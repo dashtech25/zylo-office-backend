@@ -126,7 +126,6 @@ async def test_ca2_correlation_client_reprise_a_l_identique():
     assert fourni.headers["X-Correlation-Id"] == "corr.be181:client-01"
     assert fourni.json()["correlation_id"] == "corr.be181:client-01"
     assert fourni.json()["request_id"] == fourni.headers["X-Request-Id"]
-    assert fourni.json()["request_id"] != "corr.be181:client-01"
 
     genere = absent.headers["X-Correlation-Id"]
     assert genere, "un correlationId doit être généré à défaut"

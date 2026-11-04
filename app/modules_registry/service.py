@@ -12,7 +12,7 @@ from app.core.database import get_db
 from app.core.errors import AppError
 from app.modules_registry.etats import ETAT_INCOMPATIBLE, etat_depuis_ligne, etat_module, etat_ouvre_acces
 from app.modules_registry.models import Module, OrganizationModule
-from app.modules_registry.schemas import InstalledModuleResponse
+from app.modules_registry.schemas import InstalledModuleResponse, ModuleAccessResponse
 from app.rbac.models import Permission, Role, RolePermission
 from app.rbac.service import get_current_organization_id
 
@@ -299,6 +299,70 @@ def _select_effective_entitlement(rows, now: datetime):
     return min(rows, key=lambda row: (row[0].startsAt, row[0].createdAt), default=None)
 
 
+def _projeter_acces(module: Module, installation_status: str, rows, now: datetime) -> tuple[str, bool, bool]:
+    """Projection unique `(accessState, canActivate, canOpen)` d'un module pour une organisation (BE-025).
+
+    Source unique partagée par le catalogue (`list_installed_modules`) et la projection d'un module
+    (`get_module_access_projection`) : les deux lectures ne peuvent donc pas diverger.
+
+    - `canActivate` : vrai si le droit d'abonnement est accordé (`_project_entitlement_access`) ;
+      une absence de ligne d'entitlement vaut accès legacy (`not_configured`, non-régression).
+    - `canOpen` : vrai seulement si le module est activé pour l'organisation (`active` ou `trial`),
+      que le droit est accordé ET que le registre déclare le module `disponible`. Un manifeste
+      `incompatible` ferme donc l'ouverture même si le droit et l'activation sont présents, en
+      cohérence avec `is_module_active` (BE-021, CA-4). Fail-closed : aucun cas non prévu n'ouvre.
+
+    `rows` est la liste `(SubscriptionEntitlement, Subscription.status)` de l'organisation pour ce
+    module. Fonction pure : aucune requête, aucune écriture.
+    """
+    access_state, can_activate = _project_entitlement_access(_select_effective_entitlement(rows, now), now)
+    registre_ouvert = etat_ouvre_acces(etat_depuis_ligne(module.code, module))
+    can_open = installation_status in {"active", "trial"} and can_activate and registre_ouvert
+    return access_state, can_activate, can_open
+
+
+async def get_module_access_projection(
+    db: AsyncSession, organization_id: uuid.UUID, module_id: uuid.UUID
+) -> ModuleAccessResponse:
+    """Projection d'accès d'un module (catalogue) pour l'organisation courante (BE-025).
+
+    Renvoie `ModuleAccessResponse` pour `GET /organizations/current/modules/{moduleId}/access`.
+    404 si `module_id` n'existe pas au catalogue. Un module jamais activé ici est projeté avec le
+    statut `inactive`. Ne lit que les lignes de `organization_id` : un droit d'une autre organisation
+    n'entre jamais dans le calcul (isolation, CA-5).
+    """
+    module = (await db.execute(select(Module).where(Module.id == module_id))).scalar_one_or_none()
+    if module is None:
+        raise AppError(code="module_not_found", message="Module inconnu.", status_code=404)
+    installation_status = (
+        await db.execute(
+            select(OrganizationModule.status).where(
+                OrganizationModule.organizationId == organization_id,
+                OrganizationModule.moduleCode == module.code,
+            )
+        )
+    ).scalar_one_or_none() or "inactive"
+    rows = (
+        await db.execute(
+            select(SubscriptionEntitlement, Subscription.status)
+            .join(Subscription, Subscription.id == SubscriptionEntitlement.subscriptionId)
+            .where(
+                SubscriptionEntitlement.organizationId == organization_id,
+                SubscriptionEntitlement.moduleCode == module.code,
+            )
+        )
+    ).all()
+    access_state, can_activate, can_open = _projeter_acces(module, installation_status, rows, datetime.now(timezone.utc))
+    return ModuleAccessResponse(
+        moduleId=module.id,
+        moduleCode=module.code,
+        status=installation_status,
+        accessState=access_state,
+        canActivate=can_activate,
+        canOpen=can_open,
+    )
+
+
 async def get_module_entitlement_access(
     db: AsyncSession, organization_id: uuid.UUID, module_code: str
 ) -> tuple[str, bool]:
@@ -349,8 +413,8 @@ async def list_installed_modules(db: AsyncSession, organization_id: uuid.UUID) -
     for module in modules:
         org_module = org_modules_by_code.get(module.code)
         installation_status = org_module.status if org_module else "inactive"
-        access_state, can_activate = _project_entitlement_access(
-            _select_effective_entitlement(entitlements_by_module.get(module.code, []), now), now
+        access_state, can_activate, can_open = _projeter_acces(
+            module, installation_status, entitlements_by_module.get(module.code, []), now
         )
         result.append(
             InstalledModuleResponse(
@@ -363,7 +427,7 @@ async def list_installed_modules(db: AsyncSession, organization_id: uuid.UUID) -
                 activatedAt=org_module.activatedAt if org_module else None,
                 accessState=access_state,
                 canActivate=can_activate,
-                canOpen=(installation_status in {"active", "trial"} and can_activate),
+                canOpen=can_open,
             )
         )
     return result

@@ -15,6 +15,7 @@ from app.modules_registry.permissions import MODULE_MANAGE
 from app.modules_registry.schemas import (
     ActivateModuleRequest,
     InstalledModuleResponse,
+    ModuleAccessResponse,
     ModuleResponse,
     OrganizationModuleResponse,
     SetModuleActivationRequest,
@@ -42,6 +43,23 @@ async def list_current_organization_modules(
     """Lecture ouverte à tout membre actif de l'organisation courante. Un non-membre ne reçoit
     jamais le catalogue (refus par `get_current_organization_id`)."""
     return await service.list_installed_modules(db, organization_id)
+
+
+@organizations_modules_router.get(
+    "/current/modules/{module_id}/access",
+    response_model=ModuleAccessResponse,
+    summary="Projection d'accès (canOpen / canActivate) d'un module pour l'organisation courante",
+)
+async def get_current_organization_module_access(
+    module_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> ModuleAccessResponse:
+    """Lecture ouverte à tout membre actif de l'organisation courante (BE-025). Les droits sont
+    calculés côté serveur : `canOpen` est faux pour `inactive`, `expired` et `blocked` (comme pour
+    un module non activé ou au manifeste incompatible) ; la garde réelle reste celle des routes du
+    module, qui répond 403. 404 si le module n'existe pas au catalogue."""
+    return await service.get_module_access_projection(db, organization_id, module_id)
 
 
 @organizations_modules_router.put(

@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     APP_NAME: str = "Zylo Office Backend"
+    # Locale des messages d'erreur (BE-256). NON DÉFINI (QE-EXP-23) : aucune
+    # valeur par défaut ; à None, les textes de repli du code sont renvoyés.
+    DEFAULT_LOCALE: str | None = None
     # Intention : le défaut est `production`. Une image ou un shell sans
     # variable applique les règles strictes ; les replis exigent un choix
     # explicite `development` (voir docs/process/configuration.md).

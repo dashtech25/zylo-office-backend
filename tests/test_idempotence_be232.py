@@ -21,6 +21,7 @@ from sqlalchemy import func, select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, get_db
+from app.core.errors import register_exception_handlers
 from app.core.idempotency import IdempotencyKey, require_idempotency_key, run_idempotent
 from app.core.security import get_current_user
 from app.rbac.service import get_current_organization_id, require_permission
@@ -34,6 +35,9 @@ PERMISSION_JAMAIS_ACCORDEE = "test.idempotence.jamais"
 def _construire_application(compteur: list[int]) -> FastAPI:
     """Application de test : deux commandes qui comptent leurs exécutions réelles."""
     application = FastAPI()
+    # Même enveloppe d'erreurs que l'application réelle (BE-220) : sans elle,
+    # une AppError 403 ou 409 remonte telle quelle au lieu d'une réponse HTTP.
+    register_exception_handlers(application)
 
     def _ajouter_commande(chemin: str, permission: str) -> None:
         @application.post(chemin, status_code=201, dependencies=[Depends(require_permission(permission))])

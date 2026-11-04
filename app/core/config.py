@@ -169,6 +169,10 @@ class Settings(BaseSettings):
     ACTIVATION_URL_BASE: str = "http://localhost:3001/activer"
     # Durée de validité d'un jeton d'activation (décision T-049 : 72 heures).
     USER_INVITATION_TTL_HOURS: int = 72
+    # Idempotence des commandes (BE-232, QE-EXP-06 : TTL NON DÉFINI dans la
+    # définition). Hypothèse appliquée : 24 h. Une clé plus ancienne est traitée
+    # comme nouvelle (app/core/idempotency.py). Lu à chaque appel, pas à l'import.
+    IDEMPOTENCY_KEY_TTL_HOURS: int = 24
     # Réinitialisation par e-mail, token fragment pour qu'il ne soit pas envoyé
     # dans les journaux/referers HTTP.
     PASSWORD_RESET_URL_BASE: str = "http://localhost:3001/forgot-password"

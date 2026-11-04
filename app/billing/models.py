@@ -15,7 +15,7 @@ app/billing/service.py::current_subscription) : aucune requête globale.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, Index, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, Index, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,8 +36,36 @@ class Plan(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     periodDays: Mapped[int] = mapped_column(nullable=False, default=30)
 
 
+class BillingPayer(Base):
+    """Payeur d'un abonnement (BE-071) : la personne ou l'entité qui règle la facture.
+
+    Le payeur est distinct du tenant bénéficiaire (`Subscription.beneficiaryTenantId`)
+    et de l'administrateur (`Subscription.adminUserId`). Payer ne confère aucun droit
+    d'accès : un paiement réussi n'alimente jamais `subscription_entitlement`.
+    `payerKind` dit de quelle sorte d'entité il s'agit ; `accountRef` est la référence
+    du compte côté facturation (la nature de cette référence reste à fixer, QE-FAC-22).
+    """
+    __tablename__ = "billing_payer"
+    __table_args__ = {"comment": "Payeur d'un abonnement, distinct du tenant bénéficiaire et de l'administrateur (BE-071)."}
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    payerKind: Mapped[str] = mapped_column(String(30), nullable=False, comment="Sorte de payeur (organisation, personne).")
+    accountRef: Mapped[str] = mapped_column(String(255), nullable=False, comment="Référence du compte payeur côté facturation.")
+    createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class Subscription(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Abonnement d'une organisation à un plan. Démarre en `trial` ; `planVersionId` pointe la version souscrite (nullable pour les lignes antérieures à c0b7d9a2e511)."""
+    """Abonnement d'une organisation à un plan. Démarre en `trial` ; `planVersionId` pointe la version souscrite (nullable pour les lignes antérieures à c0b7d9a2e511).
+
+    BE-071 sépare trois rôles qui étaient confondus dans `organizationId` :
+    - `payerId` : le payeur (`billing_payer`), nullable pour les lignes antérieures ;
+    - `beneficiaryTenantId` : le tenant qui bénéficie de l'abonnement. Il reprend
+      `organizationId` (recopié par la migration) ; c'est le périmètre de lecture
+      et d'écriture (isolation tenant, CA-3 de BE-071) ;
+    - `adminUserId` : l'utilisateur administrateur du tenant, seul habilité à changer
+      l'administrateur (voir app/billing/payers.py::changer_administrateur).
+    `organizationId` reste NOT NULL (contrat BE-023) : il n'est plus le seul propriétaire.
+    """
     __tablename__ = "subscription"
     __table_args__ = {"comment": "Abonnement d'une organisation à un plan — statut trial/active/expired/cancelled."}
 
@@ -46,6 +74,9 @@ class Subscription(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     planId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("plan.id"), nullable=False, index=True)
     planVersionId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("planVersion.id"), nullable=True, index=True)
+    payerId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("billing_payer.id"), nullable=True, index=True, comment="Payeur de l'abonnement (BE-071).")
+    beneficiaryTenantId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=True, index=True, comment="Tenant bénéficiaire, périmètre d'accès (BE-071).")
+    adminUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=True, index=True, comment="Administrateur du tenant bénéficiaire (BE-071).")
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="trial")
     startDate: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     endDate: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -15,6 +15,7 @@ from app.modules.zylo_liquid.router import router as zylo_liquid_router
 from app.modules.zylo_tanker.router import router as zylo_tanker_router
 from app.modules_registry.router import organizations_modules_router
 from app.modules_registry.router import router as modules_router
+from app.rbac.grants_membres import router as grants_membres_router
 from app.rbac.module_router import router as rbac_module_router
 from app.notifications.router import router as notifications_router
 from app.rbac.router import router as rbac_router
@@ -42,6 +43,7 @@ api_router.include_router(modules_router, prefix="/modules", tags=["modules"])
 api_router.include_router(rbac_router, prefix="/rbac", tags=["rbac"])
 # BE-016 : lecture des rôles de l organisation courante (lecture seule).
 api_router.include_router(roles_lecture_router, prefix="/organizations", tags=["rbac"])
+api_router.include_router(grants_membres_router, prefix="/organizations", tags=["rbac"])
 api_router.include_router(rbac_module_router, prefix="/rbac", tags=["rbac"])
 api_router.include_router(audit_router, prefix="/audit", tags=["audit"])
 api_router.include_router(organization_audit_router, prefix="/organizations", tags=["audit"])

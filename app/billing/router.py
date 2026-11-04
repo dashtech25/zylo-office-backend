@@ -173,7 +173,7 @@ async def flutterwave_webhook(
     """
     secret = os.getenv("FLUTTERWAVE_WEBHOOK_SECRET", "")
     if not secret:
-        raise AppError(code="provider_not_configured", message="Le webhook Flutterwave n'est pas configuré.", status_code=503)
+        raise AppError(code="PROVIDER_UNAVAILABLE", message="Le webhook Flutterwave n'est pas configuré.", status_code=503)
     if not verif_hash or not hmac.compare_digest(verif_hash, secret):
         raise AppError(code="webhook_signature_invalid", message="Signature de webhook invalide.", status_code=401)
     raw = await request.body()

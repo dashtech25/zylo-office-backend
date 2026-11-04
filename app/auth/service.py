@@ -7,13 +7,14 @@ from functools import lru_cache
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.service import record_audit_event
 from app.auth.models import RefreshToken
 from app.auth.politique_mot_de_passe import MESSAGE_IDENTIQUE, PolitiqueMotDePasseErreur, erreur_api, verifie_mot_de_passe
 from app.auth.schemas import LoginRequest, RegisterRequest
 from app.core.config import settings
 from app.core.errors import AppError
 from app.core.security import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
-from app.identity.models import User
+from app.identity.models import OrganizationUser, User
 
 
 def _hash_token(token: str) -> str:
@@ -50,13 +51,35 @@ async def revoque_sessions(db: AsyncSession, user_id, *, sauf_refresh_token: str
     await db.execute(requete.values(revokedAt=maintenant))
 
 
+ACTION_CHANGEMENT_MOT_DE_PASSE = "auth.password.change"
+
+
 async def change_password(
     db: AsyncSession, user: User, current_password: str, new_password: str, refresh_token: str | None = None
 ) -> User:
-    """Vérifie le mot de passe actuel (temporaire ou non) avant de le
-    remplacer — jamais un changement sans preuve de connaissance de
-    l'ancien, même pour lever `mustChangePassword`. Applique la politique
-    commune, puis révoque les sessions (le refresh_token fourni reste ouvert)."""
+    """Change le mot de passe du compte connecté (BE-018).
+
+    Ordre des contrôles, chacun bloquant avant toute écriture :
+    1. l'ancien mot de passe doit correspondre (401 `invalid_credentials`, sans
+       modification : CA-2) ;
+    2. le nouveau passe la politique commune (422 `password_policy_violation`) ;
+    3. le nouveau ne peut pas être identique à l'ancien (422).
+
+    Effets, dans une seule transaction :
+    - le condensat bcrypt est remplacé et `mustChangePassword` repasse à faux ;
+    - les refresh tokens ouverts sont révoqués, sauf celui de la session courante
+      (`refresh_token`), qui reste ouverte ;
+    - une entrée d'audit `auth.password.change` est écrite pour chaque organisation
+      dont l'utilisateur est membre (BE-007, CA-4). L'entrée ne contient ni l'ancien
+      ni le nouveau mot de passe : `changes` ne porte qu'un indicateur sans valeur de mot de passe.
+      Un utilisateur sans appartenance n'a aucune organisation sous laquelle
+      journaliser : aucune entrée n'est alors écrite (l'écriture d'audit exige une
+      organisation, voir `app.audit.service.record_audit_event`).
+
+    Cette fonction ne traite que le compte passé en paramètre : la route ne porte
+    aucun identifiant de cible, donc un utilisateur ne peut pas changer le mot de
+    passe d'un autre compte (CA-3). L'appelant fournit `user` déjà authentifié.
+    """
     if not verify_password(current_password, user.hashedPassword):
         raise AppError(code="invalid_credentials", message="Mot de passe actuel incorrect.", status_code=401)
     try:
@@ -73,6 +96,20 @@ async def change_password(
     user.hashedPassword = hash_password(new_password)
     user.mustChangePassword = False
     await revoque_sessions(db, user.id, sauf_refresh_token=refresh_token)
+    organisations = (
+        await db.execute(select(OrganizationUser.organizationId).where(OrganizationUser.userId == user.id))
+    ).scalars().all()
+    for organization_id in organisations:
+        await record_audit_event(
+            db,
+            organization_id,
+            user.id,
+            action=ACTION_CHANGEMENT_MOT_DE_PASSE,
+            entity_type="User",
+            entity_id=user.id,
+            summary="Changement du mot de passe du compte",
+            changes={"modificationEffectuee": True},
+        )
     await db.commit()
     await db.refresh(user)
     return user

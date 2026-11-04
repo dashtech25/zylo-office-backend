@@ -15,7 +15,7 @@ app/billing/service.py::current_subscription) : aucune requête globale.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, JSON, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -107,17 +107,75 @@ class PlanVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     effectiveAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class SubscriptionEntitlement(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    __tablename__ = "subscriptionEntitlement"
-    __table_args__ = (UniqueConstraint("subscriptionId", "entitlementCode", name="uq_subscriptionEntitlement_subscription_code"),)
+class Capability(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Registre de capacités rattaché au registre de modules (BE-021).
 
-    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True)
+    Une capacité est la cible d'un entitlement (`subscription_entitlement.capaciteId`).
+    `quotaUnit` porte l'unité dans laquelle `quotaLimite` est exprimé (QE-SOC-23) :
+    l'entitlement ne la répète pas.
+    """
+    __tablename__ = "capability"
+    __table_args__ = {"comment": "Registre des capacités d'un module, cible des entitlements d'abonnement."}
+
+    moduleCode: Mapped[str] = mapped_column(String(100), ForeignKey("module.code"), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(150), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    quotaUnit: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="Unité du quota de la capacité.")
+
+
+class SubscriptionEntitlement(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Droit accordé par un abonnement ou une attribution (BE-024, absorbe BE-261).
+
+    Table unique des entitlements (décision D3). Chaque ligne est une attribution :
+    - `sourceAttribution` dit d'où vient le droit (`offre`, `achat_additionnel`,
+      `essai`, `allocation_admin`, `usage_reel`) ;
+    - `niveauApplication` dit à quel niveau il s'applique (`organisation` ou `utilisateur`) ;
+    - `offreId` pointe la version de plan source (`planVersion`) quand le droit vient d'une offre ;
+    - `capaciteId` pointe le registre de capacités ; `quotaLimite` est un entier strictement
+      positif dont l'unité est portée par la capacité ;
+    - `status` porte l'effet d'accès (`active`, `inactive`, `expired`, `blocked`) : il n'y a pas
+      de colonne séparée. L'état calculé `expired` est dérivé de `endsAt` (voir
+      app/billing/entitlements.py::calculer_entitlements).
+
+    `organizationId` est nul uniquement pour une offre globale (`sourceAttribution` = `offre`).
+    Une ligne sans organisation pour une autre source est refusée par la base.
+    Le nom de table est en snake_case : décision du propriétaire pour BE-024.
+    """
+    __tablename__ = "subscription_entitlement"
+    __table_args__ = (
+        UniqueConstraint("subscriptionId", "entitlementCode", name="uq_subscription_entitlement_subscription_code"),
+        CheckConstraint(
+            "\"niveauApplication\" IN ('organisation', 'utilisateur')",
+            name="ck_subscription_entitlement_niveau",
+        ),
+        CheckConstraint(
+            "\"sourceAttribution\" IN ('offre', 'achat_additionnel', 'essai', 'allocation_admin', 'usage_reel')",
+            name="ck_subscription_entitlement_source",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'inactive', 'expired', 'blocked')",
+            name="ck_subscription_entitlement_status",
+        ),
+        CheckConstraint('"quotaLimite" IS NULL OR "quotaLimite" > 0', name="ck_subscription_entitlement_quota_positif"),
+        CheckConstraint(
+            "\"organizationId\" IS NOT NULL OR \"sourceAttribution\" = 'offre'",
+            name="ck_subscription_entitlement_org_offre_globale",
+        ),
+        {"comment": "Entitlements d'abonnement : droits par capacité, source, niveau, quota et état d'accès."},
+    )
+
+    organizationId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=True, index=True)
     subscriptionId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("subscription.id"), nullable=False, index=True)
     moduleCode: Mapped[str] = mapped_column(String(100), nullable=False)
     entitlementCode: Mapped[str] = mapped_column(String(150), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     startsAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     endsAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    offreId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("planVersion.id"), nullable=True, index=True)
+    capaciteId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("capability.id"), nullable=True, index=True)
+    quotaLimite: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    niveauApplication: Mapped[str] = mapped_column(String(20), nullable=False, default="organisation", server_default="organisation")
+    sourceAttribution: Mapped[str] = mapped_column(String(30), nullable=False, default="offre", server_default="offre")
 
 
 class PaymentAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):

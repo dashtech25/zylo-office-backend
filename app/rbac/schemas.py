@@ -87,6 +87,19 @@ class CreateGrantRequest(BaseModel):
     delegatedFromGrantId: uuid.UUID | None = None
 
 
+class CreateMemberGrantRequest(BaseModel):
+    """Corps de `POST /organizations/current/members/{userId}/grants` (BE-017). Le membre
+    cible vient du chemin, pas du corps : il ne peut pas être changé par le client."""
+
+    permissionCode: str
+    effect: str = Field(pattern="^(allow|deny)$")
+    resourceType: str | None = None
+    resourceId: uuid.UUID | None = None
+    validUntil: datetime | None = None
+    auditNote: str | None = None
+    delegatedFromGrantId: uuid.UUID | None = None
+
+
 class GrantResponse(BaseModel):
     id: uuid.UUID
     organizationId: uuid.UUID

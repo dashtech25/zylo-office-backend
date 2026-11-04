@@ -54,7 +54,11 @@ async def create_push_subscription(
     "/push-subscriptions/{subscription_id}",
     status_code=204,
     summary="Supprimer un abonnement Web Push",
-    description="Désinscrit ce navigateur des notifications push — n'a aucun effet si l'abonnement n'appartient pas à l'utilisateur connecté.",
+    description=(
+        "Désinscrit ce navigateur des notifications push côté serveur. Réponses : 204 si l'abonnement "
+        "appartenait à l'utilisateur connecté et a été supprimé ; 401 sans session ; 404 si l'abonnement "
+        "est absent ou appartient à un autre utilisateur (sans fuite d'existence)."
+    ),
 )
 async def delete_push_subscription(
     subscription_id: uuid.UUID,

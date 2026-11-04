@@ -89,6 +89,19 @@ async def create_push_subscription(
 
 
 async def delete_push_subscription(db: AsyncSession, organization_id: uuid.UUID, user_id: uuid.UUID, subscription_id: uuid.UUID) -> None:
+    """Désabonnement serveur d'un abonnement Web Push (BE-034, CA-1 et CA-3).
+
+    Contrat :
+    - la ligne est supprimée seulement si elle appartient à `user_id` dans
+      `organization_id` ; sinon l'appelant reçoit 404 (`notification_subscription_not_found`).
+    - Un abonnement d'un autre utilisateur n'est jamais supprimé, et son existence
+      n'est pas révélée : absent et « pas à vous » donnent la même réponse 404.
+    - Le filtre `userId` est la frontière d'isolation ; ne pas le retirer au profit
+      d'un contrôle côté client. L'authentification (401 sans session) est assurée
+      par `get_current_user` au niveau du router, avant cette fonction.
+    - La désinscription du navigateur (`PushManager.unsubscribe`) reste une
+      responsabilité du frontend ; ce service ne fait que retirer l'abonnement serveur.
+    """
     subscription = (
         await db.execute(
             select(PushSubscription).where(
@@ -99,7 +112,7 @@ async def delete_push_subscription(db: AsyncSession, organization_id: uuid.UUID,
         )
     ).scalar_one_or_none()
     if subscription is None:
-        return
+        raise AppError(code="notification_subscription_not_found", message="Abonnement introuvable.", status_code=404)
     await db.delete(subscription)
     await db.commit()
 

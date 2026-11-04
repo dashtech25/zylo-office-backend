@@ -42,7 +42,7 @@ async def test_mutation_avec_version_obsolete_renvoie_409_sans_ecraser(
     client: AsyncClient, registered_user: dict, organization: dict
 ):
     """CA-1 : une version obsolète ne modifie ni le nom ni la version."""
-    headers = _entetes(registered_user["accessToken"])
+    headers = _entetes(registered_user["accessToken"], organization["id"])
     url = f"/api/v1/organizations/{organization['id']}"
     assert organization["version"] == 1
 
@@ -63,7 +63,7 @@ async def test_reponse_409_contient_version_courante_et_horodatage(
     client: AsyncClient, registered_user: dict, organization: dict
 ):
     """CA-2 : contrat de la réponse 409 : enveloppe standard, version courante et horodatage dans details."""
-    headers = _entetes(registered_user["accessToken"])
+    headers = _entetes(registered_user["accessToken"], organization["id"])
     url = f"/api/v1/organizations/{organization['id']}"
     await client.patch(url, json={"name": "Deuxième", "version": 1}, headers=headers)
 
@@ -85,7 +85,7 @@ async def test_deux_mutations_concurrentes_une_seule_reussit(
     client: AsyncClient, registered_user: dict, organization: dict
 ):
     """CA-3 : deux mutations partant de la même version ; une seule est appliquée."""
-    headers = _entetes(registered_user["accessToken"])
+    headers = _entetes(registered_user["accessToken"], organization["id"])
     url = f"/api/v1/organizations/{organization['id']}"
 
     reponses = await asyncio.gather(
@@ -108,7 +108,7 @@ async def test_version_d_un_tenant_invisible_d_un_autre_tenant(
     await client.patch(
         f"/api/v1/organizations/{organization['id']}",
         json={"name": "Tenant A modifié", "version": 1},
-        headers=_entetes(registered_user["accessToken"]),
+        headers=_entetes(registered_user["accessToken"], organization["id"]),
     )
 
     courante_b = await client.get(
@@ -131,7 +131,7 @@ async def test_version_d_un_tenant_invisible_d_un_autre_tenant(
     ecriture_croisee = await client.patch(
         f"/api/v1/organizations/{organization['id']}",
         json={"name": "Intrusion", "version": 1},
-        headers=_entetes(autre["token"]),
+        headers=_entetes(autre["token"], autre["organization"]["id"]),
     )
     assert ecriture_croisee.status_code in (403, 404)
     assert "versionCourante" not in ecriture_croisee.text
@@ -141,7 +141,7 @@ async def test_mutation_sans_version_reste_acceptee_et_incremente_la_version(
     client: AsyncClient, registered_user: dict, organization: dict
 ):
     """Sans champ `version`, la mutation n'a pas de contrôle de conflit, mais la version avance."""
-    headers = _entetes(registered_user["accessToken"])
+    headers = _entetes(registered_user["accessToken"], organization["id"])
     res = await client.patch(
         f"/api/v1/organizations/{organization['id']}", json={"name": "Sans version"}, headers=headers
     )

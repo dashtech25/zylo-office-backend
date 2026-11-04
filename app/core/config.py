@@ -1,3 +1,50 @@
+"""Configuration de l'application, chargée une fois à l'import (BE-221).
+
+Source unique : la classe `Settings` (pydantic-settings). Ordre de lecture des
+valeurs, du plus prioritaire au moins prioritaire : variables d'environnement du
+processus, puis fichier `.env` du répertoire de lancement (absent en production,
+où les variables sont injectées), puis valeur par défaut déclarée ci-dessous.
+Une variable présente remplace entièrement la valeur par défaut.
+
+Environnement : `ENVIRONMENT` vaut `production` par défaut. Seule la valeur exacte
+`development` autorise les replis publics (`FALLBACK_*`). Toute autre valeur
+applique les règles strictes (échec fermé, voir `ConfigurationSecretError`).
+
+Paramètres (origine : variable d'environnement ; défaut ; NON DÉFINI si absent des
+sources) :
+- Application : `APP_NAME` (défaut « Zylo Office Backend »), `ENVIRONMENT`
+  (défaut `production`), `PORT` (3002), `CORS_ORIGINS` (liste JSON ; défaut :
+  frontend de développement 3001 et e2e 3055, jamais `*`).
+- Base : `DATABASE_URL` (défaut local PostgreSQL 5432, mot de passe de repli
+  refusé hors development). Dans les tests, `TEST_DATABASE_URL` est copiée dans
+  `DATABASE_URL` par tests/conftest.py après garde de nom `zylo_t<NNN>_test`.
+- Secrets sans valeur utilisable hors development : `JWT_SECRET`,
+  `STORAGE_SIGNED_URL_SECRET` (au moins 32 caractères, pas le repli),
+  `APP_FIELD_ENCRYPTION_KEY` (défaut vide, exigée hors development et test).
+  Les valeurs ne sont jamais écrites dans les messages d'erreur.
+- JWT : `JWT_ALGORITHM` (HS256), `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` (15),
+  `JWT_REFRESH_TOKEN_EXPIRE_DAYS` (30).
+- Stockage : `STORAGE_BACKEND` (local), `STORAGE_LOCAL_ROOT` (./var/storage),
+  `STORAGE_SIGNED_URL_TTL_SECONDS` (900), `STORAGE_S3_*` (NON DÉFINI : aucune
+  valeur par défaut sauf bucket `zylo-office-documents` et région `us-east-1`).
+- Intégration Holykell : `HOLYKELL_SYNC_BASE_URL` (vide = boucle désactivée),
+  `HOLYKELL_SYNC_INTERVAL_SEC` (5).
+- Balayage structurel : `STRUCTURAL_SWEEP_INTERVAL_SEC` (300).
+- Web Push : `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` (vides = canal désactivé),
+  `VAPID_CLAIMS_EMAIL`.
+- Messagerie : `EMAIL_BACKEND` (none ; console réservé à development, memory à
+  test, smtp à production), `EMAIL_SMTP_*` (NON DÉFINI hors smtp : aucune valeur
+  par défaut), `ACTIVATION_URL_BASE`, `USER_INVITATION_TTL_HOURS` (72),
+  `PASSWORD_RESET_URL_BASE`, `PASSWORD_RESET_TTL_MINUTES` (30, entre 1 et 60).
+- Limitation d'authentification : `AUTH_RATE_LIMIT_*` (fenêtre 900 s, 10 échecs par
+  compte, 100 par IP), `AUTH_RATE_LIMIT_TRUSTED_PROXIES` (vide : aucun proxy).
+- Sessions : `AUTH_COOKIE_SECURE` (NON DÉFINI par défaut : Secure hors development),
+  `AUTH_COOKIE_SAMESITE` (lax), `AUTH_COOKIE_DOMAIN` (NON DÉFINI : hôte exact),
+  `AUTH_PUBLIC_REGISTRATION_ENABLED` (false ; true refusé hors development et test),
+  `AUTH_HEADER_ACCEPTED_UNTIL` (2026-11-30, fuseau UTC obligatoire).
+
+Documentation détaillée des usages : docs/process/configuration.md.
+"""
 from datetime import datetime, timezone
 from typing import Literal
 from urllib.parse import urlsplit

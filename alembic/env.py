@@ -28,6 +28,7 @@ from app.notifications import models as notifications_models  # noqa: F401
 from app.operator import alertes_models as operator_alertes_models  # noqa: F401
 from app.operator import secrets_models as operator_secrets_models  # noqa: F401
 from app.rbac import models as rbac_models  # noqa: F401
+from app.release import models as release_models  # noqa: F401
 from app.shared import geo as shared_geo_models  # noqa: F401
 from app.shared import currency as shared_currency_models  # noqa: F401
 

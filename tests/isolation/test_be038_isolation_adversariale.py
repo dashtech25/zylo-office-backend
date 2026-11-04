@@ -1,0 +1,402 @@
+"""Suite adversariale d'isolation tenant et de permissions HTTP (BE-038).
+
+Tests écrits d'après la définition `### BE-038` de
+implementation-backend/tasks-socle-tenant-identite.md, avant toute correction.
+
+Périmètre : toutes les routes d'organisation, lues dans l'inventaire réel de
+l'application (`tests/route_inventory.py`) : une route est « d'organisation » si
+sa garde d'appartenance (`get_current_organization_id`) est présente. La liste
+n'est donc pas écrite à la main : une route ajoutée plus tard est testée sans
+modification de ce fichier.
+
+Quatre familles de cas, chacune paramétrée par route (« METHODE /chemin ») :
+- refus d'intrus (CA-1, CA-2) : un utilisateur sans appartenance reçoit 404
+  `organization_not_found` uniforme, sans donnée de l'organisation ;
+- refus de permission (CA-1) : un membre sans rôle reçoit 403 `permission_denied`
+  sur chaque route qui exige une permission ;
+- isolation entre deux organisations (CA-2) : le propriétaire de A, qui a tous
+  ses droits sur A, est refusé (404) dès que le chemin ou l'en-tête désigne B,
+  y compris pour un changement de contexte (en-tête A, chemin B et inverse) ;
+- niveau inférieur (CA-5) : un membre ne détenant que `organization.members.read`
+  est refusé (403) sur toute route qui exige une autre permission.
+
+Scénarios explicites :
+- CA-3 : un identifiant d'objet d'une autre organisation (deviné ou réel) donne
+  la même réponse qu'un identifiant inexistant (statut et corps, hors
+  `request_id`) ;
+- CA-4 : un jeton d'accès expiré, ou dont la session est révoquée, est refusé en
+  401 sans aucune donnée d'organisation dans la réponse ;
+- CA-5 : un membre disposant de `rbac.role.manage` ne peut pas s'accorder un
+  grant (`rbac.grant.manage`), privilège supérieur.
+
+Couverture : `test_couverture_routes_organisation` vérifie que l'ensemble
+paramétré correspond exactement à l'inventaire, pour qu'une suite vide ne
+passe pas en silence.
+
+Les rôles et appartenances de test sont posés directement en base, comme dans
+test_be017_grants_membres.py.
+"""
+
+import re
+import uuid
+from datetime import datetime, timedelta, timezone
+
+import jwt
+import pytest
+from httpx import AsyncClient
+from sqlalchemy import select, update
+
+from app.main import app
+from app.auth.models import RefreshToken
+from app.core.database import AsyncSessionLocal
+from app.core.security import famille_du_jeton_d_acces
+from app.core.config import settings
+from app.identity.models import OrganizationUser
+from app.rbac.models import Permission, Role, RolePermission, UserRole
+from tests.route_inventory import inventaire
+
+MOT_DE_PASSE = "TestPassword123!"
+PERMISSION_INFERIEURE = "organization.members.read"
+PERMISSION_ROLES = "rbac.role.manage"
+PERMISSION_GRANTS = "rbac.grant.manage"
+CODE_INTROUVABLE = "organization_not_found"
+CODE_PERMISSION = "permission_denied"
+
+ROUTES_ORGANISATION = sorted(i.cle for i in inventaire(app) if i.appartenance)
+ROUTES_AVEC_PERMISSION = sorted(
+    i.cle for i in inventaire(app) if i.appartenance and i.permissions
+)
+ROUTES_SANS_PERMISSION_EXPLICITE = sorted(
+    i.cle for i in inventaire(app) if i.appartenance and not i.permissions
+)
+PERMISSIONS_PAR_ROUTE = {i.cle: i.permissions for i in inventaire(app)}
+
+
+# ---------------------------------------------------------------------------
+# Aides de construction des requêtes
+# ---------------------------------------------------------------------------
+
+
+def _url(cle: str, organisation: str) -> tuple[str, str]:
+    """Méthode et URL d'une route de l'inventaire, chemin instancié.
+
+    Le paramètre `organization_id` reçoit l'organisation visée ; `module_code`
+    reçoit un module réel ; tout autre paramètre reçoit un identifiant au
+    hasard (inexistant). Le corps est vide : les gardes s'exécutent avant la
+    validation du corps, donc un refus doit être émis sans corps valide."""
+    methode, chemin = cle.split(" ", 1)
+
+    def remplace(m: re.Match) -> str:
+        nom = m.group(1)
+        if nom == "organization_id":
+            return organisation
+        if nom == "module_code":
+            return "zylo_liquid"
+        return str(uuid.uuid4())
+
+    return methode, re.sub(r"\{(\w+)\}", remplace, chemin)
+
+
+async def _appeler(client: AsyncClient, cle: str, headers: dict, organisation: str):
+    methode, url = _url(cle, organisation)
+    kwargs: dict = {"headers": headers}
+    if methode in {"POST", "PUT", "PATCH"}:
+        kwargs["json"] = {}
+    return await client.request(methode, url, **kwargs)
+
+
+def _entetes(jeton: str, organisation: str) -> dict:
+    return {"Authorization": f"Bearer {jeton}", "X-Organization-Id": organisation}
+
+
+def _sans_request_id(corps):
+    """Corps de réponse sans identifiant de requête (propre à chaque appel)."""
+    if isinstance(corps, dict):
+        return {k: _sans_request_id(v) for k, v in corps.items() if k != "request_id"}
+    if isinstance(corps, list):
+        return [_sans_request_id(v) for v in corps]
+    return corps
+
+
+async def _inscrire(client: AsyncClient, nom: str) -> dict:
+    email = f"be038-{uuid.uuid4().hex[:12]}@zylo-office-test.example.com"
+    await client.post("/api/v1/auth/register", json={"email": email, "password": MOT_DE_PASSE, "fullName": nom})
+    login = await client.post("/api/v1/auth/login", json={"email": email, "password": MOT_DE_PASSE})
+    assert login.status_code == 200, login.text
+    jeton = login.json()["accessToken"]
+    me = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {jeton}"})
+    assert me.status_code == 200, me.text
+    return {"jeton": jeton, "userId": me.json()["id"], "nom": nom}
+
+
+async def _creer_organisation(client: AsyncClient, proprietaire: dict, nom: str) -> str:
+    res = await client.post(
+        "/api/v1/organizations",
+        json={"name": nom, "slug": f"be038-{uuid.uuid4().hex[:10]}"},
+        headers={"Authorization": f"Bearer {proprietaire['jeton']}"},
+    )
+    assert res.status_code == 201, res.text
+    return res.json()["id"]
+
+
+async def _permission(db, code: str) -> Permission:
+    permission = await db.scalar(select(Permission).where(Permission.code == code))
+    if permission is None:
+        permission = Permission(code=code, moduleCode="identity", description="Permission de test BE-038")
+        db.add(permission)
+        await db.flush()
+    return permission
+
+
+async def _ajouter_membre(organisation_id: str, utilisateur_id: str, permissions: list[str]) -> None:
+    """Rattache l'utilisateur à l'organisation avec un rôle ne contenant que `permissions`."""
+    org = uuid.UUID(organisation_id)
+    user = uuid.UUID(utilisateur_id)
+    async with AsyncSessionLocal() as db:
+        db.add(OrganizationUser(organizationId=org, userId=user))
+        if permissions:
+            role = Role(organizationId=org, code=f"be038-{uuid.uuid4().hex[:8]}", name="Rôle de test BE-038")
+            db.add(role)
+            await db.flush()
+            for code in permissions:
+                permission = await _permission(db, code)
+                db.add(RolePermission(roleId=role.id, permissionId=permission.id))
+            db.add(UserRole(userId=user, organizationId=org, roleId=role.id))
+        await db.commit()
+
+
+@pytest.fixture
+async def monde(client: AsyncClient) -> dict:
+    """Deux organisations A et B, chacune avec son propriétaire ; un intrus sans
+    appartenance ; dans A, un membre sans rôle et un membre de niveau inférieur
+    (`organization.members.read` seul) ; dans A, un membre administrateur des
+    rôles (`rbac.role.manage` seul)."""
+    proprietaire_a = await _inscrire(client, "Proprietaire A")
+    org_a = await _creer_organisation(client, proprietaire_a, "Organisation A BE-038")
+    proprietaire_b = await _inscrire(client, "Proprietaire B")
+    org_b = await _creer_organisation(client, proprietaire_b, "Organisation B BE-038")
+
+    intrus = await _inscrire(client, "Intrus")
+    membre_sans_droit = await _inscrire(client, "Membre sans droit")
+    inferieur = await _inscrire(client, "Membre inferieur")
+    gestionnaire_roles = await _inscrire(client, "Gestionnaire des rôles")
+    await _ajouter_membre(org_a, membre_sans_droit["userId"], [])
+    await _ajouter_membre(org_a, inferieur["userId"], [PERMISSION_INFERIEURE])
+    await _ajouter_membre(org_a, gestionnaire_roles["userId"], [PERMISSION_ROLES])
+
+    return {
+        "a": {"id": org_a, "nom": "Organisation A BE-038", "proprietaire": proprietaire_a},
+        "b": {"id": org_b, "nom": "Organisation B BE-038", "proprietaire": proprietaire_b},
+        "intrus": intrus,
+        "membre_sans_droit": membre_sans_droit,
+        "inferieur": inferieur,
+        "gestionnaire_roles": gestionnaire_roles,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Couverture (CA-1, CA-2)
+# ---------------------------------------------------------------------------
+
+
+def test_couverture_routes_organisation():
+    """L'ensemble paramétré est l'inventaire réel : aucune route d'organisation oubliée,
+    et la suite n'est pas vide (garde contre un test vacueux)."""
+    inventaire_appartenance = {i.cle for i in inventaire(app) if i.appartenance}
+    assert len(ROUTES_ORGANISATION) > 300
+    assert set(ROUTES_ORGANISATION) == inventaire_appartenance
+    assert ROUTES_AVEC_PERMISSION, "aucune route avec permission : l'inventaire est inopérant"
+
+
+# ---------------------------------------------------------------------------
+# CA-1 et CA-2 : refus d'intrus, refus de permission, isolation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("cle", ROUTES_ORGANISATION)
+async def test_intrus_sans_appartenance_recoit_404_uniforme(client: AsyncClient, monde: dict, cle: str):
+    """CA-1, CA-2 : sans appartenance à A, aucune réponse de succès et aucune donnée de A."""
+    org_a = monde["a"]["id"]
+    res = await _appeler(client, cle, _entetes(monde["intrus"]["jeton"], org_a), org_a)
+    assert res.status_code == 404, f"{cle} -> {res.status_code} {res.text[:300]}"
+    assert res.json()["error"]["code"] == CODE_INTROUVABLE
+    assert monde["a"]["nom"] not in res.text
+
+
+@pytest.mark.parametrize("cle", ROUTES_AVEC_PERMISSION)
+async def test_membre_sans_permission_recoit_403(client: AsyncClient, monde: dict, cle: str):
+    """CA-1 : un membre sans rôle reçoit 403 `permission_denied` sur chaque route qui exige
+    une permission, et jamais de succès."""
+    org_a = monde["a"]["id"]
+    res = await _appeler(client, cle, _entetes(monde["membre_sans_droit"]["jeton"], org_a), org_a)
+    assert res.status_code == 403, f"{cle} -> {res.status_code} {res.text[:300]}"
+    assert res.json()["error"]["code"] == CODE_PERMISSION
+
+
+@pytest.mark.parametrize("cle", ROUTES_SANS_PERMISSION_EXPLICITE)
+async def test_route_sans_permission_explicite_reste_gardee_par_appartenance(client: AsyncClient, monde: dict, cle: str):
+    """CA-1 : pour une route sans permission déclarée, le membre n'a pas de refus de droit
+    à attendre, mais l'appartenance reste exigée : l'intrus est refusé (déjà couvert ci-dessus) et
+    un membre d'une AUTRE organisation ne peut pas agir sur A."""
+    org_a = monde["a"]["id"]
+    res = await _appeler(client, cle, _entetes(monde["b"]["proprietaire"]["jeton"], org_a), org_a)
+    assert res.status_code == 404, f"{cle} -> {res.status_code} {res.text[:300]}"
+    assert res.json()["error"]["code"] == CODE_INTROUVABLE
+
+
+@pytest.mark.parametrize("cle", ROUTES_ORGANISATION)
+async def test_proprietaire_de_a_refuse_sur_b_et_changement_de_contexte(client: AsyncClient, monde: dict, cle: str):
+    """CA-2 : le propriétaire de A, qui a tous ses droits sur A, est refusé (404) sur B
+    (chemin et en-tête), et sur tout changement de contexte entre A et B."""
+    org_a, org_b = monde["a"]["id"], monde["b"]["id"]
+    jeton_a = monde["a"]["proprietaire"]["jeton"]
+    cas = {
+        "en-tête B, chemin B": (_entetes(jeton_a, org_b), org_b),
+        "en-tête A, chemin B": (_entetes(jeton_a, org_a), org_b),
+        "en-tête B, chemin A": (_entetes(jeton_a, org_b), org_a),
+    }
+    for nom, (entetes, chemin_org) in cas.items():
+        res = await _appeler(client, cle, entetes, chemin_org)
+        assert res.status_code == 404, f"{cle} [{nom}] -> {res.status_code} {res.text[:300]}"
+        assert res.json()["error"]["code"] == CODE_INTROUVABLE, f"{cle} [{nom}]"
+        assert monde["b"]["nom"] not in res.text, f"{cle} [{nom}] fuite du nom de B"
+
+
+# ---------------------------------------------------------------------------
+# CA-5 : niveau inférieur, privilège supérieur
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "cle",
+    [c for c in ROUTES_AVEC_PERMISSION if PERMISSION_INFERIEURE not in PERMISSIONS_PAR_ROUTE[c]],
+)
+async def test_membre_de_niveau_inferieur_ne_reussit_pas_action_reservee(client: AsyncClient, monde: dict, cle: str):
+    """CA-5 : un membre qui ne détient que `organization.members.read` ne peut pas exécuter
+    une route réservée à une autre permission."""
+    org_a = monde["a"]["id"]
+    res = await _appeler(client, cle, _entetes(monde["inferieur"]["jeton"], org_a), org_a)
+    assert res.status_code == 403, f"{cle} -> {res.status_code} {res.text[:300]}"
+    assert res.json()["error"]["code"] == CODE_PERMISSION
+
+
+async def test_administrateur_des_roles_ne_peut_pas_s_accorder_un_grant(client: AsyncClient, monde: dict):
+    """CA-5 (privilège supérieur) : détenir `rbac.role.manage` ne donne pas `rbac.grant.manage`.
+    Le gestionnaire ne peut ni créer un grant sur lui-même, ni en révoquer un."""
+    org_a = monde["a"]["id"]
+    gestionnaire = monde["gestionnaire_roles"]
+    entetes = _entetes(gestionnaire["jeton"], org_a)
+    res = await client.post(
+        f"/api/v1/organizations/current/members/{gestionnaire['userId']}/grants",
+        json={"permissionCode": PERMISSION_GRANTS, "effect": "allow"},
+        headers=entetes,
+    )
+    assert res.status_code == 403, res.text
+    assert res.json()["error"]["code"] == CODE_PERMISSION
+    res = await client.post(
+        f"/api/v1/rbac/organizations/{org_a}/user-roles",
+        json={"userId": gestionnaire["userId"], "roleId": str(uuid.uuid4())},
+        headers=entetes,
+    )
+    assert res.status_code == 403, res.text
+
+
+# ---------------------------------------------------------------------------
+# CA-3 : objets devinés ou d'une autre organisation
+# ---------------------------------------------------------------------------
+
+
+async def test_identifiant_devine_d_une_autre_organisation_repond_comme_un_inexistant(client: AsyncClient, monde: dict):
+    """CA-3 : un rôle réel de B, demandé depuis A, donne la même réponse qu'un identifiant
+    inexistant. Les deux routes testées sont celle d'organisation courante et celle du chemin."""
+    org_a, org_b = monde["a"]["id"], monde["b"]["id"]
+    jeton_a = monde["a"]["proprietaire"]["jeton"]
+    liste = await client.get(f"/api/v1/rbac/organizations/{org_b}/roles", headers=_entetes(monde["b"]["proprietaire"]["jeton"], org_b))
+    assert liste.status_code == 200, liste.text
+    roles_b = liste.json()
+    assert roles_b, "B doit avoir au moins un rôle pour ce test"
+    role_b = roles_b[0]["id"]
+    inexistant = str(uuid.uuid4())
+
+    gabarits = [
+        (f"/api/v1/organizations/current/roles/{{}}", _entetes(jeton_a, org_a)),
+        (f"/api/v1/rbac/organizations/{org_a}/roles/{{}}", _entetes(jeton_a, org_a)),
+    ]
+    for gabarit, entetes in gabarits:
+        devine = await client.get(gabarit.format(role_b), headers=entetes)
+        absent = await client.get(gabarit.format(inexistant), headers=entetes)
+        assert devine.status_code == absent.status_code == 404, (gabarit, devine.text, absent.text)
+        assert _sans_request_id(devine.json()) == _sans_request_id(absent.json()), gabarit
+        assert role_b not in devine.text, gabarit
+
+
+async def test_identifiant_de_membre_devine_repond_comme_un_inexistant(client: AsyncClient, monde: dict):
+    """CA-3 : un membre de B (identifiant réel) visé dans A, comme un identifiant inexistant."""
+    org_a = monde["a"]["id"]
+    jeton_a = monde["a"]["proprietaire"]["jeton"]
+    cible_b = monde["b"]["proprietaire"]["userId"]
+    entetes = _entetes(jeton_a, org_a)
+    devine = await client.get(f"/api/v1/rbac/organizations/{org_a}/users/{cible_b}/grants", headers=entetes)
+    absent = await client.get(f"/api/v1/rbac/organizations/{org_a}/users/{uuid.uuid4()}/grants", headers=entetes)
+    assert devine.status_code == absent.status_code, (devine.text, absent.text)
+    assert _sans_request_id(devine.json()) == _sans_request_id(absent.json())
+
+
+# ---------------------------------------------------------------------------
+# CA-4 : session expirée ou révoquée pendant la requête
+# ---------------------------------------------------------------------------
+
+ROUTES_SESSION = [
+    "GET /api/v1/organizations/current",
+    "GET /api/v1/organizations/current/members",
+    "GET /api/v1/rbac/organizations/{organization_id}/roles",
+]
+
+
+@pytest.mark.parametrize("cle", ROUTES_SESSION)
+async def test_jeton_d_acces_expire_est_refuse_sans_fuite(client: AsyncClient, monde: dict, cle: str):
+    """CA-4 : un jeton d'accès dont l'expiration est passée est refusé en 401, et la réponse
+    ne contient aucune donnée de l'organisation."""
+    org_a = monde["a"]["id"]
+    jeton_valide = monde["a"]["proprietaire"]["jeton"]
+    famille = famille_du_jeton_d_acces(jeton_valide)
+    assert famille is not None
+    maintenant = datetime.now(timezone.utc)
+    expire = jwt.encode(
+        {
+            "sub": monde["a"]["proprietaire"]["userId"],
+            "type": "access",
+            "iat": maintenant - timedelta(hours=2),
+            "exp": maintenant - timedelta(hours=1),
+            "jti": str(uuid.uuid4()),
+            "fam": str(famille),
+        },
+        settings.JWT_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+    methode, url = _url(cle, org_a)
+    res = await client.request(methode, url, headers=_entetes(expire, org_a))
+    assert res.status_code == 401, res.text
+    assert monde["a"]["nom"] not in res.text
+    assert monde["a"]["proprietaire"]["nom"] not in res.text
+
+
+async def test_session_revoquee_pendant_l_usage_est_refusee_sans_fuite(client: AsyncClient, monde: dict):
+    """CA-4 : une session révoquée (refresh token de la famille révoqué) rend refusé le jeton
+    d'accès encore valide, sur une route qui renverrait normalement la liste des membres."""
+    org_a = monde["a"]["id"]
+    jeton = monde["a"]["proprietaire"]["jeton"]
+    avant = await client.get("/api/v1/organizations/current/members", headers=_entetes(jeton, org_a))
+    assert avant.status_code == 200, avant.text
+    famille = famille_du_jeton_d_acces(jeton)
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            update(RefreshToken)
+            .where(RefreshToken.familyId == famille)
+            .values(revokedAt=datetime.now(timezone.utc))
+        )
+        await db.commit()
+    apres = await client.get("/api/v1/organizations/current/members", headers=_entetes(jeton, org_a))
+    assert apres.status_code == 401, apres.text
+    assert monde["a"]["nom"] not in apres.text
+    assert "@zylo-office-test.example.com" not in apres.text

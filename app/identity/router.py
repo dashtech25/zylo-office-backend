@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.schemas import UserResponse
 from app.core.database import get_db
+from app.core.errors import AppError
 from app.core.security import get_current_user
 from app.identity import service
 from app.identity import invitations
@@ -21,7 +22,7 @@ from app.identity.schemas import (
     UpdateUserStatusRequest,
     UserStatusResponse,
 )
-from app.rbac.service import require_permission
+from app.rbac.service import get_current_organization_id, require_permission
 
 router = APIRouter()
 
@@ -50,6 +51,23 @@ async def list_my_organizations(
     db: AsyncSession = Depends(get_db),
 ) -> list[Organization]:
     return await service.list_user_organizations(db, current_user.id)
+
+
+@router.get("/current", response_model=OrganizationResponse, summary="Lire l'organisation courante validée")
+async def get_current_organization(
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Organization:
+    """Résout l'organisation sélectionnée par `X-Organization-Id` après
+    validation de l'appartenance active. L'en-tête reste un sélecteur, jamais
+    une preuve d'accès; les routes portant un organization_id imposent aussi
+    que le chemin et l'en-tête concordent."""
+    organization = await db.get(Organization, organization_id)
+    # Le résolveur vérifie déjà l'appartenance, mais conserve une erreur métier
+    # structurée si la ligne disparaît entre la vérification et la lecture.
+    if organization is None:
+        raise AppError(code="organization_not_found", message="Organisation introuvable.", status_code=404)
+    return organization
 
 
 @router.post("", response_model=OrganizationResponse, status_code=201)

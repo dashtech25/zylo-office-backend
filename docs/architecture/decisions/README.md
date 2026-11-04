@@ -14,3 +14,4 @@ Statuts : `Proposée`, `Acceptée`, `Remplacée par NNNN`. Une décision remplac
 | [0006](0006-playwright-suspendu.md) | Suspension de Playwright | Acceptée (décision client du 2026-10-09) |
 | [0007](0007-storybook-retire.md) | Retrait de Storybook | Acceptée, exécution planifiée (T-041) |
 | [0008](0008-table-ports-unique.md) | Table de ports unique et allocation par worktree | Acceptée (T-003) |
+| [0009](0009-fournisseur-paiement-provisoire.md) | Fournisseur de paiement provisoire derrière un adaptateur | Proposée, réversible; aucun paiement live |

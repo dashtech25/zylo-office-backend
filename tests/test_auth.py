@@ -1,4 +1,5 @@
 from httpx import AsyncClient
+from app.core.config import settings
 
 from tests.conftest import unique_email
 
@@ -16,6 +17,16 @@ async def test_register_then_login(client: AsyncClient):
     body = res.json()
     assert "accessToken" in body
     assert "refreshToken" in body
+
+
+async def test_public_registration_is_hidden_when_disabled(client: AsyncClient, monkeypatch):
+    monkeypatch.setattr(settings, "AUTH_PUBLIC_REGISTRATION_ENABLED", False)
+    res = await client.post(
+        "/api/v1/auth/register",
+        json={"email": unique_email(), "password": "TestPassword123!", "fullName": "Alice"},
+    )
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == "registration_disabled"
 
 
 async def test_register_duplicate_email_rejected(client: AsyncClient):

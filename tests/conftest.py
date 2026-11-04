@@ -8,6 +8,9 @@ from datetime import datetime, timezone
 # assez longs. Ils écrasent volontairement le .env du worktree (variables
 # d'environnement prioritaires), sans jamais reprendre de valeur réelle.
 os.environ["ENVIRONMENT"] = "test"
+# Les tests historiques utilisent /auth/register pour créer leurs acteurs.
+# Le comportement fail-closed est vérifié séparément avec le réglage désactivé.
+os.environ["AUTH_PUBLIC_REGISTRATION_ENABLED"] = "true"
 # T-027 : clé de chiffrement de test, propre au dépôt de test, jamais une valeur réelle.
 os.environ["APP_FIELD_ENCRYPTION_KEY"] = "test-only-field-encryption-key-" + "0123456789abcdef" * 2
 os.environ["JWT_SECRET"] = "test-only-jwt-secret-" + "0123456789abcdef" * 2

@@ -30,7 +30,10 @@ DB_REPLI = f"postgresql+asyncpg://zylo_office:{FALLBACK_DB_PASSWORD}@localhost:5
 SECRET_COURT = "trop-court-123"
 SECRET_CHIFFREMENT = "chiffrement-" + "0123456789abcdef" * 2
 
-VARIABLES = ("ENVIRONMENT", "JWT_SECRET", "STORAGE_SIGNED_URL_SECRET", "DATABASE_URL", "APP_FIELD_ENCRYPTION_KEY")
+VARIABLES = (
+    "ENVIRONMENT", "JWT_SECRET", "STORAGE_SIGNED_URL_SECRET", "DATABASE_URL",
+    "APP_FIELD_ENCRYPTION_KEY", "AUTH_PUBLIC_REGISTRATION_ENABLED",
+)
 
 
 def _environnement(monkeypatch, **valeurs):
@@ -47,6 +50,31 @@ def _settings():
 
 def test_environnement_par_defaut_est_production():
     assert Settings.model_fields["ENVIRONMENT"].default == "production"
+
+
+def test_inscription_publique_est_desactivee_sans_variable(monkeypatch):
+    _environnement(
+        monkeypatch,
+        ENVIRONMENT="test",
+        JWT_SECRET=SECRET_FORT,
+        STORAGE_SIGNED_URL_SECRET=SECRET_FORT_STORAGE,
+        DATABASE_URL=DB_FORTE,
+    )
+    assert _settings().AUTH_PUBLIC_REGISTRATION_ENABLED is False
+
+
+def test_inscription_publique_true_est_refusee_en_production(monkeypatch):
+    _environnement(
+        monkeypatch,
+        ENVIRONMENT="production",
+        JWT_SECRET=SECRET_FORT,
+        STORAGE_SIGNED_URL_SECRET=SECRET_FORT_STORAGE,
+        DATABASE_URL=DB_FORTE,
+        APP_FIELD_ENCRYPTION_KEY=SECRET_CHIFFREMENT,
+        AUTH_PUBLIC_REGISTRATION_ENABLED="true",
+    )
+    with pytest.raises(ConfigurationSecretError, match="AUTH_PUBLIC_REGISTRATION_ENABLED"):
+        _settings()
 
 
 def test_variable_absente_avec_secret_de_repli_refuse(monkeypatch):

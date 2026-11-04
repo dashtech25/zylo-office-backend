@@ -1,6 +1,6 @@
 import uuid
 
-from pydantic import BaseModel, EmailStr, field_validator, model_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from app.auth.politique_mot_de_passe import verifie_mot_de_passe
 
@@ -69,5 +69,24 @@ class ChangePasswordRequest(BaseModel):
     @classmethod
     def _politique_mot_de_passe(cls, valeur: str) -> str:
         # Le nom et l'e-mail ne sont vérifiés qu'au service (ils viennent de la base).
+        verifie_mot_de_passe(valeur)
+        return valeur
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetRequestResponse(BaseModel):
+    message: str
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str = Field(min_length=40, max_length=128)
+    newPassword: str
+
+    @field_validator("newPassword")
+    @classmethod
+    def _politique_nouveau_mot_de_passe(cls, valeur: str) -> str:
         verifie_mot_de_passe(valeur)
         return valeur

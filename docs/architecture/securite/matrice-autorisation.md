@@ -7,7 +7,7 @@ Source : les dépendances FastAPI des routes (`tests/route_inventory.py`).
 
 | Permission | Routes |
 |---|---|
-| `billing.subscription.manage` | `POST /api/v1/billing/organizations/{organization_id}/subscriptions` |
+| `billing.subscription.manage` | `POST /api/v1/billing/organizations/{organization_id}/invoices`<br>`POST /api/v1/billing/organizations/{organization_id}/invoices/{invoice_id}/payment-attempts`<br>`POST /api/v1/billing/organizations/{organization_id}/subscriptions` |
 | `identity.organization.manage` | `GET /api/v1/modules/organizations/{organization_id}/zylo-liquid/protected-demo`<br>`PATCH /api/v1/organizations/{organization_id}`<br>`GET /api/v1/organizations/{organization_id}/protected-demo` |
 | `identity.user.manage` | `POST /api/v1/organizations/{organization_id}/users`<br>`PATCH /api/v1/organizations/{organization_id}/users/{user_id}`<br>`POST /api/v1/organizations/{organization_id}/users/{user_id}/invitation` |
 | `modules.module.manage` | `POST /api/v1/modules/organizations/{organization_id}/activate`<br>`POST /api/v1/modules/organizations/{organization_id}/deactivate` |
@@ -140,25 +140,38 @@ Source : les dépendances FastAPI des routes (`tests/route_inventory.py`).
 
 ## Routes sans permission ni appartenance
 
-- `GET /`
-- `POST /api/v1/auth/activate`
-- `POST /api/v1/auth/change-password`
-- `POST /api/v1/auth/login`
-- `POST /api/v1/auth/logout`
-- `GET /api/v1/auth/me`
-- `POST /api/v1/auth/refresh`
-- `POST /api/v1/auth/register`
-- `GET /api/v1/billing/plans`
-- `POST /api/v1/export/docx`
-- `POST /api/v1/export/xlsx`
-- `GET /api/v1/health`
-- `GET /api/v1/health/error-demo`
-- `POST /api/v1/import/xlsx`
-- `GET /api/v1/modules`
-- `GET /api/v1/notifications/vapid-public-key`
-- `GET /api/v1/organizations`
-- `POST /api/v1/organizations`
-- `GET /api/v1/storage/local/{storage_reference}`
-- `PATCH /api/v1/users/{user_id}`
-- `POST /api/v1/zylo-liquid/gps/ingest`
-- `POST /api/v1/zylo-tanker/gps/ingest`
+- `GET /` — Racine d'accueil, aucune donnée. 2026-10-09.
+- `POST /api/v1/auth/activate` — Activation d'un compte par jeton à usage unique reçu hors API (T-021) : jeton vérifié et consommé dans le service, limitée par T-012. 2026-10-09.
+- `POST /api/v1/auth/change-password` — Changement de mot de passe de l'utilisateur connecté (portée utilisateur uniquement). 2026-10-09.
+- `POST /api/v1/auth/login` — Connexion : public par nature, limitée par T-012. 2026-10-09.
+- `POST /api/v1/auth/logout` — Révocation par jeton de session, sans organisation. 2026-10-09.
+- `GET /api/v1/auth/me` — Profil de l'utilisateur connecté (portée utilisateur uniquement). 2026-10-09.
+- `POST /api/v1/auth/refresh` — Rafraîchissement par jeton de session, sans organisation. 2026-10-09.
+- `POST /api/v1/auth/register` — Endpoint masqué par défaut; AUTH_PUBLIC_REGISTRATION_ENABLED=true n'est admis que si ENVIRONMENT=development ou test (le validateur Settings refuse production/staging). Libre-service sans décision produit réservé aux tests et au développement local. 2026-11-02.
+- `GET /api/v1/billing/payment-provider` — Métadonnées statiques du provider de test (configured=false, checkoutAvailable=false), sans donnée tenant ni secret. 2026-11-02.
+- `GET /api/v1/billing/plans` — Catalogue de plans, lecture seule (création par API retirée par T-019, option A de T-050). Passera authentifié si IAM-020 est confirmée. 2026-10-09.
+- `POST /api/v1/export/docx` — Conversion d'un tableau fourni par l'appelant, authentifiée (get_current_user), sans accès à la base. 2026-10-09.
+- `POST /api/v1/export/xlsx` — Conversion d'un tableau fourni par l'appelant, authentifiée (get_current_user), sans accès à la base. 2026-10-09.
+- `GET /api/v1/health` — Sonde de santé. 2026-10-09.
+- `GET /api/v1/health/error-demo` — Démonstration du format d'erreur, sans donnée. A retirer en production. 2026-10-09.
+- `POST /api/v1/import/xlsx` — Lecture d'un fichier fourni par l'appelant, authentifiée (get_current_user), sans accès à la base. 2026-10-09.
+- `GET /api/v1/modules` — Catalogue des modules (aucune donnée d'organisation). Passera authentifié si la décision catalogues-publics est confirmée (IAM-020). 2026-10-09.
+- `GET /api/v1/notifications/vapid-public-key` — Clé publique VAPID (non secrète), lue avant tout abonnement, aucune donnée d'organisation. 2026-10-09 (T-004b lot 2).
+- `GET /api/v1/organizations` — Liste des organisations de l'utilisateur connecté (portée utilisateur). 2026-10-09.
+- `POST /api/v1/organizations` — Création d'organisation par tout utilisateur connecté. Quota ORG_CREATION_QUOTA à fixer par le client (T-019, décision en attente). 2026-10-09.
+- `GET /api/v1/storage/local/{storage_reference}` — Téléchargement par URL signée (signature vérifiée dans le service). 2026-10-09.
+- `PATCH /api/v1/users/{user_id}` — Photo de profil : soi-même, ou owner d'une organisation dont la cible est membre. Contrôle dans le service (update_user_profile). 2026-10-09.
+
+## Routes protégées par allowlist opérateur
+
+- `GET /api/v1/operator/health` — `require_operator` (session utilisateur + allowlist serveur `OPERATOR_READ_USER_IDS`).
+- `GET /api/v1/operator/organizations` — `require_operator` (session utilisateur + allowlist serveur `OPERATOR_READ_USER_IDS`).
+- `GET /api/v1/operator/organizations/{organization_id}` — `require_operator` (session utilisateur + allowlist serveur `OPERATOR_READ_USER_IDS`).
+- `GET /api/v1/operator/payment-events/{event_id}` — `require_operator` (session utilisateur + allowlist serveur `OPERATOR_READ_USER_IDS`).
+- `GET /api/v1/operator/requests/{request_id}` — `require_operator` (session utilisateur + allowlist serveur `OPERATOR_READ_USER_IDS`).
+
+## Routes avec contrôle manuel documenté
+
+- `POST /api/v1/billing/webhooks/flutterwave` — Signature Flutterwave verif-hash comparée en temps constant avant lecture du payload ou accès aux événements; secret absent -> 503, signature invalide -> 401. 2026-11-02.
+- `POST /api/v1/zylo-liquid/gps/ingest` — Secret d'ingestion propre à l'organisation dans X-GPS-Ingest-Secret, vérifié en service avant traitement; absence/invalide -> 401. 2026-10-09.
+- `POST /api/v1/zylo-tanker/gps/ingest` — Secret d'ingestion propre à l'organisation dans X-GPS-Ingest-Secret, vérifié en service avant traitement; absence/invalide -> 401. 2026-10-09.

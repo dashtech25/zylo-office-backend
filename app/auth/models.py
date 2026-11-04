@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import DateTime, ForeignKey, Index, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,3 +43,26 @@ class LoginAttempt(UUIDPrimaryKeyMixin, Base):
     keyHash: Mapped[str] = mapped_column(String(64), nullable=False, index=True, comment="Empreinte SHA-256 de la clé de limitation")
     outcome: Mapped[str] = mapped_column(String(8), nullable=False, comment="failure ou success")
     occurredAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Horodatage applicatif de la tentative")
+
+
+class PasswordResetToken(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Jeton de récupération à usage unique, empreinte SHA-256 uniquement."""
+
+    __tablename__ = "passwordResetToken"
+    __table_args__ = (
+        Index(
+            "uq_passwordResetToken_open_per_user",
+            "userId",
+            unique=True,
+            postgresql_where='"usedAt" IS NULL AND "revokedAt" IS NULL',
+        ),
+        {"comment": "Jeton de récupération de compte, haché, à usage unique et expiration courte."},
+    )
+
+    userId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tokenHash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expiresAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    usedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revokedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -33,6 +33,9 @@ security_logger = logging.getLogger("zylo_office.security")
 ACTION_LOGIN = "login"
 ACTION_REGISTER = "register"
 ACTION_REFRESH = "refresh"
+ACTION_ACTIVATE = "activate"
+ACTION_PASSWORD_RESET = "password_reset"
+ACTION_PASSWORD_RESET_CONFIRM = "reset_confirm"
 
 PORTEE_COUPLE = "couple"
 PORTEE_IP = "ip"
@@ -183,7 +186,8 @@ async def enregistre_echec(db: AsyncSession, request: Request, action: str, emai
         )
     )
     await db.commit()
-    security_logger.warning("auth_failure", extra={"action": action, "ip": ip, "portee": PORTEE_COUPLE if email else PORTEE_IP})
+    event = "auth_failure" if action in {ACTION_LOGIN, ACTION_REGISTER, ACTION_REFRESH, ACTION_ACTIVATE} else "security_attempt"
+    security_logger.warning(event, extra={"action": action, "ip": ip, "portee": PORTEE_COUPLE if email else PORTEE_IP})
 
 
 async def enregistre_succes(db: AsyncSession, request: Request, action: str, email: str) -> None:
@@ -201,4 +205,17 @@ async def enregistre_succes(db: AsyncSession, request: Request, action: str, ema
                 occurredAt=maintenant(),
             )
         )
+    await db.commit()
+
+
+async def enregistre_succes_ip(db: AsyncSession, request: Request, action: str) -> None:
+    """Après preuve de possession d'un jeton, remet à zéro les échecs par IP.
+
+    Utilisé par l'activation, qui ne porte pas d'adresse e-mail et ne doit pas
+    créer de compteur lié à une identité devinable.
+    """
+    cle = _cle_ip(action, adresse_client(request))
+    await db.execute(
+        delete(LoginAttempt).where(LoginAttempt.keyHash == cle, LoginAttempt.outcome == ISSUE_ECHEC)
+    )
     await db.commit()

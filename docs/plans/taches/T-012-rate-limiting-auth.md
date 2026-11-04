@@ -6,7 +6,7 @@
 - **Décisions requises** : `securite/limitation-authentification.md` (recommandation appliquée)
 
 ## Objectif
-Limiter les tentatives sur `POST /auth/login`, `/auth/register` et `/auth/refresh`. La limite porte sur le couple (IP, compte) et sur l'IP seule. Un verrou ne bloque jamais un titulaire légitime depuis une IP déjà connue.
+Limiter les tentatives sur `POST /auth/login`, `/auth/register`, `/auth/refresh` et `POST /auth/activate`. La limite porte sur le couple (IP, compte) et sur l'IP seule. Un verrou ne bloque jamais un titulaire légitime depuis une IP déjà connue. L'activation, qui n'a pas d'identité préalable, utilise exclusivement le compteur IP : seuls les jetons invalides comptent; une erreur de politique après validation du jeton ne compte pas.
 
 ## Problèmes résolus
 - BCK-004 (P1), IAM-008 (P1), REV-S-07 (verrou par compte utilisable comme déni de service)
@@ -30,6 +30,7 @@ Limiter les tentatives sur `POST /auth/login`, `/auth/register` et `/auth/refres
 - Unitaires : 10 échecs sur un couple (IP, compte) donnent 429 ; compte inconnu et mauvais mot de passe : même corps.
 - Intégration : une tentative massive depuis IP A ne verrouille pas le compte pour IP B (test explicite, REV-S-07).
 - Intégration : une IP qui dépasse la limite globale reçoit 429, les autres IP ne sont pas touchées.
+- Intégration : les jetons d'activation invalides sont limités par IP et reçoivent `429 rate_limited` au seuil configuré.
 - Tests pytest / tsc / lint / build locaux (Playwright suspendu, voir `docs/process/decision-playwright-suspendu.md`) ; comportement non couvert par un test automatisé : connexion refusée avec message générique.
 
 ## Critères d'acceptation

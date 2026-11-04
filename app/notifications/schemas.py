@@ -2,6 +2,8 @@
 
 import uuid
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -23,5 +25,16 @@ class CreatePushSubscriptionRequest(BaseModel):
 class PushSubscriptionResponse(BaseModel):
     id: uuid.UUID
     endpoint: str
+
+    model_config = {"from_attributes": True}
+
+
+class NotificationInboxItemResponse(BaseModel):
+    id: uuid.UUID
+    category: str
+    title: str
+    body: str
+    createdAt: datetime
+    readAt: datetime | None
 
     model_config = {"from_attributes": True}

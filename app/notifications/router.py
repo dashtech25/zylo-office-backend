@@ -4,7 +4,7 @@ les modules métier, pas seulement Zylo Liquid)."""
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -12,8 +12,15 @@ from app.core.security import get_current_user
 from app.core.config import settings
 from app.identity.models import User
 from app.notifications import service
-from app.notifications.schemas import CreatePushSubscriptionRequest, PushSubscriptionResponse, VapidPublicKeyResponse
+from app.notifications.schemas import (
+    CreatePushSubscriptionRequest,
+    NotificationInboxItemResponse,
+    PushSubscriptionResponse,
+    VapidPublicKeyResponse,
+)
 from app.rbac.service import get_current_organization_id
+from app.shared.pagination import PaginationParams
+from app.shared.schemas import Page
 
 router = APIRouter()
 
@@ -56,3 +63,44 @@ async def delete_push_subscription(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await service.delete_push_subscription(db, organization_id, current_user.id, subscription_id)
+
+
+@router.get("/inbox", response_model=Page[NotificationInboxItemResponse], summary="Notifications de l'utilisateur courant")
+async def list_inbox(
+    pagination: PaginationParams = Depends(),
+    unreadOnly: bool = Query(False),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    """Liste paginée, limitée au compte courant et à l'organisation active."""
+    return await service.list_inbox_items(
+        db,
+        organization_id=organization_id,
+        user_id=current_user.id,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        unread_only=unreadOnly,
+    )
+
+
+@router.get("/inbox/{item_id}", response_model=NotificationInboxItemResponse, summary="Détail d'une notification propre au compte")
+async def get_inbox_item(
+    item_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationInboxItemResponse:
+    item = await service.get_inbox_item(db, organization_id=organization_id, user_id=current_user.id, item_id=item_id)
+    return NotificationInboxItemResponse.model_validate(item)
+
+
+@router.patch("/inbox/{item_id}/read", response_model=NotificationInboxItemResponse, summary="Marquer sa notification comme lue")
+async def mark_inbox_item_read(
+    item_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationInboxItemResponse:
+    item = await service.mark_inbox_item_read(db, organization_id=organization_id, user_id=current_user.id, item_id=item_id)
+    return NotificationInboxItemResponse.model_validate(item)

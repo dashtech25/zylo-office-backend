@@ -22,7 +22,8 @@ import logging
 import uuid
 
 from pywebpush import WebPushException, webpush
-from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -30,9 +31,10 @@ from app.core.errors import AppError
 from app.core.database import AsyncSessionLocal
 from app.identity.models import OrganizationUser
 from app.modules.zylo_liquid.models import Station, Truck
-from app.notifications.models import PushSubscription
+from app.notifications.models import NotificationInboxItem, PushSubscription
 from app.notifications.schemas import CreatePushSubscriptionRequest
 from app.rbac.service import user_has_permission
+from app.shared.schemas import Page, PageMeta
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +102,147 @@ async def delete_push_subscription(db: AsyncSession, organization_id: uuid.UUID,
         return
     await db.delete(subscription)
     await db.commit()
+
+
+async def create_inbox_item(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    recipient_user_id: uuid.UUID,
+    source_event_type: str,
+    source_event_id: uuid.UUID,
+    category: str,
+    title: str,
+    body: str,
+) -> NotificationInboxItem:
+    """Crée idempotemment un item pour un membre explicite.
+
+    Fonction interne: aucun endpoint d'écriture utilisateur n'est exposé.
+    Les producteurs doivent décider explicitement audience et contenu avant
+    d'appeler cette fonction. La catégorie et la rétention restent sous
+    PH-13; aucun producteur n'est actuellement raccordé.
+    """
+    member = await db.scalar(
+        select(OrganizationUser.id).where(
+            OrganizationUser.organizationId == organization_id,
+            OrganizationUser.userId == recipient_user_id,
+        )
+    )
+    if member is None:
+        raise AppError(code="notification_recipient_not_member", message="Le destinataire n'appartient pas à cette organisation.", status_code=404)
+    event_type = source_event_type.strip()
+    normalized_category = category.strip()
+    normalized_title = title.strip()
+    if not event_type or len(event_type) > 80 or not normalized_category or len(normalized_category) > 80:
+        raise AppError(code="notification_metadata_invalid", message="Les métadonnées de notification sont invalides.", status_code=422)
+    if not normalized_title or len(normalized_title) > 200 or len(body) > 5000:
+        raise AppError(code="notification_content_invalid", message="Le contenu de notification est invalide.", status_code=422)
+
+    stmt = pg_insert(NotificationInboxItem).values(
+        organizationId=organization_id,
+        recipientUserId=recipient_user_id,
+        sourceEventType=event_type,
+        sourceEventId=source_event_id,
+        category=normalized_category,
+        title=normalized_title,
+        body=body,
+    ).on_conflict_do_nothing(constraint="uq_notificationInboxItem_event_recipient")
+    await db.execute(stmt)
+    item = await db.scalar(
+        select(NotificationInboxItem).where(
+            NotificationInboxItem.organizationId == organization_id,
+            NotificationInboxItem.recipientUserId == recipient_user_id,
+            NotificationInboxItem.sourceEventType == event_type,
+            NotificationInboxItem.sourceEventId == source_event_id,
+        )
+    )
+    if item is None:
+        raise AppError(code="notification_create_failed", message="La notification n'a pas pu être enregistrée.", status_code=500)
+    return item
+
+
+async def list_inbox_items(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    limit: int,
+    offset: int,
+    unread_only: bool = False,
+) -> Page:
+    stmt = select(NotificationInboxItem).where(
+        NotificationInboxItem.organizationId == organization_id,
+        NotificationInboxItem.recipientUserId == user_id,
+    )
+    if unread_only:
+        stmt = stmt.where(NotificationInboxItem.readAt.is_(None))
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    rows = (
+        await db.execute(
+            stmt.order_by(NotificationInboxItem.createdAt.desc(), NotificationInboxItem.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+    ).scalars().all()
+    from app.notifications.schemas import NotificationInboxItemResponse
+
+    return Page(
+        data=[NotificationInboxItemResponse.model_validate(row) for row in rows],
+        meta=PageMeta(total=total, limit=limit, offset=offset),
+    )
+
+
+async def get_inbox_item(
+    db: AsyncSession, *, organization_id: uuid.UUID, user_id: uuid.UUID, item_id: uuid.UUID
+) -> NotificationInboxItem:
+    item = await db.scalar(
+        select(NotificationInboxItem).where(
+            NotificationInboxItem.id == item_id,
+            NotificationInboxItem.organizationId == organization_id,
+            NotificationInboxItem.recipientUserId == user_id,
+        )
+    )
+    if item is None:
+        raise AppError(code="notification_not_found", message="Notification introuvable.", status_code=404)
+    return item
+
+
+async def mark_inbox_item_read(
+    db: AsyncSession, *, organization_id: uuid.UUID, user_id: uuid.UUID, item_id: uuid.UUID
+) -> NotificationInboxItem:
+    result = await db.execute(
+        update(NotificationInboxItem)
+        .where(
+            NotificationInboxItem.id == item_id,
+            NotificationInboxItem.organizationId == organization_id,
+            NotificationInboxItem.recipientUserId == user_id,
+            NotificationInboxItem.readAt.is_(None),
+        )
+        .values(readAt=func.now())
+    )
+    if result.rowcount == 0:
+        # Idempotent repeat is successful only if the same user's item exists.
+        item = await db.scalar(
+            select(NotificationInboxItem).where(
+                NotificationInboxItem.id == item_id,
+                NotificationInboxItem.organizationId == organization_id,
+                NotificationInboxItem.recipientUserId == user_id,
+            )
+        )
+        if item is None:
+            raise AppError(code="notification_not_found", message="Notification introuvable.", status_code=404)
+    else:
+        item = await db.scalar(
+            select(NotificationInboxItem).where(
+                NotificationInboxItem.id == item_id,
+                NotificationInboxItem.organizationId == organization_id,
+                NotificationInboxItem.recipientUserId == user_id,
+            )
+        )
+    await db.commit()
+    assert item is not None
+    await db.refresh(item)
+    return item
 
 
 async def _resolve_recipient_user_ids(db: AsyncSession, organization_id: uuid.UUID, station_id: uuid.UUID | None) -> list[uuid.UUID]:

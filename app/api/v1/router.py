@@ -20,6 +20,7 @@ from app.shared.export_router import export_router
 from app.shared.geo_router import country_router, geo_router
 from app.shared.import_router import import_router
 from app.shared.storage_router import storage_router
+from app.operator.router import router as operator_router
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
@@ -32,6 +33,7 @@ api_router.include_router(rbac_module_router, prefix="/rbac", tags=["rbac"])
 api_router.include_router(audit_router, prefix="/audit", tags=["audit"])
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(billing_router, prefix="/billing", tags=["billing"])
+api_router.include_router(operator_router, prefix="/operator", tags=["operator"])
 api_router.include_router(zylo_liquid_router, prefix="/zylo-liquid", tags=["zylo-liquid"])
 api_router.include_router(files_router, prefix="/zylo-liquid", tags=["files"])
 api_router.include_router(location_router, prefix="/zylo-liquid", tags=["location"])

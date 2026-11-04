@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 import uuid
 from contextvars import ContextVar
@@ -10,6 +11,16 @@ from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.logging import request_id_ctx
+
+_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+def _request_id(headers) -> str:
+    """Accepte un identifiant de corrélation borné, sinon en génère un."""
+    candidate = headers.get("x-request-id") or headers.get("x-correlation-id")
+    if candidate is not None and _REQUEST_ID_PATTERN.fullmatch(candidate):
+        return candidate
+    return str(uuid.uuid4())
 
 
 class RequestIdMiddleware:
@@ -33,13 +44,25 @@ class RequestIdMiddleware:
             await self.app(scope, receive, send)
             return
         request = Request(scope)
-        request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
+        request_id = _request_id(request.headers)
+        # Starlette ServerErrorMiddleware (qui produit les 500 non gérées)
+        # est extérieur aux middlewares applicatifs. Le garder dans le scope
+        # permet au gestionnaire d'erreur externe de le récupérer même après
+        # la sortie de cette contextvar.
+        scope.setdefault("state", {})["request_id"] = request_id
         token = request_id_ctx.set(request_id)
 
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
-                headers = list(message.get("headers", []))
+                # Remplace les éventuels headers posés par une route pour que
+                # la réponse et l'enveloppe d'erreur gardent un ID unique.
+                headers = [
+                    (name, value)
+                    for name, value in message.get("headers", [])
+                    if name.lower() not in (b"x-request-id", b"x-correlation-id")
+                ]
                 headers.append((b"x-request-id", request_id.encode()))
+                headers.append((b"x-correlation-id", request_id.encode()))
                 message = {**message, "headers": headers}
             await send(message)
 

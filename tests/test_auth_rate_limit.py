@@ -104,7 +104,9 @@ async def test_compte_inconnu_et_mauvais_mot_de_passe_repondent_pareil(client: A
     mauvais = await connecter(client, existant, MAUVAIS_MOT_DE_PASSE, ip)
 
     assert inexistant.status_code == mauvais.status_code == 401
-    assert inexistant.json() == mauvais.json()
+    # La requête ID est volontairement unique par appel (contrat partagé du
+    # socle); le contenu métier de l'erreur, lui, doit rester indistinguable.
+    assert inexistant.json()["error"] == mauvais.json()["error"]
 
 
 async def test_verrou_du_compte_inconnu_identique_au_verrou_du_compte_existant(client: AsyncClient):
@@ -118,7 +120,7 @@ async def test_verrou_du_compte_inconnu_identique_au_verrou_du_compte_existant(c
     verrou_inconnu = await connecter(client, inconnu, MAUVAIS_MOT_DE_PASSE, ip)
 
     assert verrou_existant.status_code == verrou_inconnu.status_code == 429
-    assert verrou_existant.json() == verrou_inconnu.json()
+    assert verrou_existant.json()["error"] == verrou_inconnu.json()["error"]
 
 
 # --- Réinitialisation après délai, backoff ----------------------------------------
@@ -207,6 +209,29 @@ async def test_refresh_limite_par_ip_sans_toucher_au_login(client: AsyncClient, 
     assert bloque.status_code == 429
     # La limite de refresh est indépendante de celle du login.
     assert (await connecter(client, email, MOT_DE_PASSE, ip)).status_code == 200
+
+
+async def test_jetons_activation_invalides_sont_limites_par_ip(client: AsyncClient, monkeypatch):
+    monkeypatch.setattr(settings, "AUTH_RATE_LIMIT_MAX_FAILURES_PER_IP", 2)
+    ip = ip_unique()
+
+    for _ in range(2):
+        res = await client.post(
+            "/api/v1/auth/activate",
+            json={"token": "jeton-invalide-avec-longueur-suffisante", "password": "NouveauMotDePasse-42"},
+            headers=entetes(ip),
+        )
+        assert res.status_code == 400
+        assert res.json()["error"]["code"] == "invitation_invalid"
+
+    bloque = await client.post(
+        "/api/v1/auth/activate",
+        json={"token": "jeton-invalide-avec-longueur-suffisante", "password": "NouveauMotDePasse-42"},
+        headers=entetes(ip),
+    )
+    assert bloque.status_code == 429
+    assert bloque.json()["error"]["code"] == "rate_limited"
+    assert int(bloque.headers["Retry-After"]) >= 1
 
 
 # --- Register : les doublons comptent comme échecs --------------------------------

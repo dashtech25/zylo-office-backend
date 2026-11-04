@@ -17,6 +17,8 @@ complet et sert de patron ; `zylo_tanker` est un module en cours.
 | Git, lots, worktrees | [`docs/process/git-workflow.md`](docs/process/git-workflow.md) |
 | Workflow de bout en bout | [`docs/workflows/`](docs/workflows/README.md) |
 | Décisions d'architecture | [`docs/architecture/decisions/`](docs/architecture/decisions/README.md) |
+| Console support opérateur (lecture seule) | [`docs/modules/operator.md`](docs/modules/operator.md) |
+| Contrat facturation | [`docs/modules/facturation.md`](docs/modules/facturation.md) |
 
 ## Stack
 
@@ -37,6 +39,11 @@ cp .env.example .env          # renseigner DATABASE_URL et les secrets
 
 Port et procédure complète : [`docs/process/ports.md`](docs/process/ports.md) et
 [`docs/process/local-setup.md`](docs/process/local-setup.md).
+
+La console support reste fermée par défaut. Pour un processus backend de support,
+configurer `OPERATOR_READ_USER_IDS` avec une liste séparée par des virgules
+d'UUID de comptes opérateur dédiés et redémarrer le processus. Une variable
+absente, vide ou mal formée n'accorde aucun accès.
 
 ## Tests
 

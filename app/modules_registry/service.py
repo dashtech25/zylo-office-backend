@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import record_audit_event
+from app.billing.models import Subscription, SubscriptionEntitlement
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.modules_registry.models import Module, OrganizationModule
@@ -108,6 +109,7 @@ async def get_or_create_module(db: AsyncSession, code: str, name: str, descripti
 async def activate_module(
     db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, module_code: str
 ) -> OrganizationModule:
+    await assert_module_entitled(db, organization_id, module_code)
     result = await db.execute(select(Module).where(Module.code == module_code))
     if result.scalar_one_or_none() is None:
         raise AppError(code="module_not_found", message=f"Module inconnu : {module_code}.", status_code=404)
@@ -200,6 +202,75 @@ async def is_module_active(db: AsyncSession, organization_id: uuid.UUID, module_
     return status_value in ("active", "trial")
 
 
+async def assert_module_entitled(db: AsyncSession, organization_id: uuid.UUID, module_code: str) -> None:
+    """Compatibility-first entitlement gate.
+
+    Organizations without an explicit entitlement row retain legacy access.
+    If a row exists, only its latest effective entitlement is considered;
+    explicit inactive/expired/blocked state or an expired/cancelled backing
+    subscription denies activation and module access.
+    """
+    _access_state, allowed = await get_module_entitlement_access(db, organization_id, module_code)
+    if not allowed:
+        raise AppError(
+            code="module_entitlement_unavailable",
+            message=f"L'accès au module '{module_code}' n'est pas disponible pour cette organisation.",
+            status_code=403,
+        )
+
+
+def _project_entitlement_access(row, now: datetime) -> tuple[str, bool]:
+    """Project the existing enforcement rule for read-only UI decisions.
+
+    A missing row continues to allow legacy organizations for compatibility;
+    this is deliberately not represented as a paid/active subscription.
+    Only a missing entitlement row retains legacy access. Explicit unknown
+    entitlement or subscription states fail closed.
+    """
+    if row is None:
+        return "not_configured", True
+
+    entitlement, subscription_status = row
+    if entitlement.status == "blocked":
+        return "blocked", False
+    if (
+        entitlement.status == "expired"
+        or (entitlement.endsAt is not None and entitlement.endsAt <= now)
+        or subscription_status in {"expired", "cancelled"}
+    ):
+        return "expired", False
+    if entitlement.status == "inactive" or entitlement.startsAt > now:
+        return "inactive", False
+    if entitlement.status == "active" and subscription_status in {"active", "trial"}:
+        return "active", True
+    return "unknown", False
+
+
+def _select_effective_entitlement(rows, now: datetime):
+    """Choose the latest entitlement already in effect; future rows cannot mask it."""
+    effective = [row for row in rows if row[0].startsAt <= now]
+    if effective:
+        return max(effective, key=lambda row: (row[0].startsAt, row[0].createdAt))
+    # A future-only explicit entitlement is configured but not yet effective.
+    return min(rows, key=lambda row: (row[0].startsAt, row[0].createdAt), default=None)
+
+
+async def get_module_entitlement_access(
+    db: AsyncSession, organization_id: uuid.UUID, module_code: str
+) -> tuple[str, bool]:
+    """Return the same compatibility-first decision used by module guards."""
+    result = await db.execute(
+        select(SubscriptionEntitlement, Subscription.status)
+        .join(Subscription, Subscription.id == SubscriptionEntitlement.subscriptionId)
+        .where(
+            SubscriptionEntitlement.organizationId == organization_id,
+            SubscriptionEntitlement.moduleCode == module_code,
+        )
+    )
+    now = datetime.now(timezone.utc)
+    return _project_entitlement_access(_select_effective_entitlement(result.all(), now), now)
+
+
 async def list_installed_modules(db: AsyncSession, organization_id: uuid.UUID) -> list[InstalledModuleResponse]:
     """Croise le catalogue complet des modules avec les activations de
     l'organisation — 'inactive' par défaut si aucune ligne OrganizationModule
@@ -212,17 +283,42 @@ async def list_installed_modules(db: AsyncSession, organization_id: uuid.UUID) -
     )
     org_modules_by_code = {org_module.moduleCode: org_module for org_module in org_modules}
 
+    entitlement_rows = (
+        await db.execute(
+            select(SubscriptionEntitlement, Subscription.status)
+            .join(Subscription, Subscription.id == SubscriptionEntitlement.subscriptionId)
+            .where(SubscriptionEntitlement.organizationId == organization_id)
+            .order_by(
+                SubscriptionEntitlement.moduleCode,
+                SubscriptionEntitlement.startsAt.desc(),
+                SubscriptionEntitlement.createdAt.desc(),
+            )
+        )
+    ).all()
+    entitlements_by_module = {}
+    for row in entitlement_rows:
+        module_code = row[0].moduleCode
+        entitlements_by_module.setdefault(module_code, []).append(row)
+
     result: list[InstalledModuleResponse] = []
+    now = datetime.now(timezone.utc)
     for module in modules:
         org_module = org_modules_by_code.get(module.code)
+        installation_status = org_module.status if org_module else "inactive"
+        access_state, can_activate = _project_entitlement_access(
+            _select_effective_entitlement(entitlements_by_module.get(module.code, []), now), now
+        )
         result.append(
             InstalledModuleResponse(
                 moduleCode=module.code,
                 name=module.name,
                 description=module.description,
                 version=module.version,
-                status=org_module.status if org_module else "inactive",
+                status=installation_status,
                 activatedAt=org_module.activatedAt if org_module else None,
+                accessState=access_state,
+                canActivate=can_activate,
+                canOpen=(installation_status in {"active", "trial"} and can_activate),
             )
         )
     return result
@@ -243,6 +339,7 @@ def require_module_active(module_code: str):
                 message=f"Le module '{module_code}' n'est pas actif pour cette organisation.",
                 status_code=403,
             )
+        await assert_module_entitled(db, organization_id, module_code)
 
     return dependency
 
@@ -262,9 +359,18 @@ def require_module_active_any(*module_codes: str):
         organization_id: uuid.UUID = Depends(get_current_organization_id),
         db: AsyncSession = Depends(get_db),
     ) -> None:
+        blocked_error: AppError | None = None
         for module_code in module_codes:
             if await is_module_active(db, organization_id, module_code):
-                return
+                try:
+                    await assert_module_entitled(db, organization_id, module_code)
+                    return
+                except AppError as exc:
+                    if exc.code != "module_entitlement_unavailable":
+                        raise
+                    blocked_error = exc
+        if blocked_error is not None:
+            raise blocked_error
         raise AppError(
             code="module_inactive",
             message=f"Aucun des modules {', '.join(module_codes)} n'est actif pour cette organisation.",

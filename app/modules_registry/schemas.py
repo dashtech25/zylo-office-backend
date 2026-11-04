@@ -159,3 +159,14 @@ class ModuleAuditEventResponse(BaseModel):
             payloadMinimal=evenement.payloadMinimal,
             createdAt=evenement.createdAt,
         )
+
+
+class ModulePermissionResponse(BaseModel):
+    """Permission déclarée par la version installée d'un module (BE-055)."""
+
+    id: uuid.UUID
+    code: str
+    description: str | None
+    scope: Literal["organization", "tenant", "platform"]
+
+    model_config = {"from_attributes": True}

@@ -56,14 +56,14 @@ def _code_module() -> str:
     return f"be055_{uuid.uuid4().hex[:10]}"
 
 
-async def _module_avec_version(code: str, publiee: bool = True) -> tuple[uuid.UUID, uuid.UUID]:
+async def _module_avec_version(code: str, publiee: bool = True, version: str = "1.0.0") -> tuple[uuid.UUID, uuid.UUID]:
     """Crée un module du catalogue et une version (publiée par défaut) ; retourne (module, version)."""
     async with AsyncSessionLocal() as db:
         module = await get_or_create_module(db, code, f"Module {code}", "Module de test BE-055")
         maintenant = datetime.now(timezone.utc)
         version = ModuleVersion(
             moduleId=module.id,
-            version="1.0.0",
+            version=version,
             publicationState="published" if publiee else "draft",
             publishedAt=maintenant if publiee else None,
         )
@@ -104,7 +104,7 @@ async def test_ca1_deux_versions_declarent_des_permissions_sans_collision():
     autre version (unicité par version), mais jamais deux fois dans la même version (409)."""
     code = _code_module()
     _, version_1 = await _module_avec_version(code)
-    _, version_2 = await _module_avec_version(code, publiee=False)
+    _, version_2 = await _module_avec_version(code, publiee=False, version="2.0.0")
     await _declarer(version_1, f"{code}.station.read", f"{code}.station.manage")
     await _declarer(version_2, f"{code}.station.read", f"{code}.station.close")
 
@@ -145,7 +145,7 @@ async def test_ca2_code_non_declare_par_la_version_installee_est_refuse_en_422()
     un code déclaré par la version installée passe."""
     code = _code_module()
     _, version_installee = await _module_avec_version(code)
-    _, version_brouillon = await _module_avec_version(code, publiee=False)
+    _, version_brouillon = await _module_avec_version(code, publiee=False, version="2.0.0")
     await _declarer(version_installee, f"{code}.station.read")
     await _declarer(version_brouillon, f"{code}.station.brouillon")
 
@@ -179,7 +179,7 @@ async def test_ca3_proprietaire_lit_les_permissions_de_la_version_installee_seul
     """Lecture nominale : le propriétaire voit les codes de la version installée, pas ceux d'un brouillon."""
     code = _code_module()
     module_id, version_installee = await _module_avec_version(code)
-    _, version_brouillon = await _module_avec_version(code, publiee=False)
+    _, version_brouillon = await _module_avec_version(code, publiee=False, version="2.0.0")
     await _declarer(version_installee, f"{code}.station.read")
     await _declarer(version_brouillon, f"{code}.station.brouillon")
 
@@ -225,7 +225,7 @@ async def test_ca4_organisation_d_un_autre_tenant_repond_404_sans_donnee(
 async def test_lister_permissions_installees_module_absent_ou_sans_version_installee_404():
     """Une version installée absente (module sans version publiée) donne une erreur 404 explicite."""
     code = _code_module()
-    module_id, _ = await _module_avec_version(code, publiee=False)
+    module_id, _ = await _module_avec_version(code, publiee=False, version="2.0.0")
 
     async with AsyncSessionLocal() as db:
         with pytest.raises(AppError) as erreur:

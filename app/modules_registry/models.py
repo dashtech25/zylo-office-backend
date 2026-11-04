@@ -166,3 +166,34 @@ class ModuleStateTransition(UUIDPrimaryKeyMixin, Base):
     createdAt: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+# Portées d'une permission déclarée par un module (BE-055) : organisation `{orgId}`, tenant, plateforme.
+PORTEES_PERMISSION_MODULE: tuple[str, ...] = ("organization", "tenant", "platform")
+
+
+class ModulePermission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Permission déclarée par une version d'un module (table `module_permissions`, BE-055).
+
+    La déclaration appartient à la version, pas au module : deux versions peuvent déclarer le
+    même code (l'unicité porte sur `(moduleVersionId, code)`), et seule la version installée
+    fait foi pour savoir si un code est accordable (`declarations.exiger_permissions_declarees`).
+    `scope` indique la portée de la permission (organisation, tenant ou plateforme).
+    """
+
+    __tablename__ = "module_permissions"
+    __table_args__ = (
+        UniqueConstraint("moduleVersionId", "code", name="uq_module_permissions_version_code"),
+        {"comment": "Permissions déclarées par chaque version d'un module (BE-055)."},
+    )
+
+    moduleVersionId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("module_version.id"), nullable=False, index=True
+    )
+    code: Mapped[str] = mapped_column(String(150), nullable=False, comment="Code de permission (domaine.entite.action).")
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    scope: Mapped[str] = mapped_column(
+        Enum(*PORTEES_PERMISSION_MODULE, name="module_permission_scope", native_enum=True),
+        nullable=False,
+        comment="Portée de la permission (organization, tenant, platform).",
+    )

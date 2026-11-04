@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -100,3 +100,59 @@ class OrganizationModule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="inactive")  # active | inactive | trial
     activatedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deactivatedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# Origines d'une transition (BE-041, matrice-etats-modules-et-droits.md section 2) : qui a
+# déclenché la transition. Une origine ne vaut pas permission : elle sert à l'audit et aux règles
+# d'autorité (ex. une suspension `security` n'est pas levée par un `client`).
+ORIGINES_TRANSITION: tuple[str, ...] = ("client", "commercial", "security", "support", "automation", "platform")
+
+
+class ModuleStateTransition(UUIDPrimaryKeyMixin, Base):
+    """Journal append-only des transitions d'état (table `module_state_transitions`, BE-041).
+
+    Une ligne par transition réussie. L'état courant d'un sujet (`subjectType`, `subjectId`) est
+    le `toState` de sa dernière ligne, et sa version d'état est `stateVersionAfter`. Aucune ligne
+    n'est modifiée ni supprimée : une correction est une nouvelle transition.
+
+    Contraintes :
+    - `(subjectType, subjectId, idempotencyKey)` unique : un rejeu de commande ne crée pas de ligne ;
+    - `(subjectType, subjectId, stateVersionAfter)` unique (ajout de BE-041) : deux transitions
+      concurrentes ne peuvent pas prendre la même version, la seconde échoue en conflit.
+
+    `actorId` est obligatoire (pas de transition anonyme). `organizationId` est nul pour un sujet
+    de plateforme. La fonction qui écrit ces lignes est `transitions.transitionner`.
+    """
+
+    __tablename__ = "module_state_transitions"
+    __table_args__ = (
+        UniqueConstraint(
+            "subjectType", "subjectId", "idempotencyKey", name="uq_module_state_transitions_idempotence"
+        ),
+        UniqueConstraint(
+            "subjectType", "subjectId", "stateVersionAfter", name="uq_module_state_transitions_version"
+        ),
+        {"comment": "Journal append-only des transitions d'état des modules (BE-041)."},
+    )
+
+    subjectType: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    subjectId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    fromState: Mapped[str] = mapped_column(String(50), nullable=False)
+    toState: Mapped[str] = mapped_column(String(50), nullable=False)
+    actorId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    organizationId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=True, index=True
+    )
+    origin: Mapped[str] = mapped_column(
+        Enum(*ORIGINES_TRANSITION, name="module_transition_origin", native_enum=True),
+        nullable=False,
+        comment="Origine de la transition (client, commercial, security, support, automation, platform).",
+    )
+    reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    operationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    idempotencyKey: Mapped[str] = mapped_column(String(200), nullable=False)
+    stateVersionBefore: Mapped[int] = mapped_column(Integer, nullable=False)
+    stateVersionAfter: Mapped[int] = mapped_column(Integer, nullable=False)
+    createdAt: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

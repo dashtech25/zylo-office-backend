@@ -17,7 +17,7 @@ import uuid
 
 import pytest
 
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, engine
 from app.core.errors import AppError
 from app.data_inventory.permissions import DONNEES_INVENTAIRE_LIRE
 from app.data_inventory.service import (
@@ -32,7 +32,18 @@ from app.data_inventory.service import (
 )
 
 
-async def test_chaque_table_du_schema_figure_dans_l_inventaire():
+@pytest.fixture
+async def pool_de_boucle_courante():
+    """Repart d'un pool neuf lié à la boucle d'événements du test.
+
+    Même précaution que la fixture `client` de conftest.py : l'engine est un
+    singleton dont les connexions restent liées à la boucle qui les a ouvertes.
+    """
+    await engine.dispose()
+    yield
+
+
+async def test_chaque_table_du_schema_figure_dans_l_inventaire(pool_de_boucle_courante):
     """CA-1 : aucune table migrée n'est absente du registre d'inventaire."""
     async with AsyncSessionLocal() as db:
         manquantes = await tables_sans_inventaire(db)
@@ -65,7 +76,7 @@ def test_classe_sans_duree_decidee_est_non_definie_et_bloque_la_suppression():
     assert suppression_automatique_autorisee("personnelle", 365) is True
 
 
-async def test_lecture_inventaire_sans_permission_donne_403():
+async def test_lecture_inventaire_sans_permission_donne_403(pool_de_boucle_courante):
     """CA-4 : un utilisateur sans la permission d'inventaire reçoit 403."""
     async with AsyncSessionLocal() as db:
         with pytest.raises(AppError) as erreur:

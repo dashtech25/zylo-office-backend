@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -246,4 +246,57 @@ class ModulePermission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Enum(*PORTEES_PERMISSION_MODULE, name="module_permission_scope", native_enum=True),
         nullable=False,
         comment="Portée de la permission (organization, tenant, platform).",
+    )
+
+
+class ModuleInstallation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Installation technique d'un module pour une organisation (table `module_installations`, BE-047).
+
+    Une ligne par tentative d'installation. `state` et `stateVersion` reflètent le dernier `toState`
+    et `stateVersionAfter` du journal `module_state_transitions` (sujet `tenant_module`, BE-041) : le
+    journal reste la trace faisant foi, cette ligne sert aux lectures courantes. `operationId` est
+    l'identifiant de l'opération, renvoyé à l'appelant pour relire un résultat incertain.
+
+    Contrainte : au plus une installation non `removed` par `(organizationId, moduleId)`, garantie par
+    un index unique partiel (une ancienne installation retirée n'empêche pas une nouvelle).
+    `lastErrorCode` porte le code d'erreur de la dernière étape en échec (ex. provisionnement).
+    """
+
+    __tablename__ = "module_installations"
+    __table_args__ = (
+        Index(
+            "uq_module_installations_organisation_module_actif",
+            "organizationId",
+            "moduleId",
+            unique=True,
+            postgresql_where=text("state <> 'removed'"),
+        ),
+        {"comment": "Installations techniques des modules par organisation (BE-047)."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True,
+        comment="Organisation (tenant) qui installe le module.",
+    )
+    moduleId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("module.id"), nullable=False, index=True
+    )
+    moduleVersionId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("module_version.id"), nullable=False, index=True,
+        comment="Version installée ; doit être publiée et compatible au moment de l'installation.",
+    )
+    state: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="not_installed", server_default="not_installed",
+        comment="État courant de l'installation (matrice d'états, BE-041).",
+    )
+    stateVersion: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+        comment="Version d'état : nombre de transitions journalisées.",
+    )
+    operationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, unique=True, default=uuid.uuid4,
+        comment="Identifiant de l'opération d'installation (relecture par GET).",
+    )
+    lastErrorCode: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="Code d'erreur de la dernière étape en échec."
     )

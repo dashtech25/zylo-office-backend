@@ -43,6 +43,7 @@ ETAT_INITIAL_INSTALLATION = "not_installed"
 # États d'une installation tenant-module (matrice-etats-modules-et-droits.md, section 2).
 ETATS_INSTALLATION: tuple[str, ...] = (
     "not_installed",
+    "preflight",
     "provisioning",
     "failed",
     "installed",
@@ -60,7 +61,9 @@ ETATS_INSTALLATION: tuple[str, ...] = (
 # est l'état par défaut après installation (« Installed/inactive » dans la matrice).
 _TRANSITIONS_INSTALLATION: frozenset[tuple[str, str]] = frozenset(
     {
+        ("not_installed", "preflight"),
         ("not_installed", "provisioning"),
+        ("preflight", "provisioning"),
         ("provisioning", "installed"),
         ("provisioning", "failed"),
         ("failed", "provisioning"),

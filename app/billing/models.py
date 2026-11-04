@@ -15,7 +15,7 @@ app/billing/service.py::current_subscription) : aucune requête globale.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -144,6 +144,8 @@ class SubscriptionEntitlement(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "subscription_entitlement"
     __table_args__ = (
         UniqueConstraint("subscriptionId", "entitlementCode", name="uq_subscription_entitlement_subscription_code"),
+        # BE-045 : lecture des entitlements d'une organisation par module.
+        Index("ix_subscription_entitlement_organizationId_moduleCode", "organizationId", "moduleCode"),
         CheckConstraint(
             "\"niveauApplication\" IN ('organisation', 'utilisateur')",
             name="ck_subscription_entitlement_niveau",
@@ -174,8 +176,11 @@ class SubscriptionEntitlement(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     offreId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("planVersion.id"), nullable=True, index=True)
     capaciteId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("capability.id"), nullable=True, index=True)
     quotaLimite: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    niveauApplication: Mapped[str] = mapped_column(String(20), nullable=False, default="organisation", server_default="organisation")
-    sourceAttribution: Mapped[str] = mapped_column(String(30), nullable=False, default="offre", server_default="offre")
+    # Pas de valeur par défaut (BE-045, CA-4) : le niveau et la source sont toujours explicites.
+    niveauApplication: Mapped[str] = mapped_column(String(20), nullable=False)
+    sourceAttribution: Mapped[str] = mapped_column(String(30), nullable=False)
+    # Compteur de version de l'état (BE-045) : 1 à la création, incrémenté par les écritures d'état.
+    stateVersion: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
 
 class PaymentAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):

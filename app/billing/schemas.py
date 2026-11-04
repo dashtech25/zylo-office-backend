@@ -67,6 +67,29 @@ class EntitlementResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class OrganizationEntitlementResponse(BaseModel):
+    """Entitlement d'une organisation vu par la route BE-045 (noms du contrat de la définition).
+
+    Correspondances avec la table `subscription_entitlement` (BE-024) : `scope` =
+    `niveauApplication`, `source` = `sourceAttribution`, `state` = état calculé (`etat`),
+    `quotaLimit` = `quotaLimite`, `periodStart`/`periodEnd` = `startsAt`/`endsAt`.
+    `quotaUnit` est lue sur la capacité ; nulle si elle n'en porte pas (aucune valeur inventée).
+    Aucun champ fournisseur de paiement.
+    """
+
+    id: uuid.UUID
+    moduleCode: str
+    entitlementCode: str
+    scope: str
+    source: str
+    state: str
+    quotaLimit: int | None = None
+    quotaUnit: str | None = None
+    periodStart: datetime
+    periodEnd: datetime | None = None
+    stateVersion: int
+
+
 class CreateInvoiceRequest(BaseModel):
     subscriptionId: uuid.UUID
 

@@ -6,7 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.permissions import AUDIT_LOG_VIEW
 from app.audit.service import record_audit_event
-from app.billing.permissions import BILLING_INVOICE_READ, SUBSCRIPTION_MANAGE, SUBSCRIPTION_READ
+from app.billing.permissions import (
+    BILLING_INVOICE_READ,
+    ORGANIZATION_ENTITLEMENT_READ,
+    SUBSCRIPTION_MANAGE,
+    SUBSCRIPTION_READ,
+)
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.security import get_current_user
@@ -50,6 +55,7 @@ OWNER_DEFAULT_PERMISSIONS = [
     (SUBSCRIPTION_MANAGE, "billing", "Gérer les abonnements de l'organisation."),
     (SUBSCRIPTION_READ, "billing", "Consulter l'abonnement, les droits et les entitlements de l'organisation."),
     (BILLING_INVOICE_READ, "billing", "Consulter les factures et tentatives de paiement de l'organisation."),
+    (ORGANIZATION_ENTITLEMENT_READ, "billing", "Consulter les entitlements de l'organisation désignée par son identifiant (BE-045)."),
     (CURRENCY_READ, "shared", "Consulter le référentiel des devises."),
     (CURRENCY_MANAGE, "shared", "Créer/modifier le référentiel des devises."),
     (EXCHANGE_RATE_READ, "shared", "Consulter les taux de change."),

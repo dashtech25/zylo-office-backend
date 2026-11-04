@@ -46,10 +46,23 @@ class LoginAttempt(UUIDPrimaryKeyMixin, Base):
 
 
 class PasswordResetToken(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Jeton de récupération à usage unique, empreinte SHA-256 uniquement."""
+    """Jeton de récupération de compte à usage unique, empreinte SHA-256 uniquement.
+
+    Table `password_reset_token` (snake_case, décision BE-037 ; renommée par la
+    révision c9f2a4e6b8d1). Seul le nom de table a changé : colonnes, index et
+    contraintes gardent les noms camelCase de la migration d'origine
+    (e3c4a8f1b2d6), déclarés explicitement ici pour que la comparaison ORM/base
+    d'Alembic ne voie aucune différence.
+
+    Invariants : `tokenHash` est unique ; au plus un jeton ouvert par utilisateur
+    (index partiel unique sur `userId` où `usedAt` et `revokedAt` sont NULL).
+    Le service d'authentification (`app/auth/password_reset.py`) révoque les
+    jetons ouverts avant d'en émettre un nouveau.
+    """
 
     __tablename__ = "password_reset_token"
     __table_args__ = (
+        Index("ix_passwordResetToken_userId", "userId"),
         Index(
             "uq_passwordResetToken_open_per_user",
             "userId",
@@ -60,7 +73,7 @@ class PasswordResetToken(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     userId: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
     )
     tokenHash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     expiresAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

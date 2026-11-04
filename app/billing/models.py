@@ -392,3 +392,35 @@ class PriceRule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     amountMinor: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="Montant en unités mineures ; NULL = non configuré.")
     currency: Mapped[str | None] = mapped_column(String(3), nullable=True, comment="Devise ISO ; NULL = non configurée.")
     taxRateBps: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="Taux de taxe en points de base ; NULL = non configuré.")
+
+
+class PlanChange(UUIDPrimaryKeyMixin, Base):
+    """Demande de changement de plan d'un abonnement (BE-088).
+
+    Une ligne est écrite à la demande d'application d'un downgrade. Un downgrade reste
+    `scheduled` jusqu'à `effectiveAt` (fin de période, `subscription.endDate`) : l'abonnement
+    garde son plan tant que la demande n'est pas appliquée. Un upgrade n'est pas écrit
+    (refusé en cours de période, QE-FAC-05). Au plus une ligne `scheduled` par abonnement,
+    garantie par un index unique partiel (migration b088c0d1e2f3).
+
+    `targetPlanVersionSnapshotId` pointe l'instantané figé de la version cible (BE-075) ;
+    `previewJson` garde l'aperçu tel qu'il a été présenté au moment de la demande.
+    Colonnes définies par BE-088 ; les noms suivent QE-FAC-04 (camelCase, FK explicites).
+    """
+    __tablename__ = "plan_change"
+    __table_args__ = {"comment": "Demande de changement de plan d'un abonnement, appliquée à échéance (BE-088)."}
+
+    subscriptionId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("subscription.id"), nullable=False, index=True,
+        comment="Abonnement concerné.",
+    )
+    targetPlanVersionSnapshotId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("plan_version_snapshot.id"), nullable=False,
+        comment="Instantané figé de la version d'offre cible (BE-075).",
+    )
+    direction: Mapped[str] = mapped_column(String(20), nullable=False, comment="upgrade ou downgrade (BE-088).")
+    effectiveAt: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, comment="Date d'effet du changement (échéance pour un downgrade).",
+    )
+    status: Mapped[str] = mapped_column(String(30), nullable=False, comment="Statut de la demande : scheduled (BE-088).")
+    previewJson: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="Aperçu présenté au moment de la demande (BE-088).")

@@ -90,15 +90,23 @@ class ReissuedInvitationResponse(BaseModel):
 
 
 class ActivateAccountRequest(BaseModel):
+    """POST /auth/activate. Deux usages du même jeton endpoint :
+    - compte créé par une organisation (T-049, `userInvitation`) : `password` requis ;
+    - invitation à rejoindre une organisation (BE-013, `organizationInvitation`) :
+      `password` et `fullName` requis seulement si la personne n'a pas encore de
+      compte ; une personne déjà inscrite rejoint l'organisation sans nouveau mot de passe.
+    La présence de ces champs est contrôlée au service, après résolution du jeton."""
+
     token: str = Field(min_length=20, max_length=200)
-    # Règle commune (app/auth/politique_mot_de_passe.py). Le nom et l'e-mail du
-    # titulaire sont vérifiés au service, après résolution du jeton.
-    password: str = Field(max_length=255)
+    # Règle commune (app/auth/politique_mot_de_passe.py), vérifiée seulement si fournie.
+    password: str | None = Field(default=None, max_length=255)
+    fullName: str | None = Field(default=None, min_length=1, max_length=255)
 
     @field_validator("password")
     @classmethod
-    def _politique_mot_de_passe(cls, valeur: str) -> str:
-        verifie_mot_de_passe(valeur)
+    def _politique_mot_de_passe(cls, valeur: str | None) -> str | None:
+        if valeur is not None:
+            verifie_mot_de_passe(valeur)
         return valeur
 
 

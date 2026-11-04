@@ -234,13 +234,19 @@ async def activate(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> AccountActivatedResponse:
-    """T-049 : le titulaire choisit son mot de passe avec le jeton reçu hors API.
-    Sans authentification : le jeton est la seule preuve. Un jeton inconnu,
-    expiré, révoqué ou déjà utilisé répond `400 invitation_invalid` sans détail;
-    les échecs répétés par IP reçoivent `429 rate_limited`."""
+    """Activation par jeton à usage unique, sans authentification (le jeton est la seule preuve).
+
+    Deux cas, reconnus par le jeton (voir `invitations.activate_account`) :
+    - compte créé par une organisation (T-049) : `password` requis ;
+    - invitation à rejoindre une organisation (BE-013) : création du compte avec
+      `password` et `fullName` si la personne n'en a pas, sinon simple adhésion à
+      l'organisation de l'invitation, sans nouveau mot de passe.
+
+    Un jeton inconnu, expiré, révoqué ou déjà utilisé répond `400 invitation_invalid`
+    sans détail ; les échecs répétés par IP reçoivent `429 rate_limited`."""
     await ratelimit.verifie_limites(db, request, ratelimit.ACTION_ACTIVATE, None)
     try:
-        user = await invitations.activate_account(db, data.token, data.password)
+        user = await invitations.activate_account(db, data.token, data.password, data.fullName)
     except AppError as exc:
         if exc.code == "invitation_invalid":
             # Le jeton ne doit pas permettre un essai illimité. Les erreurs de

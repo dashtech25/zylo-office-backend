@@ -22,9 +22,36 @@ from sqlalchemy.engine import Engine
 from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.core.logging import correlation_id_ctx, request_id_ctx
+from app.core.logging import correlation_id_ctx, operation_id_ctx, request_id_ctx
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+# Même contrat que BE-232 (app/core/idempotency.py) : clé choisie par le client,
+# 16 à 120 caractères.
+_IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{16,120}$")
+_METHODES_MUTANTES = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+# Espace de noms fixe : un même (méthode, chemin, clé) donne toujours le même UUID v5.
+_NAMESPACE_OPERATION = uuid.uuid5(uuid.NAMESPACE_URL, "zylo-office:operation")
+
+
+def _operation_id(method: str, path: str, headers) -> str | None:
+    """Retourne l'operationId d'une requête, ou None pour une lecture.
+
+    BE-181 (CA-3) : chaque mutation reçoit un operationId. Quand le client
+    envoie un Idempotency-Key valide, l'identifiant est un UUID v5 dérivé de
+    la méthode, du chemin et de la clé : un rejeu (même clé, même route)
+    obtient le même operationId, sans état partagé. Sans clé valide, un UUID
+    v4 neuf est généré : il n'est alors stable pour aucun rejeu (cas à traiter
+    côté client, voir la documentation de la tâche).
+
+    L'operationId sert à corréler les journaux et l'audit, jamais à décider
+    d'une autorisation : deux tenants envoyant la même clé sur la même route
+    partagent donc le même identifiant, ce qui est acceptable pour une trace."""
+    if method not in _METHODES_MUTANTES:
+        return None
+    cle = headers.get("idempotency-key")
+    if cle is not None and _IDEMPOTENCY_KEY_PATTERN.fullmatch(cle):
+        return str(uuid.uuid5(_NAMESPACE_OPERATION, f"{method} {path}\n{cle}"))
+    return str(uuid.uuid4())
 
 
 def _request_id(headers) -> str:
@@ -83,10 +110,13 @@ class RequestIdMiddleware:
         correlation_id = _correlation_id(request.headers, request_id)
         scope.setdefault("state", {})["request_id"] = request_id
         scope["state"]["correlation_id"] = correlation_id
+        operation_id = _operation_id(scope.get("method", "GET"), scope.get("path", ""), request.headers)
+        scope["state"]["operation_id"] = operation_id
         token = request_id_ctx.set(request_id)
         # Copiée par les tâches asynchrones créées pendant la requête et lue
         # par les appels d'intégration : même correlationId de bout en bout.
         correlation_token = correlation_id_ctx.set(correlation_id)
+        operation_token = operation_id_ctx.set(operation_id)
 
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
@@ -105,6 +135,7 @@ class RequestIdMiddleware:
         try:
             await self.app(scope, receive, send_wrapper)
         finally:
+            operation_id_ctx.reset(operation_token)
             correlation_id_ctx.reset(correlation_token)
             request_id_ctx.reset(token)
 

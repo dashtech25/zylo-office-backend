@@ -46,7 +46,7 @@ from app.core.authz import (
     decide_pour_tache,
     exiger_acces,
 )
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, engine
 from app.core.security import get_current_user, hash_password
 from app.identity.models import OrganizationUser, User
 from app.identity.schemas import CreateOrganizationRequest
@@ -57,6 +57,15 @@ from app.rbac.service import assign_role, get_or_create_permission, user_has_per
 PERM_LIRE = "be226.dossier.lire"
 PERM_SUPPRIMER = "be226.dossier.supprimer"
 MODULE_TEST = "be226"
+
+
+@pytest.fixture(autouse=True)
+async def _pool_propre_a_chaque_test():
+    """Chaque test a sa propre boucle asyncio : le pool de connexions est vidé
+    avant et après lui, sinon une connexion d'une boucle fermée est réutilisée."""
+    await engine.dispose()
+    yield
+    await engine.dispose()
 
 
 # ---------------------------------------------------------------------------

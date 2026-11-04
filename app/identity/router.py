@@ -10,10 +10,12 @@ from app.core.security import get_current_user
 from app.identity import service
 from app.identity import invitations
 from app.identity.models import Organization, User
-from app.identity.permissions import ORGANIZATION_MANAGE, USER_MANAGE
+from app.identity.permissions import MEMBERS_INVITE, ORGANIZATION_MANAGE, USER_MANAGE
 from app.identity.schemas import (
     CreatedUserResponse,
+    CreateOrganizationInvitationRequest,
     CreateOrganizationRequest,
+    OrganizationInvitationResponse,
     CreateUserRequest,
     OrganizationResponse,
     ReissuedInvitationResponse,
@@ -22,7 +24,8 @@ from app.identity.schemas import (
     UpdateUserStatusRequest,
     UserStatusResponse,
 )
-from app.rbac.service import get_current_organization_id, require_permission
+from app.rbac.guards import get_current_organization_id
+from app.rbac.service import require_permission
 
 router = APIRouter()
 
@@ -127,6 +130,40 @@ async def protected_demo(
     """Endpoint de démonstration Phase 5+6 — prouve qu'un accès est bien refusé
     sans la permission identity.organization.manage et accordé avec elle."""
     return {"status": "accès autorisé", "permission": ORGANIZATION_MANAGE}
+
+
+@router.post(
+    "/current/invitations",
+    response_model=OrganizationInvitationResponse,
+    status_code=201,
+    summary="Inviter une personne à rejoindre l'organisation courante (jeton envoyé par e-mail, jamais dans la réponse)",
+)
+async def create_organization_invitation(
+    data: CreateOrganizationInvitationRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_permission(MEMBERS_INVITE)),
+) -> OrganizationInvitationResponse:
+    """BE-012 : organisation désignée par `X-Organization-Id` (membre actif exigé).
+    Permission `organization.members.invite` ; sans elle, 403 et rien n'est créé.
+    Rôle proposé hors organisation : 404. Voir `invitations.create_organization_invitation`."""
+    return await invitations.create_organization_invitation(db, current_user, organization_id, data)
+
+
+@router.get(
+    "/current/invitations",
+    response_model=list[OrganizationInvitationResponse],
+    summary="Lister les invitations en attente de l'organisation courante",
+)
+async def list_organization_invitations(
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_permission(MEMBERS_INVITE)),
+) -> list[OrganizationInvitationResponse]:
+    """BE-012 : seules les invitations `pending` non expirées de l'organisation courante
+    (jamais celles d'une autre organisation). Même permission que la création."""
+    return await invitations.list_organization_invitations(db, organization_id)
 
 
 @router.post(

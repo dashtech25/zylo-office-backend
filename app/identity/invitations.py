@@ -13,6 +13,14 @@ Flux :
 4. `update_user_status` : désactivation réversible (sessions révoquées) et
    réactivation. Aucune suppression physique.
 
+Invitations à rejoindre une organisation (BE-012) : `create_organization_invitation`
+et `list_organization_invitations`, routes `/organizations/current/invitations`.
+Ce flux vise une adresse, pas forcément un compte : il utilise la table
+`organizationInvitation` (et non `userInvitation`). Le jeton n'est envoyé que par
+e-mail, stocké haché, et la permission `organization.members.invite` est exigée.
+L'acceptation par le destinataire relève de BE-013 : le lien envoyé pointe pour
+l'instant vers la page d'activation existante.
+
 Décision de sécurité : un compte `User` est global (une seule identité pour
 toutes les organisations). Une désactivation décidée par une organisation
 atteindrait donc aussi les autres organisations de la personne. Elle est
@@ -35,8 +43,15 @@ from app.auth.politique_mot_de_passe import PolitiqueMotDePasseErreur, erreur_ap
 from app.core.config import settings
 from app.core.errors import AppError
 from app.core.security import hash_password
-from app.identity.models import Organization, OrganizationUser, User, UserInvitation
-from app.identity.schemas import CreateUserRequest, CreatedUserResponse, ReissuedInvitationResponse, UserStatusResponse
+from app.identity.models import Organization, OrganizationInvitation, OrganizationUser, User, UserInvitation
+from app.identity.schemas import (
+    CreateOrganizationInvitationRequest,
+    CreatedUserResponse,
+    CreateUserRequest,
+    OrganizationInvitationResponse,
+    ReissuedInvitationResponse,
+    UserStatusResponse,
+)
 from app.rbac.models import Role, UserRole
 from app.shared.email import EmailMessage, get_email_sender
 
@@ -45,6 +60,7 @@ ACTION_INVITATION = "identity.user.invitation.reissue"
 ACTION_ACTIVATE = "identity.user.activate"
 ACTION_SUSPEND = "identity.user.suspend"
 ACTION_REACTIVATE = "identity.user.reactivate"
+ACTION_ORGANIZATION_INVITATION = "identity.organization.invitation.create"
 
 
 def _empreinte(jeton: str) -> str:
@@ -94,26 +110,28 @@ async def _emet_invitation(db: AsyncSession, organization_id: uuid.UUID, user: U
     return jeton, expire
 
 
-async def _envoie_invitation(nom_complet: str, email: str, nom_organisation: str, jeton: str, expire: datetime) -> None:
-    """Envoi avant le commit : un échec d'envoi annule la création (rien n'est à
-    rattraper à la main). Lève une AppError si l'envoi échoue."""
+async def _envoie_message(email: str, sujet: str, corps: str, message_echec: str) -> None:
+    """Envoi d'un message d'invitation. Appelé avant le commit : un échec d'envoi
+    annule l'écriture (rien n'est à rattraper à la main). Lève une AppError si
+    l'envoi n'est pas configuré ou échoue ; `message_echec` est le texte renvoyé
+    au client dans ce cas, propre au flux appelant."""
     sender = get_email_sender()
     if sender is None:
         raise _sans_envoi_configure()
     try:
-        await sender.send(
-            EmailMessage(
-                to=email,
-                subject="Activation de votre compte Zylo Office",
-                body=_corps_du_message(nom_complet, nom_organisation, jeton, expire),
-            )
-        )
+        await sender.send(EmailMessage(to=email, subject=sujet, body=corps))
     except Exception as exc:  # noqa: BLE001 - tout échec de transport est traité de la même façon
-        raise AppError(
-            code="email_delivery_failed",
-            message="L'invitation n'a pas pu être envoyée. Aucun compte n'a été créé.",
-            status_code=503,
-        ) from exc
+        raise AppError(code="email_delivery_failed", message=message_echec, status_code=503) from exc
+
+
+async def _envoie_invitation(nom_complet: str, email: str, nom_organisation: str, jeton: str, expire: datetime) -> None:
+    """Envoi du lien d'activation d'un compte créé (T-021)."""
+    await _envoie_message(
+        email,
+        "Activation de votre compte Zylo Office",
+        _corps_du_message(nom_complet, nom_organisation, jeton, expire),
+        "L'invitation n'a pas pu être envoyée. Aucun compte n'a été créé.",
+    )
 
 
 async def _membre(db: AsyncSession, organization_id: uuid.UUID, user_id: uuid.UUID) -> User:
@@ -371,3 +389,132 @@ async def update_user_status(
     await db.commit()
     await db.refresh(user)
     return UserStatusResponse(id=user.id, email=user.email, fullName=user.fullName, status=user.status)
+
+
+def _corps_invitation_organisation(nom_organisation: str, jeton: str, expire: datetime) -> str:
+    # Le lien pointe vers la page d'activation actuelle ; l'acceptation d'une
+    # invitation à rejoindre une organisation relève de BE-013.
+    lien = f"{settings.ACTIVATION_URL_BASE}#token={jeton}"
+    return (
+        f"Vous êtes invité à rejoindre l'organisation « {nom_organisation} » sur Zylo Office.\n"
+        f"Le lien suivant est valable jusqu'au {expire.strftime('%d/%m/%Y %H:%M')} (UTC) :\n\n"
+        f"{lien}\n\n"
+        "Ce lien ne fonctionne qu'une fois. Si vous n'attendiez pas ce message, ignorez-le.\n"
+    )
+
+
+def _vers_reponse_invitation(invitation: OrganizationInvitation) -> OrganizationInvitationResponse:
+    return OrganizationInvitationResponse(
+        id=invitation.id,
+        email=invitation.email,
+        roleId=invitation.roleId,
+        status=invitation.status,
+        expiresAt=invitation.expiresAt,
+    )
+
+
+async def create_organization_invitation(
+    db: AsyncSession, actor: User, organization_id: uuid.UUID, data: CreateOrganizationInvitationRequest
+) -> OrganizationInvitationResponse:
+    """Invite une adresse à rejoindre `organization_id` (BE-012, CA-1, CA-4, CA-5).
+
+    Déroulé : refus si l'envoi n'est pas configuré (503, rien n'est écrit) ;
+    rôle proposé vérifié dans l'organisation (404 sinon) ; une seule invitation
+    ouverte par adresse et organisation (409) ; insertion avec l'empreinte du
+    jeton ; envoi du lien par e-mail ; entrée d'audit ; commit.
+
+    L'envoi a lieu avant le commit : un échec d'envoi annule l'invitation. La
+    réponse ne contient jamais le jeton, seul le message au destinataire le porte.
+    Les droits sont contrôlés par la route (`organization.members.invite`), pas ici.
+    """
+    if get_email_sender() is None:
+        raise _sans_envoi_configure()
+
+    email = str(data.email).lower()
+    maintenant = datetime.now(timezone.utc)
+    if data.roleId is not None:
+        # Rôle d'une autre organisation : même réponse que pour un rôle absent.
+        role_ok = await db.scalar(select(Role.id).where(Role.id == data.roleId, Role.organizationId == organization_id))
+        if role_ok is None:
+            raise AppError(code="role_not_found", message="Rôle introuvable dans cette organisation.", status_code=404)
+
+    ouverte = await db.scalar(
+        select(OrganizationInvitation.id).where(
+            OrganizationInvitation.organizationId == organization_id,
+            OrganizationInvitation.email == email,
+            OrganizationInvitation.status == "pending",
+            OrganizationInvitation.expiresAt > maintenant,
+        )
+    )
+    if ouverte is not None:
+        raise AppError(
+            code="invitation_already_pending",
+            message="Une invitation est déjà en attente pour cette adresse.",
+            status_code=409,
+        )
+
+    organisation = await db.get(Organization, organization_id)
+    jeton = secrets.token_urlsafe(32)
+    expire = maintenant + timedelta(hours=settings.USER_INVITATION_TTL_HOURS)
+    invitation = OrganizationInvitation(
+        organizationId=organization_id,
+        email=email,
+        roleId=data.roleId,
+        status="pending",
+        tokenHash=_empreinte(jeton),
+        expiresAt=expire,
+        createdByUserId=actor.id,
+    )
+    db.add(invitation)
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        # Course entre deux créations pour la même adresse : l'index partiel tranche.
+        await db.rollback()
+        raise AppError(
+            code="invitation_already_pending",
+            message="Une invitation est déjà en attente pour cette adresse.",
+            status_code=409,
+        ) from exc
+
+    try:
+        await _envoie_message(
+            email,
+            f"Invitation à rejoindre {organisation.name} sur Zylo Office",
+            _corps_invitation_organisation(organisation.name, jeton, expire),
+            "L'invitation n'a pas pu être envoyée. Aucune invitation n'a été créée.",
+        )
+    except AppError:
+        await db.rollback()
+        raise
+
+    await record_audit_event(
+        db,
+        organization_id,
+        actor.id,
+        action=ACTION_ORGANIZATION_INVITATION,
+        entity_type="OrganizationInvitation",
+        entity_id=invitation.id,
+        summary=f"Invitation de {email} à rejoindre l'organisation",
+    )
+    reponse = _vers_reponse_invitation(invitation)
+    await db.commit()
+    return reponse
+
+
+async def list_organization_invitations(db: AsyncSession, organization_id: uuid.UUID) -> list[OrganizationInvitationResponse]:
+    """Invitations `pending` non expirées de l'organisation, les plus anciennes d'abord.
+    Filtre strict sur `organizationId` : aucune invitation d'une autre organisation (CA-3)."""
+    maintenant = datetime.now(timezone.utc)
+    lignes = (
+        await db.execute(
+            select(OrganizationInvitation)
+            .where(
+                OrganizationInvitation.organizationId == organization_id,
+                OrganizationInvitation.status == "pending",
+                OrganizationInvitation.expiresAt > maintenant,
+            )
+            .order_by(OrganizationInvitation.createdAt)
+        )
+    ).scalars().all()
+    return [_vers_reponse_invitation(ligne) for ligne in lignes]

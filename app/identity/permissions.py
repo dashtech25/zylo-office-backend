@@ -9,3 +9,9 @@ ORGANIZATION_MANAGE = "identity.organization.manage"
 # l'organisation, et par la migration explicite b3c4d5e6f7a8 aux propriétaires
 # existants (jamais par un backfill au démarrage).
 USER_MANAGE = "identity.user.manage"
+
+# Inviter une personne à rejoindre l'organisation courante et consulter les
+# invitations en attente (BE-012). Le code suit la recommandation QE-SOC-06 ;
+# il est accordé au propriétaire à la création de l'organisation, puis par la
+# migration explicite de BE-012 aux propriétaires existants.
+MEMBERS_INVITE = "organization.members.invite"

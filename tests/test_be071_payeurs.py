@@ -29,7 +29,15 @@ from app.identity.models import Organization, User
 
 @pytest.fixture(autouse=True)
 async def _pool_propre_a_chaque_test():
-    """Chaque test a sa propre boucle asyncio : le pool de connexions est vidé après lui."""
+    """Chaque test a sa propre boucle asyncio : le pool de connexions est vidé après lui.
+
+    Les modules connus (zylo_liquid, clé étrangère de plan.moduleCode) sont semés
+    avant chaque test, comme le fait la fixture `client` de tests/conftest.py.
+    """
+    from app.modules_registry.seed import seed_known_modules
+
+    await engine.dispose()
+    await seed_known_modules()
     yield
     await engine.dispose()
 

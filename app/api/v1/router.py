@@ -5,6 +5,7 @@ from app.api.v1.endpoints import health
 from app.auth.router import router as auth_router
 from app.billing.router import current_organization_router as billing_current_organization_router
 from app.billing.lecture_router import router as billing_lecture_router
+from app.billing.invoices_router import router as billing_invoices_router
 from app.billing.allocation_router import router as billing_allocation_router
 from app.billing.consent_router import router as billing_consent_router
 from app.billing.router import router as billing_router
@@ -60,6 +61,7 @@ api_router.include_router(audit_router, prefix="/audit", tags=["audit"])
 api_router.include_router(organization_audit_router, prefix="/organizations", tags=["audit"])
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(billing_router, prefix="/billing", tags=["billing"])
+api_router.include_router(billing_invoices_router, prefix="/billing", tags=["billing"])
 # BE-079 : agrégat abonnement (GET /billing/subscriptions/{subscriptionId}).
 api_router.include_router(billing_subscriptions_router, prefix="/billing", tags=["billing"])
 # BE-090 : résiliation d'abonnement (POST /billing/subscriptions/{subscriptionId}/cancel).

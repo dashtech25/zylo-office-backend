@@ -32,3 +32,7 @@ BILLING_CATALOGUE_READ = "billing.catalogue.read"
 # compte payeur. Porte les rôles ACTF-04 (acheteur) et ACTF-05 (contact de facturation) ; accordée
 # au propriétaire via OWNER_DEFAULT_PERMISSIONS (app/identity/service.py). Sans elle : 403 FORBIDDEN.
 BILLING_CONSENT_RECORD = "billing.consent.record"
+# BE-086 (ACTF-09, finance) : finaliser une facture brouillon. Code absent de la définition
+# (QE-SOC-06 : recommandation appliquée, nom aligné sur le geste d'audit `billing.invoice.finalize`).
+# Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
+BILLING_INVOICE_FINALIZE = "billing.invoice.finalize"

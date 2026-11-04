@@ -78,6 +78,20 @@ class Subscription(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     beneficiaryTenantId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=True, index=True, comment="Tenant bénéficiaire, périmètre d'accès (BE-071).")
     adminUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=True, index=True, comment="Administrateur du tenant bénéficiaire (BE-071).")
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="trial")
+    # Trois axes indépendants (BE-079) : cycle de vie, finances, incident. Aucun ne dérive
+    # des deux autres ; leurs valeurs et transitions sont dans app/billing/subscriptions/etats.py.
+    lifecycleStatus: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="trialing", server_default="trialing",
+        comment="Axe cycle de vie de l'abonnement (BE-079).",
+    )
+    financialStatus: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="none", server_default="none",
+        comment="Axe financier de l'abonnement (BE-079).",
+    )
+    incidentStatus: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="none", server_default="none",
+        comment="Axe incident de l'abonnement (BE-079).",
+    )
     startDate: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     endDate: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     renewedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

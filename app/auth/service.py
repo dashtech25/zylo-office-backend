@@ -39,8 +39,10 @@ async def revoque_sessions(db: AsyncSession, user_id, *, sauf_refresh_token: str
     """Révoque les refresh tokens ouverts de l'utilisateur, sauf celui fourni.
     Ne commite pas : l'appelant reste maître de la transaction.
 
-    Limite connue : un jeton d'accès déjà émis reste valable jusqu'à son
-    expiration (JWT_ACCESS_TOKEN_EXPIRE_MINUTES), car il est sans état."""
+    Effet sur les jetons d'accès : la révocation ferme la famille de la session.
+    Le jeton d'accès d'une session révoquée est refusé immédiatement (vérification
+    de la famille à chaque requête, voir `app.core.security`). La session conservée
+    (`sauf_refresh_token`) garde sa famille ouverte."""
     maintenant = datetime.now(timezone.utc)
     requete = update(RefreshToken).where(RefreshToken.userId == user_id, RefreshToken.revokedAt.is_(None))
     if sauf_refresh_token is not None:
@@ -103,8 +105,13 @@ async def authenticate_user(db: AsyncSession, data: LoginRequest) -> User:
 
 
 async def issue_tokens(db: AsyncSession, user: User, *, famille: uuid.UUID | None = None) -> tuple[str, str]:
-    """Émet un couple de jetons. Sans `famille`, ouvre une nouvelle famille (nouvelle connexion)."""
-    access_token = create_access_token(user.id)
+    """Émet un couple de jetons. Sans `famille`, ouvre une nouvelle famille (nouvelle connexion).
+
+    Le jeton d'accès porte la famille : `_utilisateur_actif_du_jeton` le refuse dès
+    que la famille n'a plus de refresh token ouvert (déconnexion, réutilisation).
+    """
+    famille_session = famille or uuid.uuid4()
+    access_token = create_access_token(user.id, famille=famille_session)
     refresh_token = create_refresh_token(user.id)
 
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
@@ -112,7 +119,7 @@ async def issue_tokens(db: AsyncSession, user: User, *, famille: uuid.UUID | Non
         RefreshToken(
             userId=user.id,
             tokenHash=_hash_token(refresh_token),
-            familyId=famille or uuid.uuid4(),
+            familyId=famille_session,
             expiresAt=expires_at,
         )
     )

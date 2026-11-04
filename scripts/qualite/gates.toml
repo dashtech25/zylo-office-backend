@@ -1,0 +1,21 @@
+# Configuration des gates qualité serveur (BE-222). Toute valeur de seuil vit ici,
+# jamais dans gates.py : une clé absente fait échouer le chargement.
+#
+# couverture_minimale : pourcentage de couverture exigé (NON DÉFINI : valeur à fixer
+#   par le responsable qualité, QE-EXP-13 ; la mesure de couverture n'est pas encore
+#   branchée au gate, la clé est lue et contrôlée dès qu'une mesure est fournie).
+# duree_maximale_secondes : durée totale maximale du gate (NON DÉFINI, QE-EXP-13).
+# relances_flaky : nombre de relances d'une étape avant échec (NON DÉFINI, QE-EXP-13).
+
+[seuils]
+couverture_minimale = 0
+duree_maximale_secondes = 900
+relances_flaky = 1
+
+[[etape]]
+nom = "gate-be222-unitaires"
+commande = ["python3", "-m", "pytest", "-q", "tests/test_gates_qualite_be222.py"]
+
+[[etape]]
+nom = "contrats-importations"
+commande = ["lint-imports"]

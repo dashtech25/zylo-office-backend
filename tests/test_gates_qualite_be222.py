@@ -27,6 +27,8 @@ EXCEPTIONS_REELLES = BACKEND_ROOT / "scripts" / "qualite" / "exceptions.toml"
 def _charge_module():
     spec = importlib.util.spec_from_file_location("gates_qualite_be222", GATES_PATH)
     module = importlib.util.module_from_spec(spec)
+    # Enregistré avant exécution : les dataclasses consultent sys.modules à la définition.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 

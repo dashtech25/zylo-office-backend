@@ -10,12 +10,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.billing import entitlements as calcul_entitlements
 from app.billing import service
 from app.billing.models import Invoice, PaymentWebhookEvent, Plan, PlanVersion, Subscription
 from app.billing.payment_provider import FlutterwaveTestProvider
-from app.billing.permissions import SUBSCRIPTION_MANAGE
+from app.billing.permissions import SUBSCRIPTION_MANAGE, SUBSCRIPTION_READ
 from app.billing.schemas import (
-    CreateInvoiceRequest, CreateSubscriptionRequest, InvoiceResponse,
+    CreateInvoiceRequest, CreateSubscriptionRequest, EntitlementResponse, InvoiceResponse,
     PaymentAttemptResponse, PaymentWebhookAck, PlanResponse, SubscriptionResponse,
     PaymentProviderStatus,
 )
@@ -24,6 +25,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.identity.models import User
 from app.identity.service import require_organization_member
+from app.rbac.guards import get_current_organization_id
 from app.rbac.service import require_permission
 from app.shared.pagination import PaginationParams, paginate
 from app.shared.schemas import Page
@@ -226,3 +228,62 @@ async def flutterwave_webhook(
             )
         return PaymentWebhookAck(received=True, duplicate=True)
     return PaymentWebhookAck(received=True, duplicate=False)
+
+
+# BE-026 : lecture de l'abonnement et des entitlements de l'organisation COURANTE.
+# Montée sous `/api/v1/organizations` (voir app/api/v1/router.py) : l'organisation
+# n'est jamais dans le chemin, elle vient de l'en-tête `X-Organization-Id`, validé
+# par `get_current_organization_id` (membership actif, sinon 404 uniforme). La
+# permission `billing.subscription.read` est ensuite exigée (403 sinon).
+current_organization_router = APIRouter()
+
+
+@current_organization_router.get(
+    "/current/subscription",
+    response_model=SubscriptionResponse | None,
+    summary="Lire l'abonnement de l'organisation courante",
+    dependencies=[Depends(require_permission(SUBSCRIPTION_READ))],
+)
+async def read_current_subscription(
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Renvoie l'abonnement actif ou d'essai de l'organisation courante, ou `null`.
+
+    `null` (et non une erreur) est l'état vide d'une organisation sans abonnement :
+    aucun plan, aucune facture ni abonnement n'est créé ni suggéré à la lecture.
+    Les codes d'entitlement listés sont ceux qui sont actifs pour cet abonnement.
+    Aucune donnée fournisseur de paiement n'est exposée.
+    """
+    current = await service.current_subscription(db, organization_id)
+    if current is None:
+        return None
+    subscription, entitlement_codes = current
+    return SubscriptionResponse(
+        id=subscription.id, organizationId=subscription.organizationId, planId=subscription.planId,
+        planVersionId=subscription.planVersionId, status=subscription.status,
+        startDate=subscription.startDate, endDate=subscription.endDate,
+        entitlementCodes=entitlement_codes,
+    )
+
+
+@current_organization_router.get(
+    "/current/entitlements",
+    response_model=list[EntitlementResponse],
+    summary="Lire les entitlements de l'organisation courante",
+    dependencies=[Depends(require_permission(SUBSCRIPTION_READ))],
+)
+async def read_current_entitlements(
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Renvoie les entitlements de l'organisation courante avec leur état calculé.
+
+    Seules les lignes de l'organisation courante sont lues : un entitlement d'une
+    autre organisation n'apparaît jamais (isolation). L'état (`etat`) est calculé à
+    la lecture par `app/billing/entitlements.py::calculer_entitlements` (`expired`
+    dès que la date de fin est dépassée pour une ligne active). Liste vide si
+    l'organisation n'a aucun entitlement.
+    """
+    return await calcul_entitlements.calculer_entitlements(db, organization_id)
+

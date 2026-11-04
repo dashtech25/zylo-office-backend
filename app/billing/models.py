@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, JSON, Numeric, String, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,6 +34,8 @@ class Subscription(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     startDate: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     endDate: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     renewedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Verrou optimiste (BE-072) : incrémenté à chaque écriture versionnée, voir app/billing/idempotency.py.
+    version: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
 
 
 class Invoice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -50,6 +52,28 @@ class Invoice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     paidAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     amountMinor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     idempotencyKey: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True)
+    # Verrou optimiste (BE-072), voir app/billing/idempotency.py.
+    version: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
+
+
+class IdempotencyRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Registre d'idempotence des commandes mutantes (BE-072).
+
+    Une ligne par (principal, route, clé). `scopeKey` porte cette portée ; une
+    seconde demande de même portée est rejouée ou refusée selon `commandHash`.
+    Voir app/billing/idempotency.py pour le contrat complet.
+    """
+    __tablename__ = "idempotency_record"
+    __table_args__ = (
+        UniqueConstraint("scopeKey", name="uq_idempotency_record_scope"),
+        {"comment": "Registre d'idempotence : portée principal + route + clé, empreinte de commande, résultat rejouable."},
+    )
+
+    scopeKey: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotencyKey: Mapped[str] = mapped_column(Text, nullable=False)
+    commandHash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")  # pending | completed
+    resultRef: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class PlanVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):

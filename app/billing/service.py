@@ -6,6 +6,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import record_audit_event
+from app.billing.errors import BillingErrorCode, billing_error
+from app.billing.idempotency import empreinte_portee, idempotent_command, portee_idempotence
 from app.billing.models import Invoice, PaymentAttempt, Plan, PlanVersion, Subscription, SubscriptionEntitlement
 from app.core.errors import AppError
 
@@ -153,20 +155,27 @@ async def current_subscription(db: AsyncSession, organization_id: uuid.UUID) -> 
     return subscription, entitlements
 
 
+ROUTE_CREATION_FACTURE = "billing.invoice.create"
+
+
+@idempotent_command(route=ROUTE_CREATION_FACTURE, result_model=Invoice)
 async def create_invoice(
     db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID,
     subscription_id: uuid.UUID, idempotency_key: str, request_id: str | None = None,
 ) -> Invoice:
-    previous = await db.scalar(select(Invoice).where(Invoice.idempotencyKey == idempotency_key))
-    if previous is not None:
-        owned = await db.scalar(select(Subscription.id).where(
-            Subscription.id == previous.subscriptionId, Subscription.organizationId == organization_id
-        ))
-        if owned is None:
-            raise AppError(code="DUPLICATE", message="Cette clé d'idempotence est déjà utilisée.", status_code=409)
-        if previous.subscriptionId != subscription_id:
-            raise AppError(code="DUPLICATE", message="Cette clé d'idempotence est déjà utilisée pour une autre demande.", status_code=409)
-        return previous
+    """Émet une facture pour un abonnement, sous contrôle d'idempotence (BE-072).
+
+    Le décorateur `idempotent_command` traite la portée (principal, route, clé) et
+    l'empreinte de commande avant ce corps : une clé déjà utilisée par le même
+    principal pour la même commande renvoie la facture initiale ; pour une autre
+    commande, `DUPLICATE` ; une clé d'un autre principal ne rejoue jamais le
+    résultat d'autrui. Ce corps ne voit donc que les demandes nouvelles.
+
+    `invoice.idempotencyKey` reçoit l'empreinte de la portée (et non la clé brute) :
+    la contrainte unique de la colonne reste active jusqu'à migration, sans
+    bloquer un second principal. Un abonnement absent ou hors organisation renvoie
+    `subscription_not_found` ; la réservation de la clé est alors retirée par le décorateur.
+    """
     subscription = await db.scalar(select(Subscription).where(
         Subscription.id == subscription_id, Subscription.organizationId == organization_id
     ))
@@ -178,17 +187,15 @@ async def create_invoice(
     invoice = Invoice(
         subscriptionId=subscription.id, amountCents=version.amountMinor,
         amountMinor=version.amountMinor, currency=version.currency,
-        status="pending", issuedAt=now, idempotencyKey=idempotency_key,
+        status="pending", issuedAt=now,
+        idempotencyKey=empreinte_portee(portee_idempotence(actor_user_id, ROUTE_CREATION_FACTURE, idempotency_key)),
     )
     db.add(invoice)
     try:
         await db.flush()
     except IntegrityError as exc:
         await db.rollback()
-        previous = await db.scalar(select(Invoice).where(Invoice.idempotencyKey == idempotency_key))
-        if previous is None or previous.subscriptionId != subscription_id:
-            raise AppError(code="DUPLICATE", message="Cette clé d'idempotence est déjà utilisée.", status_code=409) from exc
-        return previous
+        raise billing_error(BillingErrorCode.DUPLICATE) from exc
     await record_audit_event(
         db, organization_id, actor_user_id, action="billing.invoice.create",
         entity_type="Invoice", entity_id=invoice.id,

@@ -1,5 +1,5 @@
 from app.core.database import AsyncSessionLocal
-from app.identity.permissions import MEMBERS_INVITE, USER_MANAGE
+from app.identity.permissions import MEMBERS_INVITE, ORGANIZATION_SETTINGS_UPDATE, USER_MANAGE
 from app.rbac.service import get_or_create_permission
 
 
@@ -9,4 +9,5 @@ async def seed_known_permissions() -> None:
     async with AsyncSessionLocal() as db:
         await get_or_create_permission(db, USER_MANAGE, "identity", "Créer des utilisateurs, réémettre une invitation, suspendre et réactiver un membre.")
         await get_or_create_permission(db, MEMBERS_INVITE, "identity", "Inviter une personne à rejoindre l'organisation et consulter les invitations en attente.")
+        await get_or_create_permission(db, ORGANIZATION_SETTINGS_UPDATE, "identity", "Modifier les réglages de l'organisation courante (nom).")
         await db.commit()

@@ -12,7 +12,14 @@ from app.core.errors import AppError
 from app.core.security import get_current_user
 from app.core.versioning import mutation_versionnee
 from app.identity.models import Organization, OrganizationUser, User
-from app.identity.permissions import MEMBERS_INVITE, MEMBERS_READ, MEMBERS_REMOVE, ORGANIZATION_MANAGE, USER_MANAGE
+from app.identity.permissions import (
+    MEMBERS_INVITE,
+    MEMBERS_READ,
+    MEMBERS_REMOVE,
+    ORGANIZATION_MANAGE,
+    ORGANIZATION_SETTINGS_UPDATE,
+    USER_MANAGE,
+)
 from app.identity.schemas import CreateOrganizationRequest, UpdateOrganizationRequest, UpdateUserProfileRequest
 from app.modules_registry.permissions import MODULE_MANAGE
 from app.rbac.models import Role, RolePermission, UserRole
@@ -35,6 +42,7 @@ OWNER_DEFAULT_PERMISSIONS = [
     (MEMBERS_INVITE, "identity", "Inviter une personne à rejoindre l'organisation et consulter les invitations en attente."),
     (MEMBERS_READ, "identity", "Lister les membres de l'organisation courante."),
     (MEMBERS_REMOVE, "identity", "Retirer un membre de l'organisation (le rôle propriétaire reste réservé aux propriétaires)."),
+    (ORGANIZATION_SETTINGS_UPDATE, "identity", "Modifier les réglages de l'organisation courante (nom)."),
     (MODULE_MANAGE, "modules_registry", "Activer/désactiver les modules pour l'organisation."),
     (ROLE_MANAGE, "rbac", "Créer des rôles et modifier leurs permissions, attribuer/retirer un rôle."),
     (GRANT_MANAGE, "rbac", "Accorder ou refuser une permission individuelle, révoquer un grant."),

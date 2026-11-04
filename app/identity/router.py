@@ -11,7 +11,14 @@ from app.identity import service
 from app.identity import invitations
 from app.identity.models import Organization, User
 from app.identity import membres
-from app.identity.permissions import MEMBERS_INVITE, MEMBERS_READ, MEMBERS_REMOVE, ORGANIZATION_MANAGE, USER_MANAGE
+from app.identity.permissions import (
+    MEMBERS_INVITE,
+    MEMBERS_READ,
+    MEMBERS_REMOVE,
+    ORGANIZATION_MANAGE,
+    ORGANIZATION_SETTINGS_UPDATE,
+    USER_MANAGE,
+)
 from app.identity.schemas import (
     CreatedUserResponse,
     CreateOrganizationInvitationRequest,
@@ -102,6 +109,53 @@ async def get_current_organization(
     if organization is None:
         raise AppError(code="organization_not_found", message="Organisation introuvable.", status_code=404)
     return organization
+
+
+@router.get(
+    "/current/settings",
+    response_model=OrganizationResponse,
+    summary="Lire les réglages de l'organisation courante (BE-011)",
+)
+async def get_current_settings(
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> Organization:
+    """Réglages minimaux (nom, identifiant, statut, version) de l'organisation courante.
+
+    Lecture ouverte à tout membre actif, sans permission particulière (BE-011,
+    CA-1). L'organisation vient de `X-Organization-Id` validée par la garde
+    BE-009 : hors appartenance, 404 `organization_not_found`, jamais une liste vide.
+    Réutilise la lecture de GET /organizations/current (BE-010), sans second chemin.
+    """
+    return await get_current_organization(organization_id=organization_id, db=db)
+
+
+@router.put(
+    "/current/settings",
+    response_model=OrganizationResponse,
+    summary="Modifier les réglages de l'organisation courante (BE-011)",
+)
+async def update_current_settings(
+    data: UpdateOrganizationRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_permission(ORGANIZATION_SETTINGS_UPDATE)),
+) -> Organization:
+    """Modifie le nom de l'organisation courante et renvoie la ligne relue.
+
+    Corps : `name` (1 à 255 caractères, un nom vide est refusé en 422 avec
+    `field_errors`, format BE-001) et `version` optionnelle (BE-233 : une version
+    obsolète donne 409 `version_conflict`). Le slug et le statut ne sont pas
+    modifiables ici.
+
+    Ordre des contrôles : session (401), appartenance active (404 hors organisation),
+    permission `organization.settings.update` (403, rien n'est écrit), puis validation
+    du corps (422). Une modification réussie écrit une entrée d'audit
+    `identity.organization.update` via `service.update_organization`, dans la même
+    transaction que la mutation. Le service est partagé avec PATCH /organizations/{id}.
+    """
+    return await service.update_organization(db, str(organization_id), current_user.id, data)
 
 
 @router.get(

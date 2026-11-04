@@ -20,3 +20,9 @@ MEMBERS_INVITE = "organization.members.invite"
 # les organisations existantes les reçoivent par `cli.py` (backfill_owner_default_permissions).
 MEMBERS_READ = "organization.members.read"
 MEMBERS_REMOVE = "organization.members.remove"
+
+# BE-011 : modifier les réglages minimaux de l'organisation courante (nom).
+# La lecture des réglages est ouverte à tout membre actif ; seule l'écriture
+# exige ce code. Recommandation QE-SOC-06 : format `ressource.action`. Accordée
+# au propriétaire à la création de l'organisation (OWNER_DEFAULT_PERMISSIONS).
+ORGANIZATION_SETTINGS_UPDATE = "organization.settings.update"

@@ -40,6 +40,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.logging import request_id_ctx
+from app.core.messages import message_pour
 
 logger = logging.getLogger("zylo_office.errors")
 
@@ -149,8 +150,16 @@ def register_exception_handlers(app: FastAPI) -> None:
         en-têtes propres (ex. Retry-After). Journalise en avertissement, sans
         le corps de la requête."""
         logger.warning("app_error", extra={"code": exc.code, "path": request.url.path})
+        # Le texte de `AppError` reste le repli : sans clé dans un catalogue
+        # (cas de la plupart des codes métier), la réponse ne change pas.
         return _error_response(
-            exc.status_code, exc.code, exc.message, exc.details, exc.headers, exc.field_errors, request
+            exc.status_code,
+            exc.code,
+            message_pour(exc.code, exc.message),
+            exc.details,
+            exc.headers,
+            exc.field_errors,
+            request,
         )
 
     @app.exception_handler(RequestValidationError)
@@ -160,7 +169,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         return _error_response(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "validation_error",
-            "Les données envoyées sont invalides.",
+            message_pour("validation_error", "Les données envoyées sont invalides."),
             details=_jsonable_validation_errors(exc.errors()),
             field_errors=_validation_field_errors(exc.errors()),
             request=request,
@@ -195,6 +204,6 @@ def register_exception_handlers(app: FastAPI) -> None:
         return _error_response(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             "internal_error",
-            "Une erreur interne est survenue.",
+            message_pour("internal_error", "Une erreur interne est survenue."),
             request=request,
         )

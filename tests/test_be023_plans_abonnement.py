@@ -19,12 +19,14 @@ La base de test est celle de tests/conftest.py (zylo_t<NNN>_test). Les tests de
 migration rétrogradent puis remontent le schéma : ils restaurent la tête à la fin.
 """
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import pytest_asyncio
 from alembic import command
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.billing import service
@@ -37,6 +39,13 @@ from app.identity.models import Organization
 REVISION_AVANT_C0B7 = "d0c526c8656e"
 REVISION_C0B7 = "c0b7d9a2e511"
 REVISION_D8E9 = "d8e9f0a1b2c3"
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _pool_propre_a_chaque_test():
+    """Chaque test a sa propre boucle asyncio : le pool de connexions est vidé après lui."""
+    yield
+    await engine.dispose()
 
 
 def _tete_unique() -> str:
@@ -58,7 +67,8 @@ async def _execute(sql: str, parametres: dict | None = None) -> list:
 async def test_ca1_migration_c0b7_remplit_amount_minor_sans_perte():
     """CA-1 : les montants legacy `amountCents` sont recopiés à l'identique dans `amountMinor`."""
     cfg = config_alembic()
-    command.downgrade(cfg, REVISION_AVANT_C0B7)
+    # Alembic lance sa propre boucle asyncio : on le délègue à un fil séparé.
+    await asyncio.to_thread(command.downgrade, cfg, REVISION_AVANT_C0B7)
     try:
         org_id = uuid.uuid4()
         plan_id = uuid.uuid4()
@@ -69,24 +79,30 @@ async def test_ca1_migration_c0b7_remplit_amount_minor_sans_perte():
             "VALUES (:id, 'Org CA1', :slug, 'active', now(), now())",
             {"id": org_id, "slug": f"ca1-{org_id.hex[:8]}"},
         )
+        # Le registre de modules est vidé par le downgrade : on fournit le module du plan.
+        await _execute(
+            'INSERT INTO module (id, code, name, version, "createdAt", "updatedAt") '
+            "VALUES (:id, 'zylo_liquid', 'Zylo Liquid', '0.1.0', now(), now()) ON CONFLICT (code) DO NOTHING",
+            {"id": uuid.uuid4()},
+        )
         await _execute(
             'INSERT INTO plan (id, "moduleCode", code, name, "priceCents", currency, "periodDays", "createdAt", "updatedAt") '
             "VALUES (:id, 'zylo_liquid', :code, 'Plan CA1', 0, 'XAF', 30, now(), now())",
             {"id": plan_id, "code": f"ca1-{plan_id.hex[:8]}"},
         )
         await _execute(
-            'INSERT INTO subscription (id, "organizationId", "planId", status, "startDate", "endDate", version, "createdAt", "updatedAt") '
-            "VALUES (:id, :org, :plan, 'trial', now(), now() + interval '30 days', 1, now(), now())",
+            'INSERT INTO subscription (id, "organizationId", "planId", status, "startDate", "endDate", "createdAt", "updatedAt") '
+            "VALUES (:id, :org, :plan, 'trial', now(), now() + interval '30 days', now(), now())",
             {"id": sub_id, "org": org_id, "plan": plan_id},
         )
         for montant in montants:
             await _execute(
-                'INSERT INTO invoice (id, "subscriptionId", "amountCents", currency, status, "issuedAt", version, "createdAt", "updatedAt") '
-                "VALUES (:id, :sub, :montant, 'XAF', 'pending', now(), 1, now(), now())",
+                'INSERT INTO invoice (id, "subscriptionId", "amountCents", currency, status, "issuedAt", "createdAt", "updatedAt") '
+                "VALUES (:id, :sub, :montant, 'XAF', 'pending', now(), now(), now())",
                 {"id": uuid.uuid4(), "sub": sub_id, "montant": montant},
             )
 
-        command.upgrade(cfg, REVISION_C0B7)
+        await asyncio.to_thread(command.upgrade, cfg, REVISION_C0B7)
 
         lignes = await _execute(
             'SELECT "amountCents", "amountMinor" FROM invoice WHERE "subscriptionId" = :sub',
@@ -94,7 +110,9 @@ async def test_ca1_migration_c0b7_remplit_amount_minor_sans_perte():
         )
         assert sorted((int(c), int(m)) for c, m in lignes) == sorted((m, m) for m in montants)
     finally:
-        command.upgrade(cfg, "head")
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+        # Les connexions ouvertes dans le fil d'Alembic sont liées à une autre boucle.
+        await engine.dispose()
 
 
 # --- CA-2 : aller-retour de migrations et tête unique ---------------------------------
@@ -142,7 +160,6 @@ async def test_ca3_abonnement_de_o1_jamais_lisible_depuis_o2():
         vu_par_o1 = await service.current_subscription(db, o1_id)
         assert vu_par_o1 is not None and vu_par_o1[0].id == abonnement_id
         assert await service.current_subscription(db, o2_id) is None
-        from sqlalchemy import select
         lignes_o2 = (await db.scalars(select(Subscription).where(Subscription.organizationId == o2_id))).all()
         assert lignes_o2 == []
 

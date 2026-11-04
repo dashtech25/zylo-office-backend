@@ -171,6 +171,41 @@ class CatalogueModuleResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class UpgradePlanRequest(BaseModel):
+    """Corps de `POST /api/v1/admin/modules/{moduleId}/upgrade-plans` (BE-044).
+
+    Le plan est calculé entre deux versions existantes du module ; il n'est jamais exécuté."""
+
+    fromVersion: str = Field(min_length=1, max_length=50)
+    toVersion: str = Field(min_length=1, max_length=50)
+
+
+class CompatibilityEvaluationResponse(BaseModel):
+    """Résultat d'une évaluation de compatibilité (BE-044) : `result` et les `reasons` (motifs)."""
+
+    id: uuid.UUID
+    moduleVersionId: uuid.UUID
+    result: str
+    reasons: list
+    evaluatedAt: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class UpgradePlanResponse(BaseModel):
+    """Plan de mise à jour entre deux versions (BE-044). `forwardOnly` vaut vrai sans retour arrière possible."""
+
+    id: uuid.UUID
+    moduleId: uuid.UUID
+    fromVersion: str
+    toVersion: str
+    steps: list
+    rollbackPossible: bool
+    forwardOnly: bool
+
+    model_config = {"from_attributes": True}
+
+
 class VersionPublieeCatalogue(BaseModel):
     """Version publiée exposée dans une fiche publique (BE-043). Aucune version non publiée."""
 

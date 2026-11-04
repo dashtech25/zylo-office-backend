@@ -6,6 +6,10 @@ MODULE_MANAGE = "modules.module.manage"
 PLATFORM_MODULE_WRITE = "platform.module.write"
 PLATFORM_MODULE_PUBLISH = "platform.module.publish"
 
+# Résolution et lecture des cas de réconciliation d'états incertains (BE-052, QE-MOD-07/16 : code
+# recommandé, attribution par allowlist d'environnement décrite dans `platform_rights.py`).
+PLATFORM_RECONCILIATION_RESOLVE = "platform.reconciliation.resolve"
+
 # Lecture des permissions déclarées par les modules de l'organisation (BE-055, QE-MOD-16 : code
 # recommandé). Accordée au propriétaire à la création de l'organisation (OWNER_DEFAULT_PERMISSIONS).
 ORGANIZATION_MODULE_READ = "organization.module.read"

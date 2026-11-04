@@ -139,8 +139,10 @@ async def test_be009_ca4_identifiant_d_une_autre_organisation_repond_comme_un_in
     de_o2 = await client.get(f"/api/v1/rbac/organizations/{o1}/roles/{role_o2}", headers=headers)
     inexistant = await client.get(f"/api/v1/rbac/organizations/{o1}/roles/{role_inexistant}", headers=headers)
 
+    # Comparaison hors request ID (propre à chaque réponse) : code, message et statut doivent être identiques.
     assert de_o2.status_code == inexistant.status_code == 404
-    assert de_o2.json() == inexistant.json()
+    assert de_o2.json()["error"]["code"] == inexistant.json()["error"]["code"]
+    assert de_o2.json()["error"]["message"] == inexistant.json()["error"]["message"]
     assert o2 not in de_o2.text
 
 

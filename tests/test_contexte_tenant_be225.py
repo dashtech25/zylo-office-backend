@@ -151,7 +151,7 @@ async def test_ca1_tenant_sans_adhesion_active_repond_404(client: AsyncClient, a
     )
     for res in (chemin, entete_seul):
         assert res.status_code == 404, res.text
-        assert res.json()["code"] == "organization_not_found"
+        assert res.json()["error"]["code"] == "organization_not_found"
 
 
 async def test_ca1_tenant_inexistant_et_interdit_repondent_identiquement(client: AsyncClient, acteurs: dict) -> None:
@@ -167,7 +167,7 @@ async def test_ca1_tenant_inexistant_et_interdit_repondent_identiquement(client:
         headers=_entetes(acteurs["intrus"], str(uuid.uuid4())),
     )
     assert interdit.status_code == inexistant.status_code == 404
-    assert interdit.json() == inexistant.json()
+    assert interdit.json()["error"] == inexistant.json()["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +187,7 @@ async def test_ca2_corps_citant_un_autre_tenant_est_refuse(client: AsyncClient, 
             headers=_entetes(acteurs["admin_a"], acteurs["org_a"]),
         )
     assert res.status_code == 404, res.text
-    assert res.json()["code"] == "organization_not_found"
+    assert res.json()["error"]["code"] == "organization_not_found"
 
 
 async def test_ca2_corps_citant_le_meme_tenant_est_accepte(client: AsyncClient, acteurs: dict) -> None:
@@ -250,7 +250,7 @@ async def test_ca3_membre_de_b_ne_lit_pas_les_membres_de_a(client: AsyncClient, 
         headers=_entetes(acteurs["owner_b"], acteurs["org_b"]),
     )
     assert res.status_code == 404, res.text
-    assert res.json()["code"] == "organization_not_found"
+    assert res.json()["error"]["code"] == "organization_not_found"
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +280,7 @@ async def test_ca4_retrait_d_adhesion_revoque_le_contexte(client: AsyncClient, a
         headers=_entetes(membre, acteurs["org_a"]),
     )
     assert apres.status_code == 404, apres.text
-    assert apres.json()["code"] == "organization_not_found"
+    assert apres.json()["error"]["code"] == "organization_not_found"
 
     async with AsyncClient(transport=ASGITransport(app=_application_de_test(app)), base_url="http://test") as ac:
         corps = await ac.post(

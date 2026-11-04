@@ -20,3 +20,6 @@ BILLING_INVOICE_READ = "billing.invoice.read"
 # désignée par son identifiant dans le chemin (GET /organizations/{organization_id}/entitlements).
 # Portée organisation ; accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS.
 ORGANIZATION_ENTITLEMENT_READ = "organization.entitlement.read"
+# BE-075 : lecture interne du catalogue figé (snapshotJson). Aucune permission client
+# directe sur le catalogue : ce code n'est accordé à aucun rôle par défaut.
+BILLING_CATALOGUE_READ = "billing.catalogue.read"

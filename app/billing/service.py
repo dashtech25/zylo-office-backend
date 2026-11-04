@@ -210,6 +210,23 @@ async def list_organization_invoices(db: AsyncSession, organization_id: uuid.UUI
     )).all())
 
 
+async def get_organization_invoice(db: AsyncSession, organization_id: uuid.UUID, invoice_id: uuid.UUID) -> Invoice:
+    """Lit une facture de l'organisation, sans jamais la chercher hors de son périmètre (BE-027).
+
+    La jointure sur `subscription.organizationId` est la seule preuve d'appartenance :
+    une facture d'une autre organisation est indiscernable d'une facture inexistante
+    et renvoie la même 404 `invoice_not_found` (pas d'énumération d'identifiants).
+    Le statut retourné est celui de la base ; aucun paramètre de l'interface n'entre ici.
+    """
+    invoice = await db.scalar(
+        select(Invoice).join(Subscription, Subscription.id == Invoice.subscriptionId)
+        .where(Invoice.id == invoice_id, Subscription.organizationId == organization_id)
+    )
+    if invoice is None:
+        raise AppError(code="invoice_not_found", message="Facture introuvable.", status_code=404)
+    return invoice
+
+
 async def list_invoice_payment_attempts(
     db: AsyncSession, organization_id: uuid.UUID, invoice_id: uuid.UUID,
 ) -> list[PaymentAttempt]:

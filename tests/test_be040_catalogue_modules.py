@@ -23,6 +23,17 @@ BACKEND_ROOT = Path(__file__).resolve().parent.parent
 REVISION_BE040 = "73136cdbf00b"
 
 
+@pytest.fixture(autouse=True)
+async def _pool_neuf_par_test():
+    """Le moteur est un singleton : ses connexions restent liées à la boucle qui les a ouvertes.
+    Un pool neuf évite « attached to a different loop » entre deux tests (même correctif que le
+    fixture `client` du conftest)."""
+    from app.core.database import engine
+
+    await engine.dispose()
+    yield
+
+
 def _erreur_code(exc: pytest.ExceptionInfo) -> str:
     assert isinstance(exc.value, AppError)
     return exc.value.code

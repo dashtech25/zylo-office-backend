@@ -1,3 +1,17 @@
+"""Modèles de facturation du socle : catalogue, versions de prix et abonnements.
+
+Contrat (BE-023) :
+- `Plan` : offre commerciale d'un module (code unique, prix de référence).
+- `PlanVersion` : instantané de prix et d'entitlements, immuable une fois publié.
+  Un abonnement reste rattaché à la version sous laquelle il a été souscrit.
+- `Subscription` : abonnement d'une seule organisation (`organizationId` NOT NULL,
+  refus à l'écriture sinon). Les montants sont en `amountMinor` (entier, unité
+  mineure de la devise) ; `amountCents` n'existe plus que comme colonne legacy
+  de `invoice`, recopiée par la migration c0b7d9a2e511.
+
+Les lectures d'abonnement passent toujours par une organisation (voir
+app/billing/service.py::current_subscription) : aucune requête globale.
+"""
 import uuid
 from datetime import datetime
 
@@ -10,6 +24,7 @@ from app.shared.models import TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class Plan(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Offre du catalogue pour un module. Le prix de référence sert de contrôle de cohérence à get_or_create_plan."""
     __tablename__ = "plan"
     __table_args__ = {"comment": "Offre commerciale pour un module donné (prix, période, fonctionnalités incluses)."}
 
@@ -22,6 +37,7 @@ class Plan(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class Subscription(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Abonnement d'une organisation à un plan. Démarre en `trial` ; `planVersionId` pointe la version souscrite (nullable pour les lignes antérieures à c0b7d9a2e511)."""
     __tablename__ = "subscription"
     __table_args__ = {"comment": "Abonnement d'une organisation à un plan — statut trial/active/expired/cancelled."}
 
@@ -77,7 +93,7 @@ class IdempotencyRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class PlanVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Immutable published price/entitlement snapshot for a catalog plan."""
+    """Instantané immuable de prix et d'entitlements d'un plan (numéro `version` croissant par plan)."""
     __tablename__ = "planVersion"
     __table_args__ = (UniqueConstraint("planId", "version", name="uq_planVersion_plan_version"),)
 

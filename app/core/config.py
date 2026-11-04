@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import model_validator
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Valeurs de repli : elles figurent dans le code et dans `.env.example`, donc
@@ -108,11 +108,24 @@ class Settings(BaseSettings):
     # d'activation) n'est admis qu'en development ; `memory` (boîte de test)
     # n'est admis qu'en test. Voir app/shared/email.py.
     EMAIL_BACKEND: str = "none"
+    # Transport SMTP neutre, jamais activé implicitement. Les credentials sont
+    # fournis uniquement par l'environnement; aucun secret n'est versionné.
+    EMAIL_SMTP_HOST: str | None = None
+    EMAIL_SMTP_PORT: int = 587
+    EMAIL_SMTP_USERNAME: str | None = None
+    EMAIL_SMTP_PASSWORD: SecretStr | None = None
+    EMAIL_SMTP_FROM_ADDRESS: str | None = None
+    EMAIL_SMTP_STARTTLS: bool = True
+    EMAIL_SMTP_TIMEOUT_SECONDS: int = 10
     # Lien transmis au titulaire : `<base>#token=<jeton>`. Le jeton est dans le
     # fragment (non envoyé au serveur, absent des journaux d'accès).
     ACTIVATION_URL_BASE: str = "http://localhost:3001/activer"
     # Durée de validité d'un jeton d'activation (décision T-049 : 72 heures).
     USER_INVITATION_TTL_HOURS: int = 72
+    # Réinitialisation par e-mail, token fragment pour qu'il ne soit pas envoyé
+    # dans les journaux/referers HTTP.
+    PASSWORD_RESET_URL_BASE: str = "http://localhost:3001/forgot-password"
+    PASSWORD_RESET_TTL_MINUTES: int = 30
 
     # Limitation de débit de l'authentification (T-012, docs/questions/securite/
     # limitation-authentification.md). Compteurs d'échecs dans PostgreSQL (table
@@ -141,6 +154,10 @@ class Settings(BaseSettings):
     # Domaine du cookie. None = hôte exact (recommandé : interface et API sur le
     # même site, sans Domain, donc sans partage avec les sous-domaines).
     AUTH_COOKIE_DOMAIN: str | None = None
+    # L'inscription publique n'est pas activée par défaut : la création de
+    # comptes passe par les invitations d'organisation tant que le produit
+    # n'a pas approuvé le libre-service.
+    AUTH_PUBLIC_REGISTRATION_ENABLED: bool = False
     # Fin de la transition (T-037a). Jusqu'à cette date : l'en-tête Authorization
     # est accepté et les jetons restent dans le JSON des réponses d'authentification,
     # pour les clients existants. Après : cookies seuls, aucun jeton dans le corps.
@@ -170,10 +187,21 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _refuse_inscription_publique_hors_environnements_non_productifs(self) -> "Settings":
+        # Le libre-service nécessite une décision produit ainsi qu'un flux de
+        # vérification e-mail; même une variable explicitement à true ne doit
+        # pas pouvoir l'activer en production ou en staging.
+        if self.AUTH_PUBLIC_REGISTRATION_ENABLED and self.ENVIRONMENT not in {ENVIRONMENT_DEVELOPPEMENT, "test"}:
+            raise ConfigurationSecretError(
+                "AUTH_PUBLIC_REGISTRATION_ENABLED=true est admis uniquement en development ou test."
+            )
+        return self
+
+    @model_validator(mode="after")
     def _valide_envoi_des_messages(self) -> "Settings":
         # Intention : un journal d'activation (qui contient le jeton) ne peut
         # jamais être actif hors développement, et une boîte mémoire jamais hors test.
-        backends = {"none", "console", "memory"}
+        backends = {"none", "console", "memory", "smtp"}
         if self.EMAIL_BACKEND not in backends:
             raise ConfigurationSecretError(
                 f"EMAIL_BACKEND inconnu : {self.EMAIL_BACKEND!r} (valeurs admises : none, console, memory)."
@@ -182,6 +210,44 @@ class Settings(BaseSettings):
             raise ConfigurationSecretError("EMAIL_BACKEND=console n'est admis qu'avec ENVIRONMENT=development.")
         if self.EMAIL_BACKEND == "memory" and self.ENVIRONMENT != "test":
             raise ConfigurationSecretError("EMAIL_BACKEND=memory n'est admis qu'avec ENVIRONMENT=test.")
+        if self.EMAIL_BACKEND == "smtp":
+            if self.ENVIRONMENT != "production":
+                raise ConfigurationSecretError("EMAIL_BACKEND=smtp n'est admis qu'avec ENVIRONMENT=production.")
+            if not self.EMAIL_SMTP_HOST or not self.EMAIL_SMTP_FROM_ADDRESS:
+                raise ConfigurationSecretError(
+                    "EMAIL_BACKEND=smtp exige EMAIL_SMTP_HOST et EMAIL_SMTP_FROM_ADDRESS."
+                )
+            if (
+                not self.EMAIL_SMTP_USERNAME
+                or self.EMAIL_SMTP_PASSWORD is None
+                or not self.EMAIL_SMTP_PASSWORD.get_secret_value()
+            ):
+                raise ConfigurationSecretError(
+                    "EMAIL_BACKEND=smtp exige EMAIL_SMTP_USERNAME et EMAIL_SMTP_PASSWORD."
+                )
+            if not self.EMAIL_SMTP_STARTTLS:
+                raise ConfigurationSecretError(
+                    "EMAIL_BACKEND=smtp exige EMAIL_SMTP_STARTTLS=true."
+                )
+            if not (1 <= self.EMAIL_SMTP_PORT <= 65535):
+                raise ConfigurationSecretError("EMAIL_SMTP_PORT doit être entre 1 et 65535.")
+            if not (1 <= self.EMAIL_SMTP_TIMEOUT_SECONDS <= 60):
+                raise ConfigurationSecretError("EMAIL_SMTP_TIMEOUT_SECONDS doit être entre 1 et 60.")
+        if not (1 <= self.PASSWORD_RESET_TTL_MINUTES <= 60):
+            raise ConfigurationSecretError("PASSWORD_RESET_TTL_MINUTES doit être entre 1 et 60.")
+        if self.EMAIL_BACKEND == "smtp":
+            reset_url = urlsplit(self.PASSWORD_RESET_URL_BASE)
+            if reset_url.scheme != "https" or not reset_url.netloc or reset_url.query or reset_url.fragment:
+                raise ConfigurationSecretError(
+                    "Avec EMAIL_BACKEND=smtp, PASSWORD_RESET_URL_BASE doit être une URL HTTPS sans query ni fragment."
+                )
+            # La page frontend canonique est /forgot-password. Un préfixe de
+            # déploiement reste permis (ex. /zylo/forgot-password), mais pas
+            # un autre écran terminal qui rendrait le lien inutilisable.
+            if reset_url.path.rstrip("/").split("/")[-1] != "forgot-password":
+                raise ConfigurationSecretError(
+                    "Avec EMAIL_BACKEND=smtp, PASSWORD_RESET_URL_BASE doit terminer par /forgot-password."
+                )
         return self
 
     @model_validator(mode="after")

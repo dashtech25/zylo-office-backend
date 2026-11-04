@@ -52,7 +52,7 @@ SECRET_FORT_STOCKAGE = "stockage-" + "fedcba9876543210" * 2
 CLE_CHIFFREMENT = "chiffrement-" + "a1b2c3d4e5f60718" * 2
 SECRET_COURT = "trop-court-123"
 MOT_DE_PASSE_BASE = "mdp-" + secrets.token_hex(12)
-SECRET_JWT_MARQUEUR = "marqueur-jwt-" + secrets.token_hex(12)
+SECRET_JWT_MARQUEUR = "marqueur-jwt-" + secrets.token_hex(6)  # 25 caractères : sous le minimum de 32
 
 
 def _env_propre(**valeurs: str | None) -> dict[str, str]:
@@ -108,7 +108,7 @@ def _settings(**environnement: str) -> Settings:
     ],
 )
 def test_demarrage_refuse_quand_un_secret_obligatoire_manque(tmp_path, variables):
-    env = _env_propre(**{k: None for k in VARIABLES_APPLICATION}, **variables)
+    env = _env_propre(**{**{k: None for k in VARIABLES_APPLICATION}, **variables})
     if "ENVIRONMENT" not in variables:
         env.pop("ENVIRONMENT", None)
     res = _importe_configuration(tmp_path, env)
@@ -208,7 +208,7 @@ def test_zylo_office_test_refusee_meme_avec_l_ancien_opt_in():
 def test_base_de_developpement_jamais_base_de_test():
     """La base de test d'exécution ne désigne jamais une base de développement (CA-2)."""
     url = os.environ.get("TEST_DATABASE_URL", "")
-    nom = url.rsplit("/", 1)[-1].split("?")[0]
+    nom = url.split("?", 1)[0].rsplit("/", 1)[-1]
     assert nom.startswith("zylo_t") and nom.endswith("_test"), nom
     assert nom not in {"zylo", "zylo_office", "zylo_dev", "zylo_liquid", "zylo_recette", "zylo_office_test"}
 

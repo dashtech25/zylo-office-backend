@@ -9,3 +9,9 @@ ORGANIZATION_MANAGE = "identity.organization.manage"
 # l'organisation, et par la migration explicite b3c4d5e6f7a8 aux propriétaires
 # existants (jamais par un backfill au démarrage).
 USER_MANAGE = "identity.user.manage"
+
+# BE-014 : lire la liste des membres de l'organisation courante, et en retirer
+# un. Accordées au propriétaire à la création de l'organisation (OWNER_DEFAULT_PERMISSIONS) ;
+# les organisations existantes les reçoivent par `cli.py` (backfill_owner_default_permissions).
+MEMBERS_READ = "organization.members.read"
+MEMBERS_REMOVE = "organization.members.remove"

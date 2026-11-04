@@ -10,7 +10,8 @@ from app.core.security import get_current_user
 from app.identity import service
 from app.identity import invitations
 from app.identity.models import Organization, User
-from app.identity.permissions import ORGANIZATION_MANAGE, USER_MANAGE
+from app.identity import membres
+from app.identity.permissions import MEMBERS_READ, MEMBERS_REMOVE, ORGANIZATION_MANAGE, USER_MANAGE
 from app.identity.schemas import (
     CreatedUserResponse,
     CreateOrganizationRequest,
@@ -22,6 +23,7 @@ from app.identity.schemas import (
     UpdateUserStatusRequest,
     UserStatusResponse,
 )
+from app.rbac.schemas import OrganizationMemberResponse
 from app.rbac.service import get_current_organization_id, require_permission
 
 router = APIRouter()
@@ -97,6 +99,41 @@ async def get_current_organization(
     if organization is None:
         raise AppError(code="organization_not_found", message="Organisation introuvable.", status_code=404)
     return organization
+
+
+@router.get(
+    "/current/members",
+    response_model=list[OrganizationMemberResponse],
+    summary="Lister les membres de l'organisation courante, avec leurs rôles (BE-014)",
+    dependencies=[Depends(require_permission(MEMBERS_READ))],
+)
+async def list_current_members(
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    """Membres de l'organisation validée par la garde BE-009 (`X-Organization-Id`).
+    Refus : 404 si l'utilisateur n'est pas membre, 403 sans `organization.members.read`.
+    Une liste vide ne signifie jamais un refus : le propriétaire est toujours membre."""
+    return await membres.list_members(db, organization_id)
+
+
+@router.delete(
+    "/current/members/{user_id}",
+    status_code=204,
+    summary="Retirer un membre de l'organisation courante (BE-014)",
+    dependencies=[Depends(require_permission(MEMBERS_REMOVE))],
+)
+async def remove_current_member(
+    user_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Retire l'appartenance et les rôles du membre dans l'organisation courante.
+    Refus : 404 si la cible n'est pas membre, 403 si la cible est propriétaire
+    et l'acteur ne l'est pas, 409 `last_owner` si le retrait viderait l'organisation
+    de son dernier propriétaire actif. Détail et audit : `app/identity/membres.py`."""
+    await membres.remove_member(db, organization_id, current_user, user_id)
 
 
 @router.post("", response_model=OrganizationResponse, status_code=201)

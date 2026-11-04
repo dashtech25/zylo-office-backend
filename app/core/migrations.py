@@ -42,6 +42,7 @@ REVISIONS_DESTRUCTIVES: dict[str, str] = {
     "7ffb9473d45e": "upgrade fait TRUNCATE de zyloLiquidFuelProduct : ne jamais rejouer sur une base contenant des données",
     "82fd37bd908f": "upgrade supprime une colonne (tank_mm_alarm_thresholds)",
     "c4d5e6f7a8b9": "upgrade supprime des colonnes vestigiales des prix carburant",
+    "e5f6a7b8c9d0": "upgrade supprime la table operatorAuditLog après reprise de ses lignes dans audit_event (BE-030)",
 }
 
 

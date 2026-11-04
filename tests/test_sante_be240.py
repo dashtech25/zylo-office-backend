@@ -31,7 +31,7 @@ from sqlalchemy.exc import OperationalError
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, get_db
 from app.main import app
-from app.operator.audit_models import OperatorAuditLog
+from app.audit.models import AuditLog
 
 RESEAU_INTERNE_TEST = ["127.0.0.0/8"]
 CHAMPS_COMPOSANT_AUTORISES = {"name", "status"}
@@ -165,11 +165,11 @@ async def test_statut_operateur_avec_droit_liste_les_composants_et_date_de_verif
 
     async with AsyncSessionLocal() as db:
         lignes = list((await db.scalars(
-            select(OperatorAuditLog).where(OperatorAuditLog.requestId == "status-be240-lecture")
+            select(AuditLog).where(AuditLog.request_id == "status-be240-lecture", AuditLog.action.like("operator.%"))
         )).all())
     assert len(lignes) == 1
-    assert lignes[0].action == "status.read"
-    assert lignes[0].outcome == "success"
+    assert lignes[0].action == "operator.status.read"
+    assert lignes[0].changes["outcome"] == "success"
 
 
 async def test_statut_operateur_et_readiness_portent_la_date_de_verification(

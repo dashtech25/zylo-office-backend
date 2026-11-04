@@ -3,7 +3,6 @@ import uuid
 
 from app.audit.models import AuditLog
 from app.core.database import AsyncSessionLocal
-from app.operator.audit_models import OperatorAuditLog
 from sqlalchemy import select
 
 
@@ -77,17 +76,17 @@ async def test_operator_allowlist_is_read_only_and_returns_redacted_metadata(
     assert missing_event.json()["error"]["code"] == "payment_event_not_found"
 
     async with AsyncSessionLocal() as db:
-        audit_rows = list((await db.scalars(select(OperatorAuditLog))).all())
-    by_request_id = {row.requestId: row for row in audit_rows}
+        audit_rows = list((await db.scalars(select(AuditLog).where(AuditLog.action.like("operator.%")))).all())
+    by_request_id = {row.request_id: row for row in audit_rows}
     assert by_request_id["operator-list-audit"].actorUserId == uuid.UUID(me.json()["id"])
-    assert by_request_id["operator-list-audit"].scope == "platform"
-    assert by_request_id["operator-list-audit"].action == "organization.list"
-    assert by_request_id["operator-list-audit"].outcome == "success"
-    assert by_request_id["operator-org-audit"].scope == "organization"
-    assert by_request_id["operator-org-audit"].targetId == uuid.UUID(organization["id"])
-    assert by_request_id["operator-trace-miss"].action == "request_trace.read"
-    assert by_request_id["operator-trace-miss"].outcome == "not_found"
-    assert by_request_id["operator-payment-miss"].outcome == "not_found"
+    assert by_request_id["operator-list-audit"].scopeResourceType == "platform"
+    assert by_request_id["operator-list-audit"].action == "operator.organization.list"
+    assert by_request_id["operator-list-audit"].changes["outcome"] == "success"
+    assert by_request_id["operator-org-audit"].scopeResourceType == "organization"
+    assert by_request_id["operator-org-audit"].scopeResourceId == uuid.UUID(organization["id"])
+    assert by_request_id["operator-trace-miss"].action == "operator.request_trace.read"
+    assert by_request_id["operator-trace-miss"].changes["outcome"] == "not_found"
+    assert by_request_id["operator-payment-miss"].changes["outcome"] == "not_found"
 
 
 async def test_malformed_operator_allowlist_does_not_grant_access(

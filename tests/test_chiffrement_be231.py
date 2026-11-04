@@ -67,7 +67,7 @@ async def test_ca1_rotation_conserve_la_lecture_des_valeurs_anciennes(db, cle_ma
 
     maintenant = dt.datetime.now(dt.timezone.utc)
     version_1 = await rotate_key(db, operateur, maintenant)
-    anneau = await charger_anneau(db, cle_maitre)
+    anneau = await charger_anneau(db)
     stocke_v1 = anneau.chiffrer(CLAIR)
     assert stocke_v1.startswith("enc:v2:1:")
 
@@ -77,7 +77,7 @@ async def test_ca1_rotation_conserve_la_lecture_des_valeurs_anciennes(db, cle_ma
 
     # Lecture de la valeur ancienne après rotation, en mémoire comme après rechargement.
     assert anneau.dechiffrer(stocke_v1) == CLAIR
-    anneau_relu = await charger_anneau(db, cle_maitre)
+    anneau_relu = await charger_anneau(db)
     assert anneau_relu.dechiffrer(stocke_v1) == CLAIR
     # Les nouvelles écritures utilisent la version courante N+1.
     assert anneau_relu.chiffrer(CLAIR).startswith(f"enc:v2:{version_2}:")
@@ -90,7 +90,7 @@ async def test_ca2_revocation_rend_l_ancienne_cle_inoperante(db, cle_maitre, ope
 
     maintenant = dt.datetime.now(dt.timezone.utc)
     version_1 = await rotate_key(db, operateur, maintenant)
-    anneau = await charger_anneau(db, cle_maitre)
+    anneau = await charger_anneau(db)
     stocke_v1 = anneau.chiffrer(CLAIR)
     await rotate_key(db, operateur, maintenant)
     await revoquer_cle(db, operateur, version_1, maintenant, anneau)
@@ -99,7 +99,7 @@ async def test_ca2_revocation_rend_l_ancienne_cle_inoperante(db, cle_maitre, ope
     with pytest.raises(ChiffrementError):
         anneau.dechiffrer(stocke_v1)
     with pytest.raises(ChiffrementError):
-        (await charger_anneau(db, cle_maitre)).dechiffrer(stocke_v1)
+        (await charger_anneau(db)).dechiffrer(stocke_v1)
 
 
 async def test_ca2_version_courante_non_revocable(db, cle_maitre, operateur):
@@ -108,7 +108,7 @@ async def test_ca2_version_courante_non_revocable(db, cle_maitre, operateur):
 
     maintenant = dt.datetime.now(dt.timezone.utc)
     version = await rotate_key(db, operateur, maintenant)
-    anneau = await charger_anneau(db, cle_maitre)
+    anneau = await charger_anneau(db)
     with pytest.raises(AppError) as erreur:
         await revoquer_cle(db, operateur, version, maintenant, anneau)
     assert erreur.value.status_code == 409
@@ -177,7 +177,7 @@ async def test_ca4_revocation_sans_droit_donne_403(db, cle_maitre, operateur, mo
     maintenant = dt.datetime.now(dt.timezone.utc)
     version_1 = await rotate_key(db, operateur, maintenant)
     await rotate_key(db, operateur, maintenant)
-    anneau = await charger_anneau(db, cle_maitre)
+    anneau = await charger_anneau(db)
     monkeypatch.setenv("OPERATOR_READ_USER_IDS", str(uuid.uuid4()))
     with pytest.raises(AppError) as erreur:
         await revoquer_cle(db, SimpleNamespace(id=uuid.uuid4()), version_1, maintenant, anneau)

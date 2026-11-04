@@ -52,6 +52,14 @@ def _fernet() -> Fernet:
     return Fernet(base64.urlsafe_b64encode(derivee))
 
 
+def fernet_maitre() -> Fernet:
+    """Fernet dérivé de `APP_FIELD_ENCRYPTION_KEY`, public pour l'enveloppe des clés (BE-231).
+
+    Utilisé par core/crypto.py pour chiffrer les clés de données stockées en base.
+    Même contrôle de longueur et même dérivation que `chiffrer` : une seule clé maître."""
+    return _fernet()
+
+
 def est_chiffre(valeur: str) -> bool:
     return valeur.startswith(PREFIXE_CHIFFRE)
 

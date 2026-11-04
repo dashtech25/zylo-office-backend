@@ -1,6 +1,7 @@
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,13 +10,16 @@ from app.core.security import get_current_user
 from app.identity.models import User
 from app.identity.permissions import ORGANIZATION_MANAGE
 from app.identity.service import require_organization_member
-from app.modules_registry import declarations, service
+from app.core.idempotency import require_idempotency_key, run_idempotent
+from app.modules_registry import declarations, installation, service
 from app.modules_registry.models import Module, OrganizationModule
-from app.modules_registry.permissions import MODULE_MANAGE, ORGANIZATION_MODULE_READ
+from app.modules_registry.permissions import MODULE_MANAGE, ORGANIZATION_MODULE_INSTALL, ORGANIZATION_MODULE_READ
 from app.modules_registry.schemas import (
     ActivateModuleRequest,
+    InstallModuleRequest,
     InstalledModuleResponse,
     ModuleAccessResponse,
+    ModuleInstallationResponse,
     ModulePermissionResponse,
     ModuleResponse,
     OrganizationModuleResponse,
@@ -82,6 +86,76 @@ async def list_module_permissions(
     """
     lignes = await declarations.lister_permissions_installees(db, module_id)
     return [ModulePermissionResponse.model_validate(ligne) for ligne in lignes]
+
+
+@organizations_modules_router.post(
+    "/{organization_id}/modules/{module_id}/installations",
+    summary="Installer techniquement un module pour une organisation (BE-047)",
+    dependencies=[Depends(require_permission(ORGANIZATION_MODULE_INSTALL))],
+)
+async def installer_module(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    data: InstallModuleRequest,
+    request: Request,
+    cle: str = Depends(require_idempotency_key),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Crée l'installation de la version `moduleVersionId` et la mène à `installed` (ou `failed`).
+
+    Exige `organization.module.install` sur l'organisation du chemin (403 sinon, sans ligne créée).
+    L'en-tête `Idempotency-Key` est obligatoire : le même couple (clé, charge) renvoie la réponse
+    initiale avec le même `operationId`, sans seconde installation (`core/idempotency`).
+    Refus préalables (détaillés dans `modules_registry/installation.py`) : 422
+    `MODULE_VERSION_NOT_PUBLISHED`, 409 `MODULE_VERSION_INCOMPATIBLE`, 409
+    `MODULE_PREREQUISITE_MISSING`, 409 `MODULE_ALREADY_INSTALLED`. Un échec de provisionnement ne
+    fait pas échouer la requête : la réponse 201 porte l'état `failed` et son `lastErrorCode`.
+    """
+
+    async def produire() -> tuple[int, dict]:
+        ligne = await installation.executer_installation(
+            db,
+            organization_id=organization_id,
+            acteur_id=current_user.id,
+            module_id=module_id,
+            module_version_id=data.moduleVersionId,
+            state_version=data.stateVersion,
+            cle_idempotence=cle,
+        )
+        return 201, ModuleInstallationResponse.model_validate(ligne).model_dump(mode="json")
+
+    resultat = await run_idempotent(
+        db,
+        cle=cle,
+        organisation_id=organization_id,
+        acteur_id=current_user.id,
+        methode=request.method,
+        chemin=request.url.path,
+        charge=data.model_dump(mode="json"),
+        produire=produire,
+    )
+    return JSONResponse(status_code=resultat.statut, content=resultat.corps)
+
+
+@organizations_modules_router.get(
+    "/{organization_id}/modules/{module_id}/installations/{operation_id}",
+    response_model=ModuleInstallationResponse,
+    summary="Relire une opération d'installation (BE-047)",
+    dependencies=[Depends(require_permission(ORGANIZATION_MODULE_INSTALL))],
+)
+async def lire_operation_installation(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    operation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> ModuleInstallationResponse:
+    """Renvoie l'état courant de l'opération `operation_id` (cas d'un résultat incertain).
+
+    404 si l'opération n'existe pas pour ce couple (organisation, module), y compris pour une
+    opération d'une autre organisation."""
+    ligne = await installation.lire_installation_par_operation(db, organization_id, module_id, operation_id)
+    return ModuleInstallationResponse.model_validate(ligne)
 
 
 @organizations_modules_router.put(

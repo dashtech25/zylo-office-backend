@@ -231,3 +231,27 @@ class ModulePermissionResponse(BaseModel):
     scope: Literal["organization", "tenant", "platform"]
 
     model_config = {"from_attributes": True}
+
+
+class InstallModuleRequest(BaseModel):
+    """Corps de `POST /organizations/{orgId}/modules/{moduleId}/installations` (BE-047).
+
+    `stateVersion` : version d'état attendue ; 0 pour une organisation sans installation en cours."""
+
+    moduleVersionId: uuid.UUID
+    stateVersion: int = Field(ge=0)
+
+
+class ModuleInstallationResponse(BaseModel):
+    """Installation technique renvoyée par les routes BE-047 (état courant et identifiant d'opération)."""
+
+    id: uuid.UUID
+    organizationId: uuid.UUID
+    moduleId: uuid.UUID
+    moduleVersionId: uuid.UUID
+    state: str
+    stateVersion: int
+    operationId: uuid.UUID
+    lastErrorCode: str | None
+
+    model_config = {"from_attributes": True}

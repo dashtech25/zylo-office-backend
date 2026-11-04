@@ -29,7 +29,7 @@ from app.identity.permissions import (
     USER_MANAGE,
 )
 from app.identity.schemas import CreateOrganizationRequest, UpdateOrganizationRequest, UpdateUserProfileRequest
-from app.modules_registry.permissions import MODULE_MANAGE, ORGANIZATION_MODULE_READ
+from app.modules_registry.permissions import MODULE_MANAGE, ORGANIZATION_MODULE_INSTALL, ORGANIZATION_MODULE_READ
 from app.rbac.models import Role, RolePermission, UserRole
 from app.rbac.permissions import GRANT_MANAGE, ROLE_MANAGE
 from app.rbac.service import assert_active_membership, get_or_create_permission, organisation_introuvable
@@ -53,6 +53,7 @@ OWNER_DEFAULT_PERMISSIONS = [
     (ORGANIZATION_SETTINGS_UPDATE, "identity", "Modifier les réglages de l'organisation courante (nom)."),
     (MODULE_MANAGE, "modules_registry", "Activer/désactiver les modules pour l'organisation."),
     (ORGANIZATION_MODULE_READ, "modules_registry", "Lire les permissions déclarées par les modules de l'organisation (BE-055)."),
+    (ORGANIZATION_MODULE_INSTALL, "modules_registry", "Installer techniquement un module pour l'organisation (BE-047)."),
     (ROLE_MANAGE, "rbac", "Créer des rôles et modifier leurs permissions, attribuer/retirer un rôle."),
     (GRANT_MANAGE, "rbac", "Accorder ou refuser une permission individuelle, révoquer un grant."),
     (AUDIT_LOG_VIEW, "audit", "Consulter le journal d'audit."),

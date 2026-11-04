@@ -126,7 +126,7 @@ async def _cas_403(reponses):
     organisation_id = await _creer_organisation(reponses, proprietaire)
     membre = await _creer_utilisateur(reponses)
     await _ajouter_membre_sans_droit(organisation_id, membre["id"])
-    return await reponses.get("/api/v1/zylo-liquid/stations", headers=_entetes(membre["token"], organisation_id))
+    return await reponses.get("/api/v1/organizations/current/members", headers=_entetes(membre["token"], organisation_id))
 
 
 async def _cas_404(reponses):

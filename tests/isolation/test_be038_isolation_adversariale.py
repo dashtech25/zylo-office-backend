@@ -43,7 +43,8 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 import pytest
-from httpx import AsyncClient
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, update
 
 from app.main import app
@@ -54,6 +55,11 @@ from app.core.config import settings
 from app.identity.models import OrganizationUser
 from app.rbac.models import Permission, Role, RolePermission, UserRole
 from tests.route_inventory import inventaire
+
+# Le monde de test (deux organisations, cinq comptes) est construit une seule fois par module
+# (bcrypt coûte ~0,3 s par hachage) : tous les tests partagent donc une boucle d'événements
+# de module et un client ASGI de module, déclarés ici pour remplacer ceux de conftest.py.
+pytestmark = pytest.mark.asyncio(loop_scope="module")
 
 MOT_DE_PASSE = "TestPassword123!"
 PERMISSION_INFERIEURE = "organization.members.read"
@@ -126,7 +132,14 @@ async def _inscrire(client: AsyncClient, nom: str) -> dict:
     jeton = login.json()["accessToken"]
     me = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {jeton}"})
     assert me.status_code == 200, me.text
-    return {"jeton": jeton, "userId": me.json()["id"], "nom": nom}
+    return {"jeton": jeton, "userId": me.json()["id"], "nom": nom, "email": email}
+
+
+async def _nouvelle_session(client: AsyncClient, email: str) -> str:
+    """Connexion supplémentaire : une famille de session distincte, pour les tests qui la révoquent."""
+    login = await client.post("/api/v1/auth/login", json={"email": email, "password": MOT_DE_PASSE})
+    assert login.status_code == 200, login.text
+    return login.json()["accessToken"]
 
 
 async def _creer_organisation(client: AsyncClient, proprietaire: dict, nom: str) -> str:
@@ -165,7 +178,23 @@ async def _ajouter_membre(organisation_id: str, utilisateur_id: str, permissions
         await db.commit()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
+async def client():
+    """Client ASGI de module : remplace le client par test de conftest.py (même démarrage)."""
+    from app.core.database import engine
+    from app.modules.zylo_liquid.seed import seed_known_permissions
+    from app.modules.zylo_tanker.seed import seed_known_permissions as seed_zylo_tanker_permissions
+    from app.modules_registry.seed import seed_known_modules
+
+    await engine.dispose()
+    await seed_known_modules()
+    await seed_known_permissions()
+    await seed_zylo_tanker_permissions()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+
+
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def monde(client: AsyncClient) -> dict:
     """Deux organisations A et B, chacune avec son propriétaire ; un intrus sans
     appartenance ; dans A, un membre sans rôle et un membre de niveau inférieur
@@ -183,6 +212,17 @@ async def monde(client: AsyncClient) -> dict:
     await _ajouter_membre(org_a, membre_sans_droit["userId"], [])
     await _ajouter_membre(org_a, inferieur["userId"], [PERMISSION_INFERIEURE])
     await _ajouter_membre(org_a, gestionnaire_roles["userId"], [PERMISSION_ROLES])
+
+    # Les modules métier sont activés dans A et B : sinon `module_inactive` masquerait le
+    # contrôle de permission des routes de module (le propriétaire reçoit alors les droits du module).
+    for org, proprietaire in ((org_a, proprietaire_a), (org_b, proprietaire_b)):
+        for code in ("zylo_liquid", "zylo_tanker"):
+            res = await client.post(
+                f"/api/v1/modules/organizations/{org}/activate",
+                json={"moduleCode": code},
+                headers={"Authorization": f"Bearer {proprietaire['jeton']}", "X-Organization-Id": org},
+            )
+            assert res.status_code == 200, res.text
 
     return {
         "a": {"id": org_a, "nom": "Organisation A BE-038", "proprietaire": proprietaire_a},
@@ -250,11 +290,17 @@ async def test_proprietaire_de_a_refuse_sur_b_et_changement_de_contexte(client: 
     (chemin et en-tête), et sur tout changement de contexte entre A et B."""
     org_a, org_b = monde["a"]["id"], monde["b"]["id"]
     jeton_a = monde["a"]["proprietaire"]["jeton"]
-    cas = {
-        "en-tête B, chemin B": (_entetes(jeton_a, org_b), org_b),
-        "en-tête A, chemin B": (_entetes(jeton_a, org_a), org_b),
-        "en-tête B, chemin A": (_entetes(jeton_a, org_b), org_a),
-    }
+    if "{organization_id}" in cle:
+        # Le chemin porte l'organisation : on croise en-tête et chemin pour tester la cohérence.
+        cas = {
+            "en-tête B, chemin B": (_entetes(jeton_a, org_b), org_b),
+            "en-tête A, chemin B": (_entetes(jeton_a, org_a), org_b),
+            "en-tête B, chemin A": (_entetes(jeton_a, org_b), org_a),
+        }
+    else:
+        # Pas d'organisation dans le chemin : seul l'en-tête désigne B. (Un en-tête A avec un
+        # chemin sans organisation est une requête légitime sur A, pas un cas d'isolation.)
+        cas = {"en-tête B": (_entetes(jeton_a, org_b), org_b)}
     for nom, (entetes, chemin_org) in cas.items():
         res = await _appeler(client, cle, entetes, chemin_org)
         assert res.status_code == 404, f"{cle} [{nom}] -> {res.status_code} {res.text[:300]}"
@@ -293,12 +339,12 @@ async def test_administrateur_des_roles_ne_peut_pas_s_accorder_un_grant(client: 
     )
     assert res.status_code == 403, res.text
     assert res.json()["error"]["code"] == CODE_PERMISSION
-    res = await client.post(
-        f"/api/v1/rbac/organizations/{org_a}/user-roles",
-        json={"userId": gestionnaire["userId"], "roleId": str(uuid.uuid4())},
+    res = await client.delete(
+        f"/api/v1/organizations/current/members/{gestionnaire['userId']}/grants/{uuid.uuid4()}",
         headers=entetes,
     )
     assert res.status_code == 403, res.text
+    assert res.json()["error"]["code"] == CODE_PERMISSION
 
 
 # ---------------------------------------------------------------------------
@@ -383,9 +429,10 @@ async def test_jeton_d_acces_expire_est_refuse_sans_fuite(client: AsyncClient, m
 
 async def test_session_revoquee_pendant_l_usage_est_refusee_sans_fuite(client: AsyncClient, monde: dict):
     """CA-4 : une session révoquée (refresh token de la famille révoqué) rend refusé le jeton
-    d'accès encore valide, sur une route qui renverrait normalement la liste des membres."""
+    d'accès encore valide, sur une route qui renverrait normalement la liste des membres.
+    Une session fraîche est utilisée, pour ne pas révoquer celle des autres tests du module."""
     org_a = monde["a"]["id"]
-    jeton = monde["a"]["proprietaire"]["jeton"]
+    jeton = await _nouvelle_session(client, monde["a"]["proprietaire"]["email"])
     avant = await client.get("/api/v1/organizations/current/members", headers=_entetes(jeton, org_a))
     assert avant.status_code == 200, avant.text
     famille = famille_du_jeton_d_acces(jeton)

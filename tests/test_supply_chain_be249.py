@@ -212,7 +212,7 @@ def test_sortie_d_audit_illisible_echoue_fermee(tmp_path):
 # CA-3 : les exceptions expirées bloquent.
 
 def test_exception_expiree_bloque_meme_sans_vulnerabilite(tmp_path, capsys):
-    exceptions = _exceptions(tmp_path, [_exception_valide(expire="2026-10-01")])
+    exceptions = _exceptions(tmp_path, [_exception_valide(date="2026-09-01", expire="2026-10-01")])
     assert supply.main(_argv(tmp_path, exceptions=exceptions)) == 1
     assert "expirée" in capsys.readouterr().out
 
@@ -225,7 +225,7 @@ def test_exception_qui_expire_le_jour_meme_reste_valide(tmp_path):
 
 
 def test_exception_expiree_ne_couvre_plus_la_vulnerabilite(tmp_path):
-    exceptions = _exceptions(tmp_path, [_exception_valide(expire="2026-10-31")])
+    exceptions = _exceptions(tmp_path, [_exception_valide(date="2026-09-01", expire="2026-10-31")])
     assert supply.main(
         _argv(tmp_path, audit=_vulnerabilite_fastapi(tmp_path), exceptions=exceptions)
     ) == 1

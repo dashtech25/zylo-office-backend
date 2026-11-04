@@ -1,0 +1,5 @@
+# Exceptions de vulnérabilités de dépendances (BE-249, CA-2 et CA-3).
+# Chaque [[exception]] est datée, assignée et expire. Champs obligatoires :
+#   id (identifiant de la vulnérabilité), paquet, version (exacte), motif, responsable,
+#   date (ajout, AAAA-MM-JJ), expire (AAAA-MM-JJ, le jour inclus).
+# Une exception expirée bloque le pipeline. Aucune exception active à ce jour.

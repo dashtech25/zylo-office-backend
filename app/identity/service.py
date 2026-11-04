@@ -10,6 +10,7 @@ from app.billing.permissions import SUBSCRIPTION_MANAGE
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.security import get_current_user
+from app.core.versioning import mutation_versionnee
 from app.identity.models import Organization, OrganizationUser, User
 from app.identity.permissions import ORGANIZATION_MANAGE, USER_MANAGE
 from app.identity.schemas import CreateOrganizationRequest, UpdateOrganizationRequest, UpdateUserProfileRequest
@@ -147,12 +148,24 @@ async def update_organization(
     """Seul `name` est modifiable — `Organization` (Core) n'a aucun autre
     champ éditable (pas de logo/téléphone/email/langue/devise : voir l'audit
     fait pour la page Paramètres Zylo Liquid, aucun de ces champs n'existe
-    dans le modèle). `slug` reste immuable (identifiant stable)."""
+    dans le modèle). `slug` reste immuable (identifiant stable).
+
+    Contrôle de version (BE-233) : si `data.version` est fourni et ne correspond
+    plus à la version courante, `mutation_versionnee` lève 409 `version_conflict`
+    avant toute écriture ni trace d'audit. Le droit `ORGANIZATION_MANAGE` est
+    déjà vérifié par la route, donc un refus reste un 403."""
     organization = await db.get(Organization, organization_id)
     if organization is None:
         raise AppError(code="organization_not_found", message="Organisation introuvable.", status_code=404)
     before_name = organization.name
-    organization.name = data.name
+    await mutation_versionnee(
+        db,
+        Organization,
+        organization.id,
+        data.version,
+        {"name": data.name},
+        code_introuvable="organization_not_found",
+    )
     await record_audit_event(
         db,
         organization.id,

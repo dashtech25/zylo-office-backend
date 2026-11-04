@@ -28,7 +28,11 @@ class CreateOrganizationRequest(BaseModel):
 
 
 class UpdateOrganizationRequest(BaseModel):
+    """PATCH /organizations/{id}. `version` (BE-233) est la version relue
+    précédemment : absente, la mutation n'est pas conditionnée ; obsolète, 409."""
+
     name: str = Field(min_length=1, max_length=255)
+    version: int | None = Field(default=None, ge=1)
 
 
 class OrganizationResponse(BaseModel):
@@ -36,6 +40,7 @@ class OrganizationResponse(BaseModel):
     name: str
     slug: str
     status: str
+    version: int
 
     model_config = {"from_attributes": True}
 

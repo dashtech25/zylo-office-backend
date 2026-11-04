@@ -15,3 +15,8 @@ USER_MANAGE = "identity.user.manage"
 # il est accordé au propriétaire à la création de l'organisation, puis par la
 # migration explicite de BE-012 aux propriétaires existants.
 MEMBERS_INVITE = "organization.members.invite"
+# BE-014 : lire la liste des membres de l'organisation courante, et en retirer
+# un. Accordées au propriétaire à la création de l'organisation (OWNER_DEFAULT_PERMISSIONS) ;
+# les organisations existantes les reçoivent par `cli.py` (backfill_owner_default_permissions).
+MEMBERS_READ = "organization.members.read"
+MEMBERS_REMOVE = "organization.members.remove"

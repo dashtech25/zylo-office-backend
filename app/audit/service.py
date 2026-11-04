@@ -26,6 +26,9 @@ TYPES_ACTEUR_AUDIT = ("humain", "service", "systeme")
 # sait qu'une valeur existait, sans jamais la journaliser.
 _CLE_SENSIBLE = re.compile(r"password|passwd|secret|token|hash|cookie|api[_-]?key|mot_?de_?passe", re.IGNORECASE)
 REDACTION = "[masqué]"
+# Clés de carte bancaire (PAN, CVV, CVC, numéro de carte). Utilisé par le
+# chemin administratif BE-122, qui rejette au lieu de masquer.
+_CLE_CARTE = re.compile(r"(?<![a-z])(pan|cvv2?|cvc)(?![a-z])|card_?number|numero_?carte", re.IGNORECASE)
 
 
 def _retirer_secrets(valeur: Any) -> Any:
@@ -65,6 +68,7 @@ async def record_audit_event(
     approval_id: str | None = None,
     visibility: str | None = None,
     data_classification: str | None = None,
+    correlation_id: str | None = None,
 ) -> AuditEvent:
     """Écrit exactement une entrée dans la table unique `audit_event` (BE-007).
 
@@ -117,7 +121,8 @@ async def record_audit_event(
             status_code=500,
         )
 
-    request_id = request_id_ctx.get() or f"sans-requete-{uuid.uuid4()}"
+    # Un identifiant de corrélation explicite (BE-122) prime sur la contextvar.
+    request_id = correlation_id or request_id_ctx.get() or f"sans-requete-{uuid.uuid4()}"
     entry = AuditEvent(
         organizationId=organization_id,
         actorUserId=actor_user_id,

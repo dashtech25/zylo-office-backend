@@ -10,6 +10,7 @@ from app.audit.service import record_audit_event
 from app.billing.models import Subscription, SubscriptionEntitlement
 from app.core.database import get_db
 from app.core.errors import AppError
+from app.modules_registry.etats import etat_module, etat_ouvre_acces
 from app.modules_registry.models import Module, OrganizationModule
 from app.modules_registry.schemas import InstalledModuleResponse
 from app.rbac.models import Permission, Role, RolePermission
@@ -192,6 +193,11 @@ async def deactivate_module(
 
 
 async def is_module_active(db: AsyncSession, organization_id: uuid.UUID, module_code: str) -> bool:
+    """Vrai seulement si le module est `disponible` au registre (etats.py) ET activé pour
+    l'organisation. Un module `absent`, `inconnu` ou `incompatible` n'ouvre jamais l'accès,
+    même si une ligne `organizationModule` est active (BE-021, CA-4)."""
+    if not etat_ouvre_acces(await etat_module(db, module_code)):
+        return False
     result = await db.execute(
         select(OrganizationModule.status).where(
             OrganizationModule.organizationId == organization_id,

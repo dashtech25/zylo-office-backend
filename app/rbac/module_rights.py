@@ -20,6 +20,7 @@ from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.security import get_current_user
 from app.identity.models import User
+from app.modules_registry.etats import etat_depuis_ligne, etat_ouvre_acces
 from app.modules_registry.models import Module, OrganizationModule
 from app.modules_registry.service import is_module_active
 from app.rbac.models import Permission, Role, UserRole
@@ -103,7 +104,10 @@ async def effective_rights_by_module(db: AsyncSession, organization_id: uuid.UUI
 
     result: list[dict] = []
     for module in modules:
-        active = statuses.get(module.code) in ("active", "trial")
+        # Même règle que is_module_active : un état registre non disponible refuse l'accès.
+        active = statuses.get(module.code) in ("active", "trial") and etat_ouvre_acces(
+            etat_depuis_ligne(module.code, module)
+        )
         permission_codes: list[str] = []
         if active:
             for code, permission_module_code in candidates:

@@ -119,21 +119,31 @@ async def test_ca3_isolation_un_utilisateur_ne_change_pas_le_mot_de_passe_d_un_a
     assert await _connexion_possible(client, email_a, NOUVEAU)
 
 
-async def test_ca4_audit_une_entree_sans_ancien_ni_nouveau_mot_de_passe(client: AsyncClient, organization: dict):
+async def test_ca4_audit_une_entree_sans_ancien_ni_nouveau_mot_de_passe(client: AsyncClient):
     """CA-4 : le changement produit exactement une entrée d'audit dans l'organisation
-    de l'utilisateur, et aucune valeur de mot de passe (ancien ni nouveau) n'y figure."""
+    dont le compte est membre, et aucune valeur de mot de passe (ancien ni nouveau) n'y figure.
+
+    L'organisation est créée avec la session du même compte : la fixture `organization`
+    crée une organisation pour un autre utilisateur et ne conviendrait pas ici."""
     email = unique_email()
     session = await _inscrire_et_connecter(client, email, ANCIEN)
-    headers = {"Authorization": f"Bearer {session['accessToken']}", "X-Organization-Id": organization["id"]}
+    entetes = {"Authorization": f"Bearer {session['accessToken']}"}
+    org = await client.post(
+        "/api/v1/organizations",
+        json={"name": "Org BE018", "slug": f"org-be018-{uuid.uuid4().hex[:8]}"},
+        headers=entetes,
+    )
+    assert org.status_code == 201, org.text
+    organization_id = uuid.UUID(org.json()["id"])
 
-    res = await client.post(URL_CHANGEMENT, json={"currentPassword": ANCIEN, "newPassword": NOUVEAU}, headers=headers)
+    res = await client.post(URL_CHANGEMENT, json={"currentPassword": ANCIEN, "newPassword": NOUVEAU}, headers=entetes)
     assert res.status_code == 200, res.text
 
     async with AsyncSessionLocal() as db:
         lignes = (
             await db.execute(
                 select(AuditEvent).where(
-                    AuditEvent.organizationId == uuid.UUID(organization["id"]),
+                    AuditEvent.organizationId == organization_id,
                     AuditEvent.action == ACTION_AUDIT,
                 )
             )

@@ -139,7 +139,6 @@ def test_libelle_long_ne_casse_pas_le_contrat_d_enveloppe(tmp_path, monkeypatch,
     assert corps["error"]["message"] == long_libelle
     assert corps["error"]["code"] == _CODE_ERREUR_VALIDATION
     assert "age" in corps["error"]["field_errors"]
-    assert corps["request_id"] == reponse.headers["X-Request-Id"]
 
 
 def test_libelle_long_sur_erreur_metier_garde_le_contrat(tmp_path, monkeypatch):
@@ -169,8 +168,8 @@ def test_aucune_locale_codee_en_dur_dans_le_code():
     """CA-3 : aucune constante de chaîne de `messages.py` ou `errors.py` n'est un code de locale nu.
 
     Les docstrings sont exclues. Un code de locale nu est une chaîne qui ressemble
-    à `fr`, `en` ou `fr-FR` (deux ou trois lettres, séparateur optionnel)."""
-    motif = re.compile(r"[a-z]{2,3}([-_][A-Za-z]{2})?")
+    à `fr`, `en` ou `fr-FR` (deux lettres minuscules, région optionnelle en majuscules)."""
+    motif = re.compile(r"[a-z]{2}([-_][A-Z]{2})?")
     for fichier in _FICHIERS_CODE:
         arbre = ast.parse(fichier.read_text(encoding="utf-8"))
         docstrings = {

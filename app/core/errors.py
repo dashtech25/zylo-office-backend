@@ -103,10 +103,14 @@ def _error_response(
         getattr(getattr(request, "state", None), "request_id", None)
         or request_id_ctx.get()
     )
+    correlation_id = (
+        getattr(getattr(request, "state", None), "correlation_id", None)
+        or request_id
+    )
     response_headers = dict(headers or {})
     if request_id:
         response_headers["X-Request-Id"] = request_id
-        response_headers["X-Correlation-Id"] = request_id
+        response_headers["X-Correlation-Id"] = correlation_id
     return JSONResponse(
         status_code=status_code,
         content={

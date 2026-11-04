@@ -7,8 +7,10 @@ sa seule raison, sans faire échouer la collecte du module.
 """
 
 import asyncio
+import io
 import json
 import logging
+import sys
 
 import httpx
 import pytest
@@ -24,24 +26,26 @@ TENANT_BRUT = "7f3c9e2a-1111-4b5e-9d00-224224224224"
 
 
 @pytest.fixture
-def journal(capsys):
-    """Installe le journal applicatif (setup_logging) sur la sortie capturée,
-    puis restaure les gestionnaires et le niveau du logger racine."""
+def journal(monkeypatch):
+    """Installe le journal applicatif (setup_logging) sur un tampon dédié, pour
+    lire exactement les lignes émises ; restaure racine et stdout ensuite."""
     from app.core.logging import setup_logging
 
+    tampon = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", tampon)
     racine = logging.getLogger()
     anciens_gestionnaires, ancien_niveau = list(racine.handlers), racine.level
     setup_logging()
     try:
-        yield capsys
+        yield tampon
     finally:
         racine.handlers = anciens_gestionnaires
         racine.setLevel(ancien_niveau)
 
 
-def _lignes_json(capsys) -> list[dict]:
-    """Relit chaque ligne JSON émise sur stdout depuis le dernier readouterr()."""
-    sortie = capsys.readouterr().out
+def _lignes_json(tampon) -> list[dict]:
+    """Relit chaque ligne JSON émise dans le tampon du journal."""
+    sortie = tampon.getvalue()
     return [json.loads(ligne) for ligne in sortie.splitlines() if ligne.startswith("{")]
 
 
@@ -127,7 +131,7 @@ async def test_redaction_retire_mot_de_passe_et_email_des_journaux(journal):
         extra={"password": MOT_DE_PASSE_FACTICE, "email": EMAIL_FACTICE},
     )
 
-    sortie = journal.readouterr().out
+    sortie = journal.getvalue()
     assert MOT_DE_PASSE_FACTICE not in sortie
     assert EMAIL_FACTICE not in sortie
     assert "connexion" in sortie
@@ -152,7 +156,7 @@ async def test_identifiant_tenant_brut_absent_des_journaux_plateforme(journal):
         "acces_organisation", extra={"tenantId": TENANT_BRUT}
     )
 
-    sortie = journal.readouterr().out
+    sortie = journal.getvalue()
     assert TENANT_BRUT not in sortie
     assert pseudonyme_tenant(TENANT_BRUT) in sortie
 

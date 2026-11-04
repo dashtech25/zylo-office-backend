@@ -22,7 +22,7 @@ from sqlalchemy.engine import Engine
 from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.core.logging import request_id_ctx
+from app.core.logging import correlation_id_ctx, request_id_ctx
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
@@ -40,6 +40,18 @@ def _request_id(headers) -> str:
         if candidate is not None and _REQUEST_ID_PATTERN.fullmatch(candidate):
             return candidate
     return str(uuid.uuid4())
+
+
+def _correlation_id(headers, request_id: str) -> str:
+    """Retient le X-Correlation-Id client s'il respecte le motif, sinon reprend
+    le request_id (contrat BE-001 : une requête sans correlation garde un seul
+    identifiant visible). Un X-Correlation-Id distinct du X-Request-Id donne
+    donc un correlationId distinct, propagé à travers les tâches et intégrations
+    de la requête (BE-224, CA-1)."""
+    candidate = headers.get("x-correlation-id")
+    if candidate is not None and _REQUEST_ID_PATTERN.fullmatch(candidate):
+        return candidate
+    return request_id
 
 
 class RequestIdMiddleware:
@@ -68,8 +80,13 @@ class RequestIdMiddleware:
         # est extérieur aux middlewares applicatifs. Le garder dans le scope
         # permet au gestionnaire d'erreur externe de le récupérer même après
         # la sortie de cette contextvar.
+        correlation_id = _correlation_id(request.headers, request_id)
         scope.setdefault("state", {})["request_id"] = request_id
+        scope["state"]["correlation_id"] = correlation_id
         token = request_id_ctx.set(request_id)
+        # Copiée par les tâches asynchrones créées pendant la requête et lue
+        # par les appels d'intégration : même correlationId de bout en bout.
+        correlation_token = correlation_id_ctx.set(correlation_id)
 
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
@@ -81,13 +98,14 @@ class RequestIdMiddleware:
                     if name.lower() not in (b"x-request-id", b"x-correlation-id")
                 ]
                 headers.append((b"x-request-id", request_id.encode()))
-                headers.append((b"x-correlation-id", request_id.encode()))
+                headers.append((b"x-correlation-id", correlation_id.encode()))
                 message = {**message, "headers": headers}
             await send(message)
 
         try:
             await self.app(scope, receive, send_wrapper)
         finally:
+            correlation_id_ctx.reset(correlation_token)
             request_id_ctx.reset(token)
 
 

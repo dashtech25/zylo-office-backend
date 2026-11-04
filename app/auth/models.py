@@ -48,7 +48,7 @@ class LoginAttempt(UUIDPrimaryKeyMixin, Base):
 class PasswordResetToken(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Jeton de récupération à usage unique, empreinte SHA-256 uniquement."""
 
-    __tablename__ = "passwordResetToken"
+    __tablename__ = "password_reset_token"
     __table_args__ = (
         Index(
             "uq_passwordResetToken_open_per_user",

@@ -1,4 +1,20 @@
-"""Flux de récupération de compte par jeton e-mail à usage unique."""
+"""Récupération de compte par jeton e-mail à usage unique (BE-019).
+
+Parcours :
+1. `prepare_password_reset` : pour un compte actif et un canal e-mail configuré,
+   crée un jeton aléatoire, ne conserve que son empreinte SHA-256 dans la table
+   `password_reset_token`, et révoque les jetons encore ouverts du compte.
+2. Le routeur (`app/auth/router.py`) répond toujours par la même réponse 202,
+   que le compte existe ou non ; l'envoi se fait après le commit via
+   `deliver_reset_message`, qui avale toute erreur SMTP (aucune fuite au demandeur).
+3. `confirm_password_reset` : valide le jeton (non consommé, non révoqué, non
+   expiré, compte actif), applique la politique de mot de passe, consomme le
+   jeton de façon atomique, change le mot de passe, révoque les sessions et
+   les autres jetons ouverts, puis écrit une entrée d'audit sans secret.
+
+Aucune permission n'est requise. Un jeton consommé, expiré, révoqué ou dont le
+compte n'est plus actif est refusé par le même code `password_reset_invalid`.
+"""
 
 import hashlib
 import logging
@@ -14,7 +30,8 @@ from app.auth.politique_mot_de_passe import PolitiqueMotDePasseErreur, erreur_ap
 from app.auth.service import revoque_sessions
 from app.core.config import settings
 from app.core.errors import AppError
-from app.identity.models import User
+from app.audit.service import record_audit_event
+from app.identity.models import OrganizationUser, User
 from app.shared.email import EmailMessage, EmailSender
 
 logger = logging.getLogger("zylo_office.security")
@@ -24,6 +41,7 @@ MESSAGE_PUBLIC = (
     "des instructions seront envoyées."
 )
 MESSAGE_EMAIL = "Réinitialisation du mot de passe Zylo Office"
+ACTION_AUDIT_REINITIALISATION = "auth.password_reset.completed"
 
 
 def _empreinte(jeton: str) -> str:
@@ -95,6 +113,16 @@ async def deliver_reset_message(sender: EmailSender, message: EmailMessage) -> N
 
 
 async def confirm_password_reset(db: AsyncSession, token: str, new_password: str) -> None:
+    """Consomme le jeton et définit le nouveau mot de passe (CA-2, CA-3, CA-5).
+
+    Lève `AppError(password_reset_invalid, 400)` si le jeton est inconnu, consommé,
+    révoqué, expiré, ou si son compte n'est plus actif. Le jeton n'agit que sur
+    le compte qui en est propriétaire : aucun identifiant de compte n'est accepté.
+    Lève l'erreur de politique de mot de passe sans consommer le jeton.
+    L'audit `auth.password_reset.completed` est écrit une fois par organisation
+    rattachée au compte ; un compte sans rattachement n'a donc pas d'entrée
+    d'audit (le journal exige une organisation).
+    """
     now = datetime.now(timezone.utc)
     token_row = await db.scalar(
         select(PasswordResetToken).where(
@@ -149,6 +177,22 @@ async def confirm_password_reset(db: AsyncSession, token: str, new_password: str
     user.hashedPassword = hash_password(new_password)
     user.mustChangePassword = False
     await revoque_sessions(db, user.id)
+    # Audit sans mot de passe, jeton ni empreinte : seul l'événement est journalisé.
+    # Le journal exige une organisation ; une entrée est écrite par organisation
+    # où l'utilisateur est rattaché, dans la même transaction que le changement.
+    organisations = (
+        await db.scalars(select(OrganizationUser.organizationId).where(OrganizationUser.userId == user.id))
+    ).all()
+    for organization_id in organisations:
+        await record_audit_event(
+            db,
+            organization_id,
+            user.id,
+            action=ACTION_AUDIT_REINITIALISATION,
+            entity_type="User",
+            entity_id=user.id,
+            summary="Réinitialisation du mot de passe effectuée par jeton de récupération",
+        )
     await db.execute(
         update(PasswordResetToken)
         .where(

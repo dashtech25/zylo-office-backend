@@ -26,7 +26,7 @@ MESSAGE = b"credential-be230"
 MOTIFS_SECRETS = [
     re.compile(r"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     re.compile(r"AKIA[0-9A-Z]{16}"),
-    re.compile(r"(JWT_SECRET|SECRET_KEY|PASSWORD|ENCRYPTION_KEY|SIGNED_URL_SECRET)\s*[=:]\s*[\"']?([A-Za-z0-9+/_\-]{24,})"),
+    re.compile(r"(JWT_SECRET|SECRET_KEY|PASSWORD|ENCRYPTION_KEY|SIGNED_URL_SECRET)[ \t]*[=:][ \t]*[\"']?([A-Za-z0-9+/=\-]{24,})"),
 ]
 # Valeurs publiques de repli documentées (core/config.py) : admises par design,
 # jamais utilisables hors développement (refus au démarrage, BE-221).
@@ -37,16 +37,25 @@ VALEURS_PUBLIQUES_DOCUMENTEES = {"changeme-generate-a-real-random-secret", "chan
 async def db():
     from sqlalchemy import delete
 
-    from app.core.database import AsyncSessionLocal
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+
     from app.operator.secrets_models import SecretRegistry
 
-    async with AsyncSessionLocal() as session:
-        # Registre vidé : le contrôle de démarrage lit toutes les lignes obligatoires.
-        await session.execute(delete(SecretRegistry))
-        await session.commit()
-        yield session
-        await session.execute(delete(SecretRegistry))
-        await session.commit()
+    # Moteur propre à chaque test (NullPool) : le moteur partagé de l'application
+    # garde des connexions liées à une autre boucle d'événements pytest-asyncio.
+    moteur = create_async_engine(os.environ["DATABASE_URL"], poolclass=NullPool)
+    try:
+        async with async_sessionmaker(bind=moteur, expire_on_commit=False)() as session:
+            # Registre vidé : le contrôle de démarrage lit toutes les lignes obligatoires.
+            await session.execute(delete(SecretRegistry))
+            await session.commit()
+            yield session
+            await session.rollback()
+            await session.execute(delete(SecretRegistry))
+            await session.commit()
+    finally:
+        await moteur.dispose()
 
 
 async def _inserer_secret(db, nom: str, *, obligatoire: bool, expire_le=None):

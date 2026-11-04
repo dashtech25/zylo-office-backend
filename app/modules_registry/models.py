@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -17,6 +17,11 @@ class Module(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     version: Mapped[str] = mapped_column(String(50), nullable=False, default="0.1.0")
+    # Version du contrat de manifeste (format non défini, QE-SOC-19). Hors de
+    # VERSIONS_MANIFESTE_SUPPORTEES, le module passe à l'état `incompatible` (etats.py).
+    manifestVersion: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1", comment="Version du contrat de manifeste du module."
+    )
 
 
 class OrganizationModule(UUIDPrimaryKeyMixin, TimestampMixin, Base):

@@ -60,6 +60,7 @@ async def test_operator_allowlist_is_read_only_and_returns_redacted_metadata(
             action="billing.invoice.create", entityType="Invoice", entityId=uuid.uuid4(),
             summary=f"Invoice created (request_id={request_id}) private-person@example.test",
             changes={"email": "private-person@example.test"},
+            request_id=request_id, eventId=uuid.uuid4().hex,
         ))
         await db.commit()
     persisted_trace = await client.get(f"/api/v1/operator/requests/{request_id}", headers=headers)

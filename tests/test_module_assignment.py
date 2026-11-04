@@ -141,7 +141,7 @@ async def _module_assignments(org_id: str, user_id: str, module_code: str) -> in
 async def _audit_actions(org_id: str) -> list[str]:
     async with AsyncSessionLocal() as db:
         rows = await db.execute(
-            text('SELECT action FROM "auditLog" WHERE "organizationId" = :org'),
+            text('SELECT action FROM audit_event WHERE "organizationId" = :org'),
             {"org": uuid.UUID(org_id)},
         )
         return [r[0] for r in rows.all()]

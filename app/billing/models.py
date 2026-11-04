@@ -354,3 +354,28 @@ class ConsentRecord(Base):
     scope: Mapped[str] = mapped_column(String(30), nullable=False, comment="Périmètre du consentement (payeur, tenant, beneficiaire).")
     recordedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="Heure d'enregistrement serveur.")
     correctionOfId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("consent_record.id"), nullable=True, index=True, comment="Entrée d'origine corrigée, nulle hors correction.")
+
+
+class PriceRule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Règle de prix, devise et taxe d'un objet tarifé pour un scénario et un tenant (BE-078).
+
+    Une ligne par triplet (`organizationId`, `objectCode`, `scenario`). Les colonnes
+    `amountMinor`, `currency` et `taxRateBps` sont NULLABLE : une règle partiellement
+    saisie existe mais bloque la résolution, avec le code d'erreur de la colonne
+    manquante (PRICE, CURRENCY ou TAX_NOT_CONFIGURED). Aucune valeur n'est insérée
+    par défaut : le contenu vient de la finance (QE-FAC-06, QE-FAC-26).
+    `objectCode` référence le code de l'offre (`plan.code`) ; `scenario` reste libre
+    tant que la liste des scénarios n'est pas fixée (QE-FAC-10).
+    """
+    __tablename__ = "price_rule"
+    __table_args__ = (
+        UniqueConstraint("organizationId", "objectCode", "scenario", name="uq_price_rule_org_objet_scenario"),
+        {"comment": "Règle de prix, devise et taxe par tenant, objet et scénario (BE-078). Valeurs non définies."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True, comment="Tenant propriétaire de la règle.")
+    objectCode: Mapped[str] = mapped_column(String(100), ForeignKey("plan.code"), nullable=False, comment="Code de l'offre tarifée.")
+    scenario: Mapped[str] = mapped_column(String(50), nullable=False, comment="Scénario de tarification (valeurs NON DÉFINI, QE-FAC-10).")
+    amountMinor: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="Montant en unités mineures ; NULL = non configuré.")
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True, comment="Devise ISO ; NULL = non configurée.")
+    taxRateBps: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="Taux de taxe en points de base ; NULL = non configuré.")

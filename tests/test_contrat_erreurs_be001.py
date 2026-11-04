@@ -186,7 +186,7 @@ async def test_correlation_id_client_valide_est_repris(client):
     assert reponse.headers["X-Correlation-Id"] == identifiant
 
 
-@pytest.mark.parametrize("identifiant_invalide", ["x" * 129, "espace interdit", "accent-é"])
+@pytest.mark.parametrize("identifiant_invalide", ["x" * 129, "espace interdit", "chemin/interdit"])
 async def test_request_id_client_invalide_remplace_par_uuid(client, identifiant_invalide):
     async with client:
         reponse = await client.get("/api/v1/health", headers={"X-Request-Id": identifiant_invalide})

@@ -76,6 +76,44 @@ async def list_audit_logs(
 
 
 @organization_audit_router.get(
+    "/{organization_id}/audit",
+    response_model=Page[AuditLogResponse],
+    dependencies=[Depends(require_organization_member)],
+    summary="Consulter le journal d'audit d'une organisation (lecture seule, BE-260)",
+)
+async def list_organization_audit(
+    organization_id: uuid.UUID,
+    actionPrefix: str | None = None,
+    scopeResourceType: str | None = None,
+    scopeResourceId: uuid.UUID | None = None,
+    actorUserId: uuid.UUID | None = None,
+    pagination: PaginationParams = Depends(),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    """Journal `audit_event` de l'organisation désignée par le chemin (BE-260).
+
+    Route cible de la définition : `GET /api/v1/organizations/{organization_id}/audit`
+    (nommage recommandé, NON DÉFINI dans les sources, QE-FON-16).
+
+    Contrat :
+    - l'appartenance active à l'organisation du chemin est exigée par
+      `require_organization_member` (T-010) ;
+    - le droit `audit.log.view` est exigé par `service.list_audit_logs`, qui
+      renvoie 403 `permission_denied` sans permission ni portée visible ;
+    - aucune ligne d'une autre organisation n'est renvoyée : le filtre
+      `organizationId` du service s'applique au chemin ;
+    - lecture seule : aucune méthode d'écriture n'est exposée.
+
+    Même logique que `GET /organizations/current/audit-logs` (BE-033) : seul
+    le mode de désignation de l'organisation change (chemin au lieu d'en-tête)."""
+    return await _page_de_journal(
+        db, organization_id, current_user.id, pagination,
+        actionPrefix, scopeResourceType, scopeResourceId, actorUserId,
+    )
+
+
+@organization_audit_router.get(
     "/current/audit-logs",
     response_model=Page[AuditLogResponse],
     summary="Consulter le journal d'audit de l'organisation courante (lecture seule)",

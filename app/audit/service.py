@@ -145,6 +145,65 @@ async def record_audit_event(
     return entry
 
 
+async def record_sensitive_action(
+    db: AsyncSession,
+    organization_id: uuid.UUID | None,
+    actor_user_id: uuid.UUID | None,
+    action: str,
+    entity_type: str,
+    entity_id: uuid.UUID | None,
+    summary: str,
+    justification: str | None,
+    changes: dict | None = None,
+    scope_resource_type: str | None = None,
+    scope_resource_id: uuid.UUID | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    *,
+    approval_id: str | None = None,
+) -> AuditEvent:
+    """Journalise une action sensible (BE-260) : exactement une ligne `audit_event`,
+    écrite dans la transaction de l'action (appelant responsable du commit).
+
+    Contrat :
+    - `justification` est obligatoire : absente, vide ou blanche, l'action est
+      refusée par `AppError` `justification_requise` (HTTP 422) AVANT toute
+      écriture, donc sans ligne (CA-2). Le motif est gardé sans transformation
+      au-delà de la suppression des espaces de bord ;
+    - le motif est stocké dans la colonne `reason` de BE-007 (BE-260 n'ajoute
+      aucune colonne, QE-FON-15) ;
+    - le résultat est toujours `success` : une action refusée ou en erreur se
+      journalise avec `record_audit_event(result=...)`, pas ici ;
+    - la validation des autres paramètres (organisation, acteur) reste celle de
+      `record_audit_event`, appelée ensuite.
+
+    Piège évité : vérifier la justification avant `record_audit_event` garantit
+    qu'aucune entrée partielle ne peut exister pour une action sans motif."""
+    motif = (justification or "").strip()
+    if not motif:
+        raise AppError(
+            code="justification_requise",
+            message="Action sensible refusée : une justification est obligatoire.",
+            status_code=422,
+        )
+    return await record_audit_event(
+        db,
+        organization_id,
+        actor_user_id,
+        action,
+        entity_type,
+        entity_id,
+        summary,
+        changes=changes,
+        scope_resource_type=scope_resource_type,
+        scope_resource_id=scope_resource_id,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        reason=motif,
+        approval_id=approval_id,
+    )
+
+
 async def _audit_visibility(db: AsyncSession, organization_id: uuid.UUID, user_id: uuid.UUID) -> tuple[bool, set[tuple[str, uuid.UUID]]]:
     """Retourne (voit_tout, ensemble_de_portees_visibles) — §17 du document
     d'architecture : réutilise exactement le moteur de résolution des

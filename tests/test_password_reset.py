@@ -63,10 +63,12 @@ async def test_reset_compte_actif_reponse_neutre_token_hache_usage_unique_et_ses
     delivered = next(message for message in memory_outbox() if message.to == user["email"])
     assert re.search(r"https?://[^\s]+/forgot-password#token=", delivered.body)
     async with AsyncSessionLocal() as db:
-        rows = list((await db.scalars(select(PasswordResetToken))).all())
+        user_row = await db.scalar(select(User).where(User.email == user["email"]))
+        rows = list((await db.scalars(
+            select(PasswordResetToken).where(PasswordResetToken.userId == user_row.id)
+        )).all())
         assert len(rows) == 1
         row = rows[0]
-        user_row = await db.scalar(select(User).where(User.email == user["email"]))
         assert row.userId == user_row.id
         assert row.tokenHash == hashlib.sha256(token.encode()).hexdigest()
         assert row.tokenHash != token
@@ -81,9 +83,11 @@ async def test_reset_compte_actif_reponse_neutre_token_hache_usage_unique_et_ses
     assert confirm.status_code == 204
     assert confirm.content == b""
     async with AsyncSessionLocal() as db:
-        row = (await db.scalars(select(PasswordResetToken))).one()
-        assert row.usedAt is not None
         user_row = await db.scalar(select(User).where(User.email == user["email"]))
+        row = (await db.scalars(
+            select(PasswordResetToken).where(PasswordResetToken.userId == user_row.id)
+        )).one()
+        assert row.usedAt is not None
         refresh = await db.scalar(select(RefreshToken).where(RefreshToken.userId == user_row.id))
         assert refresh.revokedAt is not None
 

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.service import record_audit_event
 from app.billing.errors import BillingErrorCode, billing_error
 from app.billing.idempotency import empreinte_portee, idempotent_command, portee_idempotence
+from app.billing import entitlements as calcul_entitlements
 from app.billing.models import Invoice, PaymentAttempt, Plan, PlanVersion, Subscription, SubscriptionEntitlement
 from app.core.errors import AppError
 
@@ -122,12 +123,7 @@ async def create_trial_subscription(
     )
     db.add(subscription)
     await db.flush()
-    for entitlement_code in version.entitlementCodes:
-        db.add(SubscriptionEntitlement(
-            organizationId=organization_id, subscriptionId=subscription.id,
-            moduleCode=plan.moduleCode, entitlementCode=entitlement_code,
-            status="active", startsAt=now, endsAt=subscription.endDate,
-        ))
+    await calcul_entitlements.attribuer_entitlements_offre(db, subscription, now=now)
     await record_audit_event(
         db, organization_id, actor_user_id, action="billing.subscription.trial.create",
         entity_type="Subscription", entity_id=subscription.id,

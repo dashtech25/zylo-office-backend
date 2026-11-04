@@ -66,8 +66,10 @@ def routes_de_test():
 
 
 @pytest.fixture
-def client_sans_relance():
-    """Client sur l'application réelle : un 500 arrive comme une réponse HTTP."""
+async def client_sans_relance(client):
+    """Client sur l'application réelle : un 500 arrive comme une réponse HTTP.
+    Dépend de `client` (conftest) pour le seed des modules et des permissions,
+    et partage sa boucle d'événements."""
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     return httpx.AsyncClient(transport=transport, base_url="http://test")
 
@@ -133,11 +135,12 @@ async def test_erreur_403_suit_l_enveloppe_complete(client_sans_relance, test_ci
     async with client_sans_relance as client:
         proprietaire = await _creer_utilisateur(client)
         org = await _creer_organisation(client, proprietaire)
-        await client.post(
+        activation = await client.post(
             f"/api/v1/modules/organizations/{org}/activate",
             json={"moduleCode": "zylo_liquid"},
             headers=_entetes(proprietaire, org),
         )
+        assert activation.status_code == 200, activation.text
         membre = await _creer_utilisateur(client)
         await _ajouter_membre_sans_droit(org, membre["id"])
 
@@ -172,7 +175,7 @@ async def test_erreur_500_suit_l_enveloppe_et_ne_fuit_rien(client_sans_relance, 
     assert journal and getattr(journal[-1], "request_id", None) == corps["request_id"]
 
 
-async def test_request_id_client_est_reutilise_sur_une_erreur(client_sans_relance, test_city):
+async def test_request_id_client_est_reutilise_sur_une_erreur(client_sans_relance):
     """CA-2 : un X-Request-Id client valide est repris dans l'enveloppe d'erreur."""
     identifiant = f"be220-{uuid.uuid4().hex[:12]}"
     async with client_sans_relance as client:

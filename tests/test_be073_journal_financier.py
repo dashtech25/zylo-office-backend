@@ -40,7 +40,7 @@ async def _id_utilisateur(email: str) -> uuid.UUID:
 async def _entrees(organization_id: str, action: str) -> list[dict]:
     async with AsyncSessionLocal() as db:
         lignes = (await db.execute(text(
-            'SELECT id, "organizationId", action, "entityType", "entityId", scope_resource_type, '
+            'SELECT id, "organizationId", action, "entityType", "entityId", "scopeResourceType", '
             '"approvalId", reason, changes, summary FROM audit_event '
             'WHERE "organizationId" = :org AND action = :action'
         ).bindparams(org=uuid.UUID(organization_id), action=action))).mappings().all()
@@ -83,7 +83,7 @@ async def test_be073_ca1_geste_sensible_ecrit_exactement_une_entree(client: Asyn
     ligne = lignes[0]
     assert ligne["entityType"] == "Subscription"
     assert ligne["entityId"] is not None
-    assert ligne["scope_resource_type"] == "payeur"
+    assert ligne["scopeResourceType"] == "payeur"
     assert ligne["reason"] == "Montée en gamme"
     assert ligne["approvalId"] == str(approbateur)
     assert ligne["changes"]["before"] == {"planCode": "essentiel"}

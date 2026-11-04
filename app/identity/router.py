@@ -7,6 +7,7 @@ from app.auth.schemas import UserResponse
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.security import get_current_user
+from app.identity import cycle_de_vie
 from app.identity import service
 from app.identity import invitations
 from app.identity.models import Organization, User
@@ -158,6 +159,68 @@ async def update_current_settings(
     transaction que la mutation. Le service est partagé avec PATCH /organizations/{id}.
     """
     return await service.update_organization(db, str(organization_id), current_user.id, data)
+
+
+@router.post(
+    "/current/suspension",
+    response_model=OrganizationResponse,
+    summary="Suspendre l'organisation courante : active vers suspended (BE-036)",
+)
+async def suspend_current_organization(
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_permission(ORGANIZATION_MANAGE)),
+) -> Organization:
+    """Passe l'organisation courante de `active` à `suspended`.
+
+    Ordre des contrôles : session (401), appartenance (404), permission
+    `identity.organization.manage` (403, rien n'est écrit), puis transition
+    (409 `organization_transition_invalide` si le statut n'est pas `active`).
+    Écrit l'audit `identity.organization.suspend`. Ne touche ni à l'abonnement
+    ni à la facturation (QE-SOC-11). Logique : `cycle_de_vie.transitionner_organisation`.
+    """
+    return await cycle_de_vie.transitionner_organisation(db, organization_id, current_user.id, "suspension")
+
+
+@router.post(
+    "/current/reactivation",
+    response_model=OrganizationResponse,
+    summary="Réactiver l'organisation courante : suspended vers active (BE-036)",
+)
+async def reactivate_current_organization(
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_permission(ORGANIZATION_MANAGE)),
+) -> Organization:
+    """Passe l'organisation courante de `suspended` à `active`.
+
+    Mêmes contrôles et ordre que la suspension (401, 404, 403, puis 409 si le
+    statut n'est pas `suspended`). Écrit l'audit `identity.organization.reactivate`.
+    Logique : `cycle_de_vie.transitionner_organisation`.
+    """
+    return await cycle_de_vie.transitionner_organisation(db, organization_id, current_user.id, "reactivation")
+
+
+@router.post(
+    "/current/closure",
+    response_model=OrganizationResponse,
+    summary="Clôturer l'organisation courante : active ou suspended vers closed (BE-036)",
+)
+async def close_current_organization(
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_permission(ORGANIZATION_MANAGE)),
+) -> Organization:
+    """Clôture l'organisation courante depuis `active` ou `suspended`.
+
+    `closed` est terminal : toute nouvelle transition renvoie 409
+    `organization_transition_invalide`. Mêmes contrôles que la suspension.
+    Écrit l'audit `identity.organization.close`. Logique : `cycle_de_vie.transitionner_organisation`.
+    """
+    return await cycle_de_vie.transitionner_organisation(db, organization_id, current_user.id, "closure")
 
 
 @router.get(

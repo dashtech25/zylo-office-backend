@@ -196,6 +196,13 @@ class Settings(BaseSettings):
     # que si l'adresse du pair direct figure dans cette liste. Vide = aucun proxy.
     AUTH_RATE_LIMIT_TRUSTED_PROXIES: list[str] = []
 
+    # Réseaux internes autorisés à lire la readiness (`/api/v1/internal/ready`,
+    # BE-240), en notation CIDR. Vide = aucun réseau interne : la route répond 404
+    # pour tout le monde. Seule l'adresse du pair direct est comparée (pas de
+    # X-Forwarded-For), pour qu'un en-tête fourni par un client ne puisse pas
+    # ouvrir la route.
+    HEALTH_INTERNAL_NETWORKS: list[str] = []
+
     # Sessions par cookies (T-037a, docs/architecture/securite/sessions.md).
     # Les jetons d'accès et de rafraîchissement sont posés en cookies HttpOnly ;
     # l'interface ne les lit jamais. `AUTH_COOKIE_SECURE` vaut None par défaut :

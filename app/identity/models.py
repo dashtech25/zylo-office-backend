@@ -71,6 +71,20 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
 
 
 class OrganizationUser(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Appartenance d'un utilisateur global à une organisation (BE-004).
+
+    Association plusieurs-à-plusieurs : un utilisateur peut appartenir à
+    plusieurs organisations, et chaque ligne désigne un couple
+    (`organizationId`, `userId`). La contrainte `uq_organizationUser_org_user`
+    refuse un second rattachement identique, ce qui garantit un seul contexte
+    par couple. Le schéma vient de la migration `4b1cccdb5fd5`.
+
+    Cette table est la seule preuve d'appartenance : `assert_active_membership`
+    (app/rbac/service.py) la consulte à chaque requête, donc supprimer la ligne
+    retire l'accès à la requête suivante. Le statut d'appartenance n'est pas
+    modélisé (question QE-SOC-04 ouverte) ; l'absence de ligne vaut refus.
+    """
+
     __tablename__ = "organizationUser"
     __table_args__ = (
         UniqueConstraint("organizationId", "userId", name="uq_organizationUser_org_user"),

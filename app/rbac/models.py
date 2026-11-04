@@ -1,3 +1,19 @@
+"""Modèle RBAC du socle : rôles, permissions, grants et affectations.
+
+Tables (camelCase, migrations dans `alembic/versions/`) :
+- `role` : gabarit de droits, scopé à une organisation (`Role`) ;
+- `permission` : code global `domaine.entite.action`, déclaré par un module
+  (`Permission`) ;
+- `rolePermission` : contenu d'un rôle (`RolePermission`) ;
+- `userRole` : attribution d'un rôle à un membre, éventuellement scopée à une
+  ressource (`UserRole`) ;
+- `userPermissionGrant` : grant ou refus individuel (`UserPermissionGrant`).
+
+Ce module ne contient que la structure. La décision d'autorisation n'est jamais
+prise ici : elle est rendue par `rbac/service.py::user_has_permission`, qui lit
+ces tables. Un rôle n'est qu'un gabarit ; ce qui compte, c'est la résolution.
+"""
+
 import uuid
 from datetime import datetime
 
@@ -10,6 +26,14 @@ from app.shared.models import TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class Role(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Rôle métier d'une organisation (ex. `owner`, `zylo_liquid_station_admin`).
+
+    Un rôle est un ensemble de permissions (`RolePermission`). Son contenu ne
+    dépend jamais de la ressource : la portée se règle sur l'attribution
+    (`UserRole.resourceType/resourceId`). `code` est unique par organisation.
+    Un rôle sans `moduleCode` est transverse au socle ; un rôle avec
+    `moduleCode` est un rôle de module (voir plus bas)."""
+
     __tablename__ = "role"
     __table_args__ = (
         UniqueConstraint("organizationId", "code", name="uq_role_org_code"),
@@ -34,6 +58,11 @@ class Role(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class Permission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Permission globale, unique par `code` (convention `domaine.entite.action`).
+
+    `moduleCode` indique le module qui la déclare. Une permission n'a pas de
+    portée propre : la portée vient de l'attribution ou du grant qui la porte."""
+
     __tablename__ = "permission"
     __table_args__ = {"comment": "Permission globale au système, déclarée par un module (convention: module.resource.action)."}
 
@@ -43,6 +72,10 @@ class Permission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class RolePermission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Association many-to-many rôle <-> permission. Unicité du couple imposée
+    par `uq_rolePermission_role_perm` (une permission ne figure qu'une fois
+    dans un rôle)."""
+
     __tablename__ = "rolePermission"
     __table_args__ = (
         UniqueConstraint("roleId", "permissionId", name="uq_rolePermission_role_perm"),

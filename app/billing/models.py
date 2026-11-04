@@ -15,7 +15,7 @@ app/billing/service.py::current_subscription) : aucune requête globale.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, Index, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, Index, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -212,6 +212,45 @@ class SubscriptionEntitlement(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     sourceAttribution: Mapped[str] = mapped_column(String(30), nullable=False)
     # Compteur de version de l'état (BE-045) : 1 à la création, incrémenté par les écritures d'état.
     stateVersion: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+
+
+class EntitlementAllocation(UUIDPrimaryKeyMixin, Base):
+    """Siège d'un entitlement attribué à un membre d'une organisation (BE-046).
+
+    Une ligne = une attribution. La révocation ne supprime jamais la ligne : elle renseigne
+    `revokedAt`, et le siège redevient disponible. Un couple (entitlement, utilisateur) n'a
+    qu'une attribution active à la fois : l'index unique partiel ne porte que sur les lignes
+    dont `revokedAt` est nul, ce qui permet une nouvelle attribution après révocation.
+
+    `organizationId` est copié de `subscription_entitlement.organizationId` à l'écriture et
+    jamais saisi par le client : le service (app/billing/allocations.py) le vérifie contre
+    l'entitlement verrouillé. Les écritures passent par ce service, qui pose le verrou sur
+    l'entitlement avant de compter les sièges.
+    """
+
+    __tablename__ = "entitlement_allocations"
+    __table_args__ = (
+        # Un seul siège actif par couple (entitlement, utilisateur) ; une révocation libère le couple.
+        Index(
+            "uq_entitlement_allocations_active",
+            "entitlementId",
+            "userId",
+            unique=True,
+            postgresql_where=text('"revokedAt" IS NULL'),
+        ),
+        {"comment": "Sièges d'entitlement attribués aux membres (BE-046). Révocation par revokedAt, sans suppression."},
+    )
+
+    entitlementId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("subscription_entitlement.id"), nullable=False, index=True
+    )
+    organizationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True
+    )
+    userId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False, index=True)
+    grantedBy: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False)
+    grantedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    revokedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class PaymentAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):

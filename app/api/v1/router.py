@@ -10,6 +10,7 @@ from app.billing.consent_router import router as billing_consent_router
 from app.billing.router import router as billing_router
 from app.billing.subscriptions.router import router as billing_subscriptions_router
 from app.billing.cancellation.router import router as billing_cancellation_router
+from app.billing.trials.router import router as billing_trials_router
 from app.files.router import router as files_router
 from app.identity.router import router as organizations_router
 from app.identity.router import account_router
@@ -64,6 +65,8 @@ api_router.include_router(billing_router, prefix="/billing", tags=["billing"])
 api_router.include_router(billing_subscriptions_router, prefix="/billing", tags=["billing"])
 # BE-090 : résiliation d'abonnement (POST /billing/subscriptions/{subscriptionId}/cancel).
 api_router.include_router(billing_cancellation_router, prefix="/billing", tags=["billing"])
+# BE-080 : démarrage d'essai (POST /billing/subscriptions/trials).
+api_router.include_router(billing_trials_router, prefix="/billing", tags=["billing"])
 api_router.include_router(billing_lecture_router, prefix="/organizations", tags=["billing"])
 # BE-046 : attribution et révocation des sièges d'entitlement (sous /organizations/{id}/entitlements).
 api_router.include_router(billing_allocation_router, prefix="/organizations", tags=["billing"])

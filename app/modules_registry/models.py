@@ -20,6 +20,8 @@ ETATS_PUBLICATION_MODULE: tuple[str, ...] = (
     "quarantined",
 )
 VISIBILITES_MODULE: tuple[str, ...] = ("hidden", "visible", "restricted")
+# États d'une version (BE-042) : draft -> review -> published ; review -> draft (rejet).
+ETATS_PUBLICATION_VERSION: tuple[str, ...] = ("draft", "review", "published")
 
 
 class Module(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -66,7 +68,8 @@ class ModuleVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     (`digest`, `provenance`, `licence`, `compatibility`, `prerequisites`) ne se modifie plus.
     La règle est appliquée par `catalogue.modifier_version`. Une version sans `digest` ni
     `provenance` ne peut pas être publiée (`catalogue.verifier_publiable`).
-    `stateVersion` est le compteur de révision de la version, réservé à la machine d'états de BE-041.
+    `stateVersion` est le compteur de révision : il avance à chaque transition de `publicationState`
+    (BE-042), et la commande de publication doit le reprendre (contrôle de concurrence).
     """
 
     __tablename__ = "module_version"
@@ -83,6 +86,13 @@ class ModuleVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     compatibility: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     prerequisites: Mapped[list | None] = mapped_column(JSON, nullable=True)
     stateVersion: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    publicationState: Mapped[str] = mapped_column(
+        Enum(*ETATS_PUBLICATION_VERSION, name="module_version_publication_state", native_enum=True),
+        nullable=False,
+        default="draft",
+        server_default="draft",
+        comment="État de publication de la version (draft, review, published).",
+    )
     publishedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 

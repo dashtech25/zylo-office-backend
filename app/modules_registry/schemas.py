@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ModuleResponse(BaseModel):
@@ -70,3 +70,60 @@ class ModuleAccessResponse(BaseModel):
     accessState: Literal["not_configured", "active", "inactive", "expired", "blocked", "unknown"]
     canActivate: bool
     canOpen: bool
+
+
+class CreerModuleRequest(BaseModel):
+    """Corps de `POST /api/v1/admin/modules` (BE-042). `code` est la clé stable du catalogue."""
+
+    code: str = Field(min_length=1, max_length=100)
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=500)
+
+
+class CreerVersionRequest(BaseModel):
+    """Corps de `POST /api/v1/admin/modules/{moduleId}/versions` (BE-042). Crée une version en `draft`."""
+
+    version: str = Field(min_length=1, max_length=50)
+    digest: str | None = Field(default=None, max_length=200)
+    provenance: str | None = Field(default=None, max_length=500)
+    licence: str | None = Field(default=None, max_length=100)
+    compatibility: dict | None = None
+    prerequisites: list | None = None
+
+
+class PublierVersionRequest(BaseModel):
+    """Corps de `POST .../versions/{versionId}/publish` (BE-042).
+
+    `stateVersion` est le compteur lu avant l'appel. `idempotencyKey` rend la commande rejouable :
+    même clé, même résultat ; sans clé, aucun rejeu n'est reconnu."""
+
+    stateVersion: int = Field(ge=1)
+    idempotencyKey: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class ModuleAdminResponse(BaseModel):
+    id: uuid.UUID
+    code: str
+    name: str
+    description: str | None
+    version: str
+    publicationState: str
+    visibility: str
+
+    model_config = {"from_attributes": True}
+
+
+class ModuleVersionAdminResponse(BaseModel):
+    id: uuid.UUID
+    moduleId: uuid.UUID
+    version: str
+    digest: str | None
+    provenance: str | None
+    licence: str | None
+    compatibility: dict | None
+    prerequisites: list | None
+    stateVersion: int
+    publicationState: str
+    publishedAt: datetime | None
+
+    model_config = {"from_attributes": True}

@@ -120,6 +120,6 @@ async def test_be127_ca4_aucune_ecriture_sur_le_registre(
 ):
     await _autoriser(client, registered_user, monkeypatch, autorise=True)
 
-    reponse = await getattr(client, methode)(CHEMIN, headers=_entetes(registered_user), json={})
+    reponse = await client.request(methode.upper(), CHEMIN, headers=_entetes(registered_user), json={})
 
     assert reponse.status_code == 405

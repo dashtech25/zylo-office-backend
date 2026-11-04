@@ -94,3 +94,16 @@ class StatutTechnique(BaseModel):
     status: str
     verifiedAt: datetime
     components: list[ComposantSante]
+
+
+class SensitiveActionClassItem(BaseModel):
+    """Une classe d'action sensible et sa fiche standard (BE-127, lecture seule)."""
+
+    code: str
+    libelle: str
+    requiresDoubleValidation: bool
+    requiresReauth: bool
+    approvalWindow: str | None
+    reversible: bool | None
+    risk_note: str
+    fiche: dict[str, str]

@@ -72,11 +72,11 @@ async def _creer_module(client: AsyncClient, registered_user: dict) -> dict:
 
 
 async def _creer_version(
-    client: AsyncClient, registered_user: dict, module_id: str, *, digest=None, provenance=None
+    client: AsyncClient, registered_user: dict, module_id: str, *, digest=None, provenance=None, version="1.0.0"
 ) -> dict:
     res = await client.post(
         f"{URL_MODULES}/{module_id}/versions",
-        json={"version": "1.0.0", "digest": digest, "provenance": provenance, "licence": "proprietary"},
+        json={"version": version, "digest": digest, "provenance": provenance, "licence": "proprietary"},
         headers=_entetes(registered_user),
     )
     assert res.status_code == 201, res.text
@@ -222,7 +222,7 @@ async def test_ca2_version_sans_digest_ou_sans_provenance_renvoie_422(
     assert res.json()["error"]["code"] == "MODULE_VERSION_INCOMPLETE"
     assert (await _etat_version_en_base(sans_digest["id"]))[0] == "draft"
 
-    version = await _creer_version(client, registered_user, module["id"], digest="sha256:abc")
+    version = await _creer_version(client, registered_user, module["id"], digest="sha256:abc", version="1.0.1")
     res = await client.post(
         f"{URL_MODULES}/{module['id']}/versions/{version['id']}/publish",
         json=_version_complete_body(state_version=version["stateVersion"], cle=str(uuid.uuid4())),

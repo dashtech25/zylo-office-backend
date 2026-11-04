@@ -83,8 +83,15 @@ _TRANSITIONS_INSTALLATION: frozenset[tuple[str, str]] = frozenset(
 )
 
 # Table des transitions autorisées, par type de sujet. Un type absent n'a aucune transition.
+# Publication d'une version de module (BE-042) : draft -> review -> published, et rejet review -> draft.
+TYPE_SUJET_VERSION = "module_version"
+_TRANSITIONS_VERSION: frozenset[tuple[str, str]] = frozenset(
+    {("draft", "review"), ("review", "published"), ("review", "draft")}
+)
+
 TRANSITIONS_AUTORISEES: dict[str, frozenset[tuple[str, str]]] = {
     TYPE_SUJET_INSTALLATION: _TRANSITIONS_INSTALLATION,
+    TYPE_SUJET_VERSION: _TRANSITIONS_VERSION,
 }
 
 

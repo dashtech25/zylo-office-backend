@@ -236,20 +236,22 @@ async def test_ca3_membre_sans_audit_read_recoit_403(client: AsyncClient, regist
 
 
 async def test_ca4_journal_de_b_jamais_renvoye_a_un_acteur_de_a(client: AsyncClient, registered_user: dict, organization: dict):
+    """L'acteur de A n'est pas membre de B (B appartient à un autre propriétaire) : 404 sur `orgId = B`."""
     organisation_a = uuid.UUID(organization["id"])
-    autre = await _organisation_de(client, (await client.post(
-        "/api/v1/auth/login",
-        json={"email": registered_user["email"], "password": registered_user["password"]},
-    )).json()["accessToken"])
-    # Le propriétaire de A n'est pas membre de B : la route doit répondre 404 sur `orgId = B`.
-    organisation_b = uuid.UUID(autre["id"])
-    acteur_b = await _id_utilisateur(registered_user["email"])
+    proprietaire_b = await client.post("/api/v1/auth/register", json={
+        "email": f"be056-b-{uuid.uuid4().hex[:10]}@zylo-office-test.example.com",
+        "password": MOT_DE_PASSE, "fullName": "Propriétaire B",
+    })
+    login_b = await client.post("/api/v1/auth/login", json={"email": proprietaire_b.json()["email"], "password": MOT_DE_PASSE})
+    organisation_b = uuid.UUID((await _organisation_de(client, login_b.json()["accessToken"]))["id"])
+    assert organisation_a != organisation_b
+
     sujet_b = uuid.uuid4()
+    acteur_b = await _id_utilisateur(proprietaire_b.json()["email"])
     async with AsyncSessionLocal() as db:
         await _transition(db, organisation=organisation_b, module=uuid.uuid4(), sujet=sujet_b,
                           vers_etat="provisioning", version=0, cle="ca4-b", acteur=acteur_b)
         await db.commit()
-    assert organisation_a != organisation_b
 
     res = await client.get(
         f"/api/v1/organizations/{organisation_b}/module-audit",

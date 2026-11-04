@@ -4,7 +4,11 @@ Routes :
 - `POST /modules` : crée une fiche en `draft` (droit `platform.module.write`), 201 ;
 - `GET /modules/{moduleId}` : lecture plateforme (droit write ou publish), 200 ;
 - `POST /modules/{moduleId}/versions` : crée une version en `draft` (droit write), 201 ;
-- `POST /modules/{moduleId}/versions/{versionId}/publish` : publie (droit publish), 200.
+- `POST /modules/{moduleId}/versions/{versionId}/publish` : publie (droit publish), 200 ;
+- `POST /modules/{moduleId}/versions/{versionId}/compatibility-evaluations` : évalue et journalise la
+  compatibilité de la version (droit publish), 201 (BE-044) ;
+- `POST /modules/{moduleId}/upgrade-plans` : calcule le plan entre deux versions, sans l'exécuter
+  (droit publish), 201 (BE-044).
 
 Chaque route vérifie le droit plateforme avant toute lecture ou écriture (refus par défaut, 403
 `PERMISSION_DENIED`). Sans authentification, `get_current_user` renvoie 401. Le routeur valide la
@@ -22,6 +26,7 @@ from app.core.logging import correlation_id_ctx
 from app.core.security import get_current_user
 from app.identity.models import User
 from app.modules_registry import catalogue_publication as service
+from app.modules_registry import compatibilite_service
 from app.modules_registry.platform_rights import a_droit_plateforme, exiger_droit_plateforme
 from app.modules_registry.permissions import PLATFORM_MODULE_PUBLISH, PLATFORM_MODULE_WRITE
 from app.modules_registry.schemas import (
@@ -29,7 +34,10 @@ from app.modules_registry.schemas import (
     CreerVersionRequest,
     ModuleAdminResponse,
     ModuleVersionAdminResponse,
+    CompatibilityEvaluationResponse,
     PublierVersionRequest,
+    UpgradePlanRequest,
+    UpgradePlanResponse,
 )
 
 router = APIRouter(prefix="/modules", tags=["admin-modules"])
@@ -112,3 +120,48 @@ async def publier_version(
     )
     await db.commit()
     return ModuleVersionAdminResponse.model_validate(version)
+
+
+@router.post(
+    "/{module_id}/versions/{version_id}/compatibility-evaluations",
+    response_model=CompatibilityEvaluationResponse,
+    status_code=201,
+    summary="Évalue la compatibilité et les dépendances d'une version (BE-044)",
+)
+async def evaluer_compatibilite(
+    module_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    utilisateur: User = Depends(get_current_user),
+) -> CompatibilityEvaluationResponse:
+    """Renvoie `compatible`, `incompatible` ou `unknown` avec ses motifs, et journalise l'évaluation.
+
+    Droit `platform.module.publish`, vérifié avant toute lecture : un refus ne crée aucune ligne."""
+    exiger_droit_plateforme(utilisateur.id, PLATFORM_MODULE_PUBLISH)
+    ligne = await compatibilite_service.evaluer_version(db, module_id, version_id)
+    await db.commit()
+    return CompatibilityEvaluationResponse.model_validate(ligne)
+
+
+@router.post(
+    "/{module_id}/upgrade-plans",
+    response_model=UpgradePlanResponse,
+    status_code=201,
+    summary="Calcule le plan de mise à jour entre deux versions, sans l'exécuter (BE-044)",
+)
+async def planifier_mise_a_jour(
+    module_id: uuid.UUID,
+    corps: UpgradePlanRequest,
+    db: AsyncSession = Depends(get_db),
+    utilisateur: User = Depends(get_current_user),
+) -> UpgradePlanResponse:
+    """Renvoie le plan (étapes, `rollbackPossible`, `forwardOnly`) et le journalise.
+
+    Droit `platform.module.publish` (même portée plateforme que l'évaluation). Le plan n'est jamais
+    exécuté ici : l'application d'une version relève d'une tâche distincte."""
+    exiger_droit_plateforme(utilisateur.id, PLATFORM_MODULE_PUBLISH)
+    ligne = await compatibilite_service.planifier_mise_a_jour(
+        db, module_id, from_version=corps.fromVersion, to_version=corps.toVersion
+    )
+    await db.commit()
+    return UpgradePlanResponse.model_validate(ligne)

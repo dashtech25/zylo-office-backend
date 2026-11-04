@@ -25,7 +25,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from httpx import AsyncClient
-from sqlalchemy import func, select, text
+from sqlalchemy import select, text
 
 from app.core.database import AsyncSessionLocal
 from app.identity.models import User
@@ -246,7 +246,7 @@ async def test_ca4_sans_droit_evaluation_refusee_et_rien_n_est_cree(
     )
 
     assert res.status_code == 403, res.text
-    assert res.json()["code"] == "PERMISSION_DENIED"
+    assert res.json()["error"]["code"] == "PERMISSION_DENIED"
     assert await _compter("module_compatibility_evaluations") == avant
 
 
@@ -352,6 +352,7 @@ async def test_plan_version_inconnue_donne_404(client: AsyncClient, registered_u
     await _donner_droits(monkeypatch, registered_user, publish=True)
     module = await _creer_module(client, registered_user)
     await _creer_version(client, registered_user, module["id"], version="1.0.0")
+    avant = await _compter("module_upgrade_plans")
 
     res = await client.post(
         f"{URL_MODULES}/{module['id']}/upgrade-plans",
@@ -360,7 +361,8 @@ async def test_plan_version_inconnue_donne_404(client: AsyncClient, registered_u
     )
 
     assert res.status_code == 404, res.text
-    assert await _compter("module_upgrade_plans") == 0
+    assert res.json()["error"]["code"] == "MODULE_VERSION_NOT_FOUND"
+    assert await _compter("module_upgrade_plans") == avant
 
 
 # --------------------------------------------------------------------------------------------

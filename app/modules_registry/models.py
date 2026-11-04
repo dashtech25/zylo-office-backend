@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -163,6 +163,56 @@ class ModuleStateTransition(UUIDPrimaryKeyMixin, Base):
     idempotencyKey: Mapped[str] = mapped_column(String(200), nullable=False)
     stateVersionBefore: Mapped[int] = mapped_column(Integer, nullable=False)
     stateVersionAfter: Mapped[int] = mapped_column(Integer, nullable=False)
+    createdAt: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ModuleCompatibilityEvaluation(UUIDPrimaryKeyMixin, Base):
+    """Évaluation de compatibilité d'une version de module (table `module_compatibility_evaluations`, BE-044).
+
+    Une ligne par évaluation demandée par la console plateforme. `result` vaut `compatible`,
+    `incompatible` ou `unknown` (jamais `compatible` sans information, voir `compatibilite.py`).
+    `reasons` est la liste des motifs (`DEPENDENCY_CYCLE`, `PREREQUISITE_MISSING`, ...). Les lignes
+    sont append-only : une nouvelle évaluation est une nouvelle ligne.
+    """
+
+    __tablename__ = "module_compatibility_evaluations"
+    __table_args__ = (
+        {"comment": "Évaluations de compatibilité des versions de module (BE-044), append-only."},
+    )
+
+    moduleVersionId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("module_version.id"), nullable=False, index=True
+    )
+    result: Mapped[str] = mapped_column(
+        Enum("compatible", "incompatible", "unknown", name="module_compatibility_result", native_enum=True),
+        nullable=False,
+        comment="Résultat de l'évaluation (compatible, incompatible, unknown).",
+    )
+    reasons: Mapped[list] = mapped_column(JSON, nullable=False, default=list, comment="Motifs de l'évaluation.")
+    evaluatedAt: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), comment="Date de l'évaluation."
+    )
+
+
+class ModuleUpgradePlan(UUIDPrimaryKeyMixin, Base):
+    """Plan de mise à jour d'un module entre deux versions (table `module_upgrade_plans`, BE-044).
+
+    Le plan est seulement calculé et journalisé ; rien n'est exécuté. `forwardOnly` vaut vrai dès
+    que `rollbackPossible` est faux. Aucune étape de retour arrière n'est proposée automatiquement
+    (voir `compatibilite.construire_plan_mise_a_jour`).
+    """
+
+    __tablename__ = "module_upgrade_plans"
+    __table_args__ = ({"comment": "Plans de mise à jour de module, calculés sans exécution (BE-044)."},)
+
+    moduleId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("module.id"), nullable=False, index=True)
+    fromVersion: Mapped[str] = mapped_column(String(50), nullable=False)
+    toVersion: Mapped[str] = mapped_column(String(50), nullable=False)
+    steps: Mapped[list] = mapped_column(JSON, nullable=False, default=list, comment="Étapes ordonnées du plan.")
+    rollbackPossible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    forwardOnly: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     createdAt: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

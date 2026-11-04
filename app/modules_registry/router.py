@@ -9,13 +9,14 @@ from app.core.security import get_current_user
 from app.identity.models import User
 from app.identity.permissions import ORGANIZATION_MANAGE
 from app.identity.service import require_organization_member
-from app.modules_registry import service
+from app.modules_registry import declarations, service
 from app.modules_registry.models import Module, OrganizationModule
-from app.modules_registry.permissions import MODULE_MANAGE
+from app.modules_registry.permissions import MODULE_MANAGE, ORGANIZATION_MODULE_READ
 from app.modules_registry.schemas import (
     ActivateModuleRequest,
     InstalledModuleResponse,
     ModuleAccessResponse,
+    ModulePermissionResponse,
     ModuleResponse,
     OrganizationModuleResponse,
     SetModuleActivationRequest,
@@ -60,6 +61,27 @@ async def get_current_organization_module_access(
     un module non activé ou au manifeste incompatible) ; la garde réelle reste celle des routes du
     module, qui répond 403. 404 si le module n'existe pas au catalogue."""
     return await service.get_module_access_projection(db, organization_id, module_id)
+
+
+@organizations_modules_router.get(
+    "/{organization_id}/modules/{module_id}/permissions",
+    response_model=list[ModulePermissionResponse],
+    summary="Permissions déclarées par la version installée d'un module (BE-055)",
+    dependencies=[Depends(require_permission(ORGANIZATION_MODULE_READ))],
+)
+async def list_module_permissions(
+    module_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[ModulePermissionResponse]:
+    """Liste les permissions déclarées par la version installée du module `module_id`, triées par code.
+
+    Exige `organization.module.read` sur l'organisation du chemin : 403 sans elle, 404 pour une
+    organisation d'un autre tenant (la garde de `require_permission` répond avant la route).
+    Lecture seule : aucune donnée d'une autre organisation n'est renvoyée, puisque la liste ne
+    dépend que du catalogue. 404 si le module est inconnu ou sans version installée.
+    """
+    lignes = await declarations.lister_permissions_installees(db, module_id)
+    return [ModulePermissionResponse.model_validate(ligne) for ligne in lignes]
 
 
 @organizations_modules_router.put(

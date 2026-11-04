@@ -5,3 +5,7 @@ MODULE_MANAGE = "modules.module.manage"
 # qui exige une organisation. Leur attribution est décrite dans `platform_rights.py`.
 PLATFORM_MODULE_WRITE = "platform.module.write"
 PLATFORM_MODULE_PUBLISH = "platform.module.publish"
+
+# Lecture des permissions déclarées par les modules de l'organisation (BE-055, QE-MOD-16 : code
+# recommandé). Accordée au propriétaire à la création de l'organisation (OWNER_DEFAULT_PERMISSIONS).
+ORGANIZATION_MODULE_READ = "organization.module.read"

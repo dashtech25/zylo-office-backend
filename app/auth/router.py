@@ -71,6 +71,16 @@ def _jeton_de_rafraichissement(request: Request, data: RefreshRequest | None) ->
 
 @router.post("/register", response_model=UserResponse, status_code=201)
 async def register(data: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)) -> User:
+    """Inscription publique (BE-006). Garde : `AUTH_PUBLIC_REGISTRATION_ENABLED`.
+
+    Fermée par défaut et refusée hors development et test (validateur de
+    `app/core/config.py`). Garde fermée : 404 `registration_disabled`, sans
+    création d'utilisateur. Le 404 (et non 403) est voulu : la route ne révèle
+    pas son existence. Garde ouverte : 201, l'utilisateur est créé sans aucune
+    appartenance à une organisation ; les accès passent par les invitations.
+    Les échecs de compte existant (`email_already_used`) comptent pour la
+    limitation de débit ; une erreur serveur ou de validation n'est jamais comptée.
+    """
     if not settings.AUTH_PUBLIC_REGISTRATION_ENABLED:
         # Ne pas exposer le libre-service tant que l'inscription et la
         # vérification e-mail n'ont pas été approuvées. Les invitations restent

@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -40,3 +41,6 @@ class InstalledModuleResponse(BaseModel):
     version: str
     status: str
     activatedAt: datetime | None
+    accessState: Literal["not_configured", "active", "inactive", "expired", "blocked", "unknown"]
+    canActivate: bool
+    canOpen: bool

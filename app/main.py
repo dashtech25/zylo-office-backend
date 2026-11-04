@@ -29,6 +29,7 @@ TAGS_METADATA = [
     {"name": "rbac", "description": "Rôles, permissions et grants individuels (allow/deny, scopés, délégables)."},
     {"name": "audit", "description": "Journal d'audit — qui a fait quoi, sur quel élément, quand, filtré par portée."},
     {"name": "billing", "description": "Plans, abonnements et facturation par module (aucun prestataire de paiement réel intégré)."},
+    {"name": "operator", "description": "Support opérateur strictement en lecture seule, accessible par allowlist serveur."},
     {"name": "currencies", "description": "Référentiel des devises — Core, sans isolation tenant, réutilisable par tout module."},
     {"name": "exchange-rates", "description": "Taux de change historisés — Core, toujours une insertion, jamais une correction."},
 ]

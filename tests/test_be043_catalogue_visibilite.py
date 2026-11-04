@@ -91,7 +91,7 @@ async def test_liste_anonyme_ne_renvoie_que_published_et_visible(client: AsyncCl
     visible_retire = _code_unique("retire")
     await _inserer_module(visible_retire, publication="withdrawn", visibilite="visible")
 
-    res = await client.get(URL_LISTE, params={"limit": 200})
+    res = await client.get(URL_LISTE, params={"limit": 100})
 
     assert res.status_code == 200, res.text
     codes_renvoyes = {module["code"] for module in res.json()["data"]}

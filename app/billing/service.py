@@ -163,9 +163,9 @@ async def create_invoice(
             Subscription.id == previous.subscriptionId, Subscription.organizationId == organization_id
         ))
         if owned is None:
-            raise AppError(code="idempotency_key_conflict", message="Cette clé d'idempotence est déjà utilisée.", status_code=409)
+            raise AppError(code="DUPLICATE", message="Cette clé d'idempotence est déjà utilisée.", status_code=409)
         if previous.subscriptionId != subscription_id:
-            raise AppError(code="idempotency_key_conflict", message="Cette clé d'idempotence est déjà utilisée pour une autre demande.", status_code=409)
+            raise AppError(code="DUPLICATE", message="Cette clé d'idempotence est déjà utilisée pour une autre demande.", status_code=409)
         return previous
     subscription = await db.scalar(select(Subscription).where(
         Subscription.id == subscription_id, Subscription.organizationId == organization_id
@@ -187,7 +187,7 @@ async def create_invoice(
         await db.rollback()
         previous = await db.scalar(select(Invoice).where(Invoice.idempotencyKey == idempotency_key))
         if previous is None or previous.subscriptionId != subscription_id:
-            raise AppError(code="idempotency_key_conflict", message="Cette clé d'idempotence est déjà utilisée.", status_code=409) from exc
+            raise AppError(code="DUPLICATE", message="Cette clé d'idempotence est déjà utilisée.", status_code=409) from exc
         return previous
     await record_audit_event(
         db, organization_id, actor_user_id, action="billing.invoice.create",
@@ -235,7 +235,7 @@ async def start_payment_attempt(
     if invoice is None:
         raise AppError(code="invoice_not_found", message="Facture introuvable.", status_code=404)
     raise AppError(
-        code="provider_not_configured",
+        code="PROVIDER_UNAVAILABLE",
         message="Le paiement Flutterwave sandbox n'est pas configuré. Aucun paiement n'a été initié.",
         status_code=503,
     )

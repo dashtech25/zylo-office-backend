@@ -121,7 +121,7 @@ async def test_billing_reads_invoices_and_blocks_unconfigured_checkout_without_a
         headers={**headers, "Idempotency-Key": str(uuid.uuid4())},
     )
     assert attempt.status_code == 503
-    assert attempt.json()["error"]["code"] == "provider_not_configured"
+    assert attempt.json()["error"]["code"] == "PROVIDER_UNAVAILABLE"
     attempts = await client.get(
         f"/api/v1/billing/organizations/{organization['id']}/invoices/{invoice['id']}/payment-attempts",
         headers=headers,
@@ -135,7 +135,7 @@ async def test_flutterwave_webhook_requires_secret_and_deduplicates_event(client
     payload = {"id": f"evt-{uuid.uuid4().hex}", "event": "charge.completed", "data": {"id": "fake"}}
     unavailable = await client.post("/api/v1/billing/webhooks/flutterwave", json=payload)
     assert unavailable.status_code == 503
-    assert unavailable.json()["error"]["code"] == "provider_not_configured"
+    assert unavailable.json()["error"]["code"] == "PROVIDER_UNAVAILABLE"
 
     monkeypatch.setenv("FLUTTERWAVE_WEBHOOK_SECRET", "test-only-webhook-secret")
     invalid = await client.post("/api/v1/billing/webhooks/flutterwave", json=payload, headers={"verif-hash": "wrong"})

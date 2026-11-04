@@ -42,6 +42,7 @@ ROUTES_PUBLIQUES: dict[str, str] = {
     # --- Publiques par nature (aucune donnée d'organisation) ---
     "GET /": "Racine d'accueil, aucune donnée. 2026-10-09.",
     "GET /api/v1/health": "Sonde de santé. 2026-10-09.",
+    "GET /api/v1/health/ready": "Sonde de disponibilité : état de la base seulement, sans donnée ni secret (BE-032). 2026-11-03.",
     "GET /api/v1/health/error-demo": "Démonstration du format d'erreur, sans donnée. A retirer en production. 2026-10-09.",
     "POST /api/v1/auth/register": "Endpoint masqué par défaut; AUTH_PUBLIC_REGISTRATION_ENABLED=true n'est admis que si ENVIRONMENT=development ou test (le validateur Settings refuse production/staging). Libre-service sans décision produit réservé aux tests et au développement local. 2026-11-02.",
     "POST /api/v1/auth/login": "Connexion : public par nature, limitée par T-012. 2026-10-09.",

@@ -62,6 +62,23 @@ def revisions_attendues() -> set[str]:
     return set(script_directory().get_heads())
 
 
+def verifie_tete_unique(tetes: set[str] | None = None) -> str:
+    """Retourne l'unique tête de la chaîne, ou lève MigrationError.
+
+    Intention : deux têtes signifient deux branches de migrations non fusionnées.
+    Alembic ne sait pas choisir laquelle appliquer : on refuse plutôt que de
+    deviner. `tetes` permet de tester le contrôle sur une chaîne fictive ; sans
+    argument, la chaîne du dépôt est lue.
+    """
+    lues = set(script_directory().get_heads()) if tetes is None else set(tetes)
+    if len(lues) != 1:
+        raise MigrationError(
+            f"Chaîne de migrations à plusieurs têtes ({', '.join(sorted(lues)) or 'aucune'}). "
+            "Fusionner les branches avec `alembic merge` avant toute migration."
+        )
+    return next(iter(lues))
+
+
 def revisions_en_attente(courantes: set[str]) -> list[str]:
     """Révisions à appliquer pour atteindre la tête, dans l'ordre d'application.
 

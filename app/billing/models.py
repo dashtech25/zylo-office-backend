@@ -387,3 +387,32 @@ class PriceRule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     amountMinor: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="Montant en unités mineures ; NULL = non configuré.")
     currency: Mapped[str | None] = mapped_column(String(3), nullable=True, comment="Devise ISO ; NULL = non configurée.")
     taxRateBps: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="Taux de taxe en points de base ; NULL = non configuré.")
+
+
+class Quote(Base):
+    """Devis (Quote) d'un achat, du tenant bénéficiaire à un compte payeur (BE-077).
+
+    Machine d'état : `created -> priced -> accepted | expired | revoked`. Un devis
+    naît `created` ; il passe `priced` seulement quand la résolution de prix (BE-078)
+    réussit, et capture alors `pricingSnapshotJson` (copie figée, jamais une
+    référence vers la règle). `planVersionSnapshotId` pointe l'instantané de l'offre
+    capturé au devis (BE-075) : une modification ultérieure du catalogue ne le change pas.
+
+    `beneficiaryTenantId` est le tenant qui porte le devis ; toute lecture filtre
+    dessus, un devis d'un autre tenant est donc traité comme inexistant (CA-4).
+    `version` est le verrou optimiste (BE-072) incrémenté à chaque transition.
+    `expiresAt` est NULLABLE : la durée de validité n'est pas définie (QE-FAC-21),
+    un devis sans date n'expire pas tant que la décision n'est pas prise.
+    """
+    __tablename__ = "quote"
+    __table_args__ = {"comment": "Devis d'achat, du tenant bénéficiaire à un payeur (BE-077). Valeurs de durée non définies (QE-FAC-21)."}
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    payerId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("billing_payer.id"), nullable=False, comment="Compte payeur du devis.")
+    beneficiaryTenantId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True, comment="Tenant bénéficiaire, qui porte le devis (scope de lecture).")
+    planVersionSnapshotId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("plan_version_snapshot.id"), nullable=False, comment="Instantané de l'offre capturé au devis (BE-075).")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="created", comment="created, priced, accepted, expired ou revoked.")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, comment="Verrou optimiste (BE-072), incrémenté à chaque transition.")
+    expiresAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Fin de validité ; NULL tant que QE-FAC-21 n'est pas tranchée.")
+    createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    pricingSnapshotJson: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="Prix, devise et taxe figés à la résolution (BE-078) ; NULL avant `priced`.")

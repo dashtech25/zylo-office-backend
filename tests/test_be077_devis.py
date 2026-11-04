@@ -227,12 +227,15 @@ async def test_ca3_acceptation_refusee_sans_permission_d_acheteur_et_devis_incha
 async def test_ca4_devis_du_tenant_a_traite_comme_inexistant_depuis_le_tenant_b(client, registered_user, organization):
     """CA-4 : lecture depuis le tenant B d'un devis du tenant A -> 404, identique à un identifiant inconnu."""
     devis_id = await _creer_devis_priced(client, registered_user, organization)
-    async with AsyncSessionLocal() as db:
-        autre = Organization(name="be077 tenant B", slug=f"be077-b-{uuid.uuid4().hex[:10]}", status="active")
-        db.add(autre)
-        await db.commit()
-        autre_id = str(autre.id)
-    headers = _entete(registered_user["accessToken"], autre_id)
+    # Tenant B réel dont l'utilisateur est propriétaire : la garde d'organisation laisse passer,
+    # et c'est bien le service qui doit répondre comme à un devis inexistant.
+    res_tenant_b = await client.post(
+        "/api/v1/organizations",
+        json={"name": "Tenant B", "slug": f"be077-b-{uuid.uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {registered_user['accessToken']}"},
+    )
+    assert res_tenant_b.status_code in (200, 201), res_tenant_b.text
+    headers = _entete(registered_user["accessToken"], res_tenant_b.json()["id"])
 
     res_existant = await client.get(_url(devis_id), headers=headers)
     res_inconnu = await client.get(_url(str(uuid.uuid4())), headers=headers)

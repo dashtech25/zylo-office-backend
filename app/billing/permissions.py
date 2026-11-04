@@ -25,3 +25,6 @@ ORGANIZATION_ENTITLEMENT_READ = "organization.entitlement.read"
 # peut attribuer sans pouvoir révoquer, et inversement. Portée organisation.
 ORGANIZATION_ENTITLEMENT_ALLOCATE = "organization.entitlement.allocate"
 ORGANIZATION_ENTITLEMENT_REVOKE = "organization.entitlement.revoke"
+# BE-075 : lecture interne du catalogue figé (snapshotJson). Aucune permission client
+# directe sur le catalogue : ce code n'est accordé à aucun rôle par défaut.
+BILLING_CATALOGUE_READ = "billing.catalogue.read"

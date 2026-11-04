@@ -294,3 +294,28 @@ class PaymentWebhookEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # avec le même identifiant ; ce contenu n'est jamais appliqué.
     quarantinedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     quarantineDigest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class PlanVersionSnapshot(Base):
+    """Instantané figé d'une version d'offre, capturé au devis ou au contrat (BE-075).
+
+    Chaque ligne fige `snapshotJson` au moment de la capture : une modification
+    ultérieure du catalogue (nouvelle version, prix réécrit) ne la change pas.
+    `planRef` est le code du plan, `planVersion` le numéro de version capturé,
+    `sourceCatalogueRef` l'identifiant de la ligne `planVersion` d'origine.
+    `organizationId` ancre l'instantané à un tenant : un snapshot n'est lu que
+    depuis son organisation (CA-4 de BE-075). Cette colonne ne figure pas dans la
+    liste de champs de la définition ; elle est ajoutée pour l'isolation tenant.
+    Pas de mise à jour exposée : le module app/billing/catalog_snapshot.py n'écrit
+    que la capture.
+    """
+    __tablename__ = "plan_version_snapshot"
+    __table_args__ = {"comment": "Instantané immuable d'une version d'offre, capturé au devis ou au contrat (BE-075)."}
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True, comment="Tenant propriétaire de l'instantané (BE-075).")
+    planRef: Mapped[str] = mapped_column(String(100), nullable=False, comment="Code du plan capturé.")
+    planVersion: Mapped[int] = mapped_column(Integer, nullable=False, comment="Numéro de la version capturée.")
+    capturedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    sourceCatalogueRef: Mapped[str] = mapped_column(String(64), nullable=False, comment="Identifiant de la ligne planVersion source.")
+    snapshotJson: Mapped[dict] = mapped_column(JSON, nullable=False, comment="Contenu figé de l'offre et de sa version.")

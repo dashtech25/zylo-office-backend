@@ -34,6 +34,7 @@ ENTREES_TABLES_PROVISOIRES: dict[str, dict[str, str]] = {
     "permission": {"classe": "interne", "proprietaire": "socle-identite"},
     "plan": {"classe": "financiere", "proprietaire": "socle-abonnements"},
     "planVersion": {"classe": "financiere", "proprietaire": "socle-abonnements"},
+    "plan_version_snapshot": {"classe": "financiere", "proprietaire": "socle-abonnements"},
     "refreshToken": {"classe": "sensible", "proprietaire": "socle-securite"},
     "region": {"classe": "publique", "proprietaire": "socle-referentiels"},
     "role": {"classe": "interne", "proprietaire": "socle-identite"},

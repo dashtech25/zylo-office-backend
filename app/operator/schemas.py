@@ -48,8 +48,16 @@ class OperatorTraceEvent(BaseModel):
 
 
 class OperatorRequestTrace(BaseModel):
+    """Résultat de la recherche par request ID (BE-031 CA-4).
+
+    `outcome` vaut `found` ou `not_found` (réponse 200). Un refus est un 403 et
+    une erreur de lecture un 503 ; ces deux issues ne produisent pas ce corps.
+    `found` est conservé pour les clients existants.
+    """
+
     requestId: str
     found: bool
+    outcome: str
     events: list[OperatorTraceEvent]
 
 

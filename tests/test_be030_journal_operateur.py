@@ -64,9 +64,9 @@ async def test_be030_ca1_chaque_lecture_operateur_cree_exactement_une_entree(
     headers, _ = await _moi(client, registered_user, monkeypatch)
 
     reponses = {
-        "be030-ca1-liste": "/api/v1/operator/organizations",
-        "be030-ca1-organisation": f"/api/v1/operator/organizations/{organization['id']}",
-        "be030-ca1-trace": "/api/v1/operator/requests/be030-trace-inconnue",
+        "be030-ca1-liste": "/api/v1/admin/organizations",
+        "be030-ca1-organisation": f"/api/v1/admin/organizations/{organization['id']}",
+        "be030-ca1-trace": "/api/v1/admin/requests/be030-trace-inconnue",
     }
     for request_id, chemin in reponses.items():
         reponse = await client.get(chemin, headers={**headers, "X-Request-Id": request_id})
@@ -82,7 +82,7 @@ async def test_be030_ca2_entree_porte_acteur_portee_action_cible_resultat_et_req
     headers, user_id = await _moi(client, registered_user, monkeypatch)
 
     reponse = await client.get(
-        f"/api/v1/operator/organizations/{organization['id']}",
+        f"/api/v1/admin/organizations/{organization['id']}",
         headers={**headers, "X-Request-Id": "be030-ca2-organisation"},
     )
     assert reponse.status_code == 200
@@ -105,7 +105,7 @@ async def test_be030_ca2_lecture_de_portee_plateforme_sans_organisation_cible(
 ):
     headers, _ = await _moi(client, registered_user, monkeypatch)
 
-    reponse = await client.get("/api/v1/operator/organizations", headers={**headers, "X-Request-Id": "be030-ca2-liste"})
+    reponse = await client.get("/api/v1/admin/organizations", headers={**headers, "X-Request-Id": "be030-ca2-liste"})
     assert reponse.status_code == 200
 
     (entree,) = await _entrees_operateur("be030-ca2-liste")
@@ -121,7 +121,7 @@ async def test_be030_ca3_consultation_refusee_journalisee_avec_resultat_refus(
     headers, user_id = await _moi(client, registered_user, monkeypatch, autorise=False)
 
     reponse = await client.get(
-        "/api/v1/operator/organizations", headers={**headers, "X-Request-Id": "be030-ca3-refus"},
+        "/api/v1/admin/organizations", headers={**headers, "X-Request-Id": "be030-ca3-refus"},
     )
     assert reponse.status_code == 403
     assert reponse.json()["error"]["code"] == "operator_access_denied"
@@ -138,9 +138,9 @@ async def test_be030_ca4_aucune_charge_utile_de_reponse_stockee(
     headers, _ = await _moi(client, registered_user, monkeypatch)
     nom = organization["name"]
 
-    await client.get("/api/v1/operator/organizations", headers={**headers, "X-Request-Id": "be030-ca4-liste"})
+    await client.get("/api/v1/admin/organizations", headers={**headers, "X-Request-Id": "be030-ca4-liste"})
     await client.get(
-        f"/api/v1/operator/organizations/{organization['id']}",
+        f"/api/v1/admin/organizations/{organization['id']}",
         headers={**headers, "X-Request-Id": "be030-ca4-organisation"},
     )
 
@@ -156,7 +156,7 @@ async def test_be030_ca5_upgrade_puis_downgrade_ciblés_reussissent_et_tete_uniq
     client: AsyncClient, registered_user: dict, organization: dict, monkeypatch,
 ):
     headers, _ = await _moi(client, registered_user, monkeypatch)
-    await client.get("/api/v1/operator/requests/be030-ca5-reprise", headers={**headers, "X-Request-Id": "be030-ca5-reprise"})
+    await client.get("/api/v1/admin/requests/be030-ca5-reprise", headers={**headers, "X-Request-Id": "be030-ca5-reprise"})
 
     script = migrations.script_directory()
     heads = script.get_heads()

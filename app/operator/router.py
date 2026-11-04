@@ -1,3 +1,21 @@
+"""Console opérateur en lecture seule (BE-031), montée sous `/api/v1/admin`.
+
+Routes :
+- `GET /api/v1/admin/organizations` : liste des organisations (portée plateforme) ;
+- `GET /api/v1/admin/organizations/{organization_id}` : abonnement et modules ;
+- `GET /api/v1/admin/requests/{request_id}` : recherche par request ID.
+
+Garde : toutes les routes dépendent de `require_operator` (allowlist serveur
+`OPERATOR_READ_USER_IDS`, fail-closed). Hors liste : 403, tentative journalisée.
+
+Chaque consultation (succès, absence, refus, erreur) produit une entrée
+`audit_event` d'action `operator.` via `record_operator_read`.
+
+Pas d'écriture : PUT, POST et DELETE reçoivent 405 (aucune route ne les déclare).
+Aucun contenu tenant : seuls organisation, abonnement, modules et métadonnées
+d'événements techniques sortent de ce module.
+"""
+
 import uuid
 
 from fastapi import APIRouter, Depends, Path, Request
@@ -38,6 +56,11 @@ async def list_organizations(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_operator),
 ) -> Page[OperatorOrganizationItem]:
+    """Liste paginée des organisations non supprimées, en lecture seule.
+
+    Retourne `id`, `name`, `slug` et `status` uniquement. Une lecture réussie est
+    journalisée (portée plateforme, action `operator.organization.list`).
+    """
     stmt = select(Organization).where(Organization.deletedAt.is_(None)).order_by(Organization.name, Organization.id)
     total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
     rows = list((await db.scalars(stmt.limit(pagination.limit).offset(pagination.offset))).all())
@@ -58,6 +81,11 @@ async def organization_overview(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_operator),
 ) -> OperatorOrganizationOverview:
+    """État d'abonnement et modules d'une organisation, sans contenu tenant.
+
+    404 `organization_not_found` si l'organisation est absente ou supprimée
+    (la consultation est tout de même journalisée, issue `not_found`).
+    """
     org = await db.get(Organization, organization_id)
     if org is None or org.deletedAt is not None:
         await record_operator_read(
@@ -110,9 +138,46 @@ async def lookup_request(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_operator),
 ) -> OperatorRequestTrace:
-    # Audit summaries include request_id only for a small subset of mutations;
-    # webhook events retain a structured requestId. No raw summary, user data,
-    # request body, or authentication data is returned.
+    """Recherche les événements liés à un request ID.
+
+    Issues (BE-031 CA-4) :
+    - `found` : 200, `outcome = found` ;
+    - `not_found` : 200, `outcome = not_found`, `events` vide ;
+    - `refused` : 403 par la garde `require_operator` (journalisé avant la réponse) ;
+    - `error` : 503 `request_trace_error` si la base échoue pendant la recherche.
+
+    Piège évité : l'erreur est journalisée (`outcome = error`) puis relancée en
+    503 propre, au lieu d'une 500 sans trace. Le `rollback` précède l'écriture du
+    journal pour que la session soit utilisable.
+    """
+    # Identifiant lu avant le `rollback` : celui-ci expire les objets ORM, et relire
+    # `current_user.id` ensuite déclencherait un chargement paresseux hors contexte async.
+    acteur_id = current_user.id
+    try:
+        events = await _chercher_traces(db, request_id)
+    except SQLAlchemyError:
+        await db.rollback()
+        await record_operator_read(
+            db, actor_user_id=acteur_id, scope="platform", action="request_trace.read",
+            target_type="request_trace", outcome="error", request_id=request.state.request_id,
+        )
+        raise AppError(code="request_trace_error", message="Recherche indisponible, réessayez.", status_code=503)
+    outcome = "found" if events else "not_found"
+    await record_operator_read(
+        db, actor_user_id=acteur_id, scope="platform", action="request_trace.read",
+        target_type="request_trace", outcome=outcome, request_id=request.state.request_id,
+    )
+    return OperatorRequestTrace(requestId=request_id, found=bool(events), outcome=outcome, events=events)
+
+
+async def _chercher_traces(db: AsyncSession, request_id: str) -> list[OperatorTraceEvent]:
+    """Lit les événements d'audit et de webhook portant ce request ID (100 au plus par source).
+
+    Les résumés d'audit ne contiennent le request ID que pour un petit sous-ensemble
+    de mutations ; les webhooks le portent dans une colonne dédiée. Aucun résumé
+    brut, donnée utilisateur, corps de requête ou donnée d'authentification n'est
+    renvoyé : seuls source, action, type d'entité et date sortent.
+    """
     audits = list((await db.scalars(select(AuditLog).where(
         AuditLog.summary.contains(f"(request_id={request_id})")
     ).order_by(AuditLog.createdAt.desc()).limit(100))).all())
@@ -124,12 +189,7 @@ async def lookup_request(
         OperatorTraceEvent(source="payment_webhook", action=w.eventType, entityType="PaymentWebhookEvent", createdAt=w.createdAt)
         for w in webhooks
     )
-    await record_operator_read(
-        db, actor_user_id=current_user.id, scope="platform", action="request_trace.read",
-        target_type="request_trace", outcome="found" if events else "not_found",
-        request_id=request.state.request_id,
-    )
-    return OperatorRequestTrace(requestId=request_id, found=bool(events), events=events)
+    return events
 
 
 @router.get("/payment-events/{event_id}", response_model=OperatorPaymentEvent)

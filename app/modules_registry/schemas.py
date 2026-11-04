@@ -54,3 +54,19 @@ class InstalledModuleResponse(BaseModel):
     accessState: Literal["not_configured", "active", "inactive", "expired", "blocked", "unknown"]
     canActivate: bool
     canOpen: bool
+
+
+class ModuleAccessResponse(BaseModel):
+    """Projection d'accès d'un module pour l'organisation courante (BE-025).
+
+    `canActivate` dit si l'organisation peut activer le module (droit d'abonnement). `canOpen`
+    dit si le module est en plus activé pour elle et que le registre le déclare disponible : c'est
+    la seule valeur à consulter avant d'ouvrir le module. Les deux sont calculées côté serveur ;
+    l'interface ne déduit jamais un droit de l'état brut."""
+
+    moduleId: uuid.UUID
+    moduleCode: str
+    status: str
+    accessState: Literal["not_configured", "active", "inactive", "expired", "blocked", "unknown"]
+    canActivate: bool
+    canOpen: bool

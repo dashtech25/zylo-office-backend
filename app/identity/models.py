@@ -16,6 +16,10 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="active")
+    # Verrou de version (BE-233, app/core/versioning.py) : +1 à chaque mutation.
+    version: Mapped[int] = mapped_column(
+        nullable=False, server_default="1", comment="Version de l'agrégat (BE-233) ; incrémentée à chaque mutation, verrou de conflit."
+    )
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):

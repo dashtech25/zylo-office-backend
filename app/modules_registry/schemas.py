@@ -159,3 +159,29 @@ class ModuleAuditEventResponse(BaseModel):
             payloadMinimal=evenement.payloadMinimal,
             createdAt=evenement.createdAt,
         )
+
+
+class CatalogueModuleResponse(BaseModel):
+    """Ligne du catalogue public (BE-043) : seuls les champs sans valeur interne de publication."""
+
+    code: str
+    name: str
+    description: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class VersionPublieeCatalogue(BaseModel):
+    """Version publiée exposée dans une fiche publique (BE-043). Aucune version non publiée."""
+
+    version: str
+    publishedAt: datetime | None
+
+
+class FicheModuleCatalogue(BaseModel):
+    """Fiche publique d'un module (BE-043) : identité et versions publiées uniquement."""
+
+    code: str
+    name: str
+    description: str | None
+    versions: list[VersionPublieeCatalogue]

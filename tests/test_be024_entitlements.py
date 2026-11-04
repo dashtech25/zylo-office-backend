@@ -281,6 +281,7 @@ async def test_ca9_ecriture_sans_entitlement_manage_renvoie_403():
                 db, actor_user_id=uuid.uuid4(), organization_id=organisation.id,
                 subscription_id=subscription.id, module_code="zylo_liquid",
                 entitlement_code="ent.ca9", starts_at=datetime.now(timezone.utc),
+                niveau_application="organisation", source_attribution="offre",
             )
     assert erreur.value.status_code == 403
     assert await _nombre_entitlements() == avant

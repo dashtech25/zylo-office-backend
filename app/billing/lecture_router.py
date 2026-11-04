@@ -16,6 +16,13 @@ Contrat :
 
 Les anciennes routes `/api/v1/billing/organizations/{id}/invoices` restent en place
 (app/billing/router.py) ; elles ne sont pas la surface de lecture de BE-027.
+
+Entitlements d'une organisation désignée par son identifiant (BE-045) :
+- `GET /organizations/{organization_id}/entitlements` : liste des entitlements avec source,
+  niveau, état calculé, période, limite et unité de quota. Le chemin porte l'organisation ;
+  l'en-tête `X-Organization-Id` doit être identique (sinon 404, garde `organisation_cible`).
+- Non-membre ou autre tenant : 404 `organization_not_found`, sans aucune donnée.
+- Permission : `organization.entitlement.read` (QE-MOD-16). Membre sans elle : 403.
 """
 
 import uuid
@@ -24,10 +31,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.billing import entitlements as calcul_entitlements
 from app.billing import service
 from app.billing.models import Invoice, Subscription
-from app.billing.permissions import BILLING_INVOICE_READ
-from app.billing.schemas import InvoiceResponse
+from app.billing.permissions import BILLING_INVOICE_READ, ORGANIZATION_ENTITLEMENT_READ
+from app.billing.schemas import InvoiceResponse, OrganizationEntitlementResponse
 from app.core.database import get_db
 from app.rbac.guards import get_current_organization_id
 from app.rbac.service import require_permission
@@ -68,3 +76,39 @@ async def get_current_invoice(
 ) -> Invoice:
     """Une facture de l'organisation active ; 404 si elle appartient à une autre organisation."""
     return await service.get_organization_invoice(db, organization_id, invoice_id)
+
+
+@router.get(
+    "/{organization_id}/entitlements",
+    response_model=list[OrganizationEntitlementResponse],
+    dependencies=[Depends(require_permission(ORGANIZATION_ENTITLEMENT_READ))],
+    summary="Lister les entitlements d'une organisation (BE-045)",
+)
+async def list_organization_entitlements(
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[OrganizationEntitlementResponse]:
+    """Entitlements de l'organisation du chemin, état calculé à la lecture.
+
+    La garde (`get_current_organization_id`) refuse d'abord une organisation étrangère ou
+    sans appartenance active par un 404 uniforme ; la permission est ensuite exigée (403).
+    Seules les lignes de cette organisation sont lues (isolation). `quotaUnit` est nul quand
+    la capacité ne porte pas d'unité.
+    """
+    calcules = await calcul_entitlements.calculer_entitlements(db, organization_id)
+    return [
+        OrganizationEntitlementResponse(
+            id=entitlement.id,
+            moduleCode=entitlement.moduleCode,
+            entitlementCode=entitlement.entitlementCode,
+            scope=entitlement.niveauApplication,
+            source=entitlement.sourceAttribution,
+            state=entitlement.etat,
+            quotaLimit=entitlement.quotaLimite,
+            quotaUnit=entitlement.quotaUnit,
+            periodStart=entitlement.startsAt,
+            periodEnd=entitlement.endsAt,
+            stateVersion=entitlement.stateVersion,
+        )
+        for entitlement in calcules
+    ]

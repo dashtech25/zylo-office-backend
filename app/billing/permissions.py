@@ -16,3 +16,7 @@ SUBSCRIPTION_READ = "billing.subscription.read"
 ENTITLEMENT_MANAGE = "entitlement.manage"
 # Lecture des factures de l'organisation courante (BE-027, routes /organizations/current/invoices).
 BILLING_INVOICE_READ = "billing.invoice.read"
+# BE-045 (QE-MOD-16, recommandation appliquée) : lecture des entitlements d'une organisation
+# désignée par son identifiant dans le chemin (GET /organizations/{organization_id}/entitlements).
+# Portée organisation ; accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS.
+ORGANIZATION_ENTITLEMENT_READ = "organization.entitlement.read"

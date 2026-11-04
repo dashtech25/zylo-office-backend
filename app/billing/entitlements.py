@@ -57,6 +57,12 @@ class EntitlementCalcule:
     niveauApplication: str
     sourceAttribution: str
     etat: str
+    # BE-045 : période, version d'état et unité du quota. `quotaUnit` vient de la capacité
+    # (nul si elle n'en porte pas : aucune valeur par défaut n'est inventée).
+    startsAt: datetime | None = None
+    endsAt: datetime | None = None
+    stateVersion: int = 1
+    quotaUnit: str | None = None
 
 
 async def _capacite_pour_code(db: AsyncSession, module_code: str, code: str) -> uuid.UUID | None:
@@ -119,13 +125,14 @@ async def calculer_entitlements(
     de fin est passée : son état stocké prime.
     """
     maintenant = now or datetime.now(timezone.utc)
-    lignes = (await db.scalars(
-        select(SubscriptionEntitlement)
+    lignes = (await db.execute(
+        select(SubscriptionEntitlement, Capability.quotaUnit)
+        .outerjoin(Capability, Capability.id == SubscriptionEntitlement.capaciteId)
         .where(SubscriptionEntitlement.organizationId == organization_id)
         .order_by(SubscriptionEntitlement.entitlementCode)
     )).all()
     calcules: list[EntitlementCalcule] = []
-    for ligne in lignes:
+    for ligne, unite_quota in lignes:
         etat = ligne.status
         if etat == "active" and ligne.endsAt is not None and ligne.endsAt <= maintenant:
             etat = "expired"
@@ -141,6 +148,10 @@ async def calculer_entitlements(
             niveauApplication=ligne.niveauApplication,
             sourceAttribution=ligne.sourceAttribution,
             etat=etat,
+            startsAt=ligne.startsAt,
+            endsAt=ligne.endsAt,
+            stateVersion=ligne.stateVersion,
+            quotaUnit=unite_quota,
         ))
     return calcules
 
@@ -158,12 +169,14 @@ async def enregistrer_entitlement(
     offre_id: uuid.UUID | None = None,
     capacite_id: uuid.UUID | None = None,
     quota_limite: int | None = None,
-    niveau_application: str = "organisation",
-    source_attribution: str = "offre",
+    niveau_application: str,
+    source_attribution: str,
     status: str = "active",
 ) -> SubscriptionEntitlement:
     """Écrit un entitlement après contrôle de la permission `entitlement.manage`.
 
+    `niveau_application` (scope) et `source_attribution` (source) sont obligatoires, sans
+    défaut (BE-045, CA-4) : un droit sans niveau ni source ne peut pas être enregistré.
     Le contrôle a lieu avant toute écriture : sans la permission, `AppError` 403 est levé
     et rien n'est ajouté à la session. Les valeurs énumérées et la cohérence
     organisation/source sont ensuite garanties par les contraintes de la base (une

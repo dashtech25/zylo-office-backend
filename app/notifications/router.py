@@ -95,12 +95,26 @@ async def get_inbox_item(
     return NotificationInboxItemResponse.model_validate(item)
 
 
-@router.patch("/inbox/{item_id}/read", response_model=NotificationInboxItemResponse, summary="Marquer sa notification comme lue")
+@router.patch(
+    "/inbox/{item_id}",
+    response_model=NotificationInboxItemResponse,
+    summary="Marquer sa notification comme lue",
+    description="Pose `readAt` si besoin ; répéter l'appel est idempotent. 404 si l'élément n'appartient pas au compte courant.",
+)
+@router.patch(
+    "/inbox/{item_id}/read",
+    response_model=NotificationInboxItemResponse,
+    include_in_schema=False,
+)
 async def mark_inbox_item_read(
     item_id: uuid.UUID,
     organization_id: uuid.UUID = Depends(get_current_organization_id),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> NotificationInboxItemResponse:
+    """Route définitive `PATCH /inbox/{itemId}` (BE-035). L'alias `/inbox/{itemId}/read`
+    reste servi, masqué du schéma OpenAPI, pour le contrat déjà documenté dans
+    `docs/architecture/notifications/inbox-api.md` ; il sera retiré quand ce document
+    sera aligné."""
     item = await service.mark_inbox_item_read(db, organization_id=organization_id, user_id=current_user.id, item_id=item_id)
     return NotificationInboxItemResponse.model_validate(item)

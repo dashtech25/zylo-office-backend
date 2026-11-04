@@ -1,6 +1,13 @@
 """Modèles de la capacité Notifications partagée : abonnements Web Push et
 éléments d'inbox explicitement adressés. Aucun type de notification ni
-producteur produit n'est défini dans ce module."""
+producteur produit n'est défini dans ce module.
+
+Tables : `notificationPushSubscription` (PushSubscription) et
+`notification_inbox_item` (NotificationInboxItem). Les tables sont listées
+dans l'inventaire des données (`app/data_inventory/registre.py`) : tout
+renommage de table doit l'y reporter, sinon `tests/test_inventaire_donnees_be242.py`
+échoue. Les noms de table suivent la règle de la tâche BE-037 : snake_case
+pour les tables décidées depuis, camelCase pour les plus anciennes."""
 
 import uuid
 from datetime import datetime
@@ -39,12 +46,20 @@ class PushSubscription(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class NotificationInboxItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Message interne explicitement adressé à un membre d'organisation.
 
+    Table `notification_inbox_item` (snake_case, décision BE-037 ; renommée par
+    la révision f5a6b7c8d9e0). Les index et la contrainte d'unicité gardent
+    leurs noms camelCase d'origine, référencés par le service d'insertion.
+
+    Idempotence : un même événement source ne produit qu'un item par
+    destinataire (contrainte `uq_notificationInboxItem_event_recipient` sur
+    organisation, destinataire, type et identifiant d'événement).
+
     Le stockage ne choisit ni catégorie produit ni canal de livraison. Aucun
     producteur métier n'est branché tant que le catalogue d'événements PH-13
     et la frontière Notifications/Alertes (ARC-007) ne sont pas validés.
     """
 
-    __tablename__ = "notificationInboxItem"
+    __tablename__ = "notification_inbox_item"
     __table_args__ = (
         UniqueConstraint(
             "organizationId", "recipientUserId", "sourceEventType", "sourceEventId",

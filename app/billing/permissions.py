@@ -20,3 +20,8 @@ BILLING_INVOICE_READ = "billing.invoice.read"
 # désignée par son identifiant dans le chemin (GET /organizations/{organization_id}/entitlements).
 # Portée organisation ; accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS.
 ORGANIZATION_ENTITLEMENT_READ = "organization.entitlement.read"
+# BE-046 (QE-MOD-16, recommandation appliquée) : attribuer un siège (allocation) d'un
+# entitlement à un membre, et révoquer ce siège. Deux permissions distinctes : un acteur
+# peut attribuer sans pouvoir révoquer, et inversement. Portée organisation.
+ORGANIZATION_ENTITLEMENT_ALLOCATE = "organization.entitlement.allocate"
+ORGANIZATION_ENTITLEMENT_REVOKE = "organization.entitlement.revoke"

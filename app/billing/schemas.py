@@ -131,3 +131,28 @@ class PaymentProviderStatus(BaseModel):
     configured: bool
     checkoutAvailable: bool
     message: str
+
+
+class AllocationCreate(BaseModel):
+    """Corps de `POST .../entitlements/{entitlementId}/allocations` (BE-046).
+
+    `stateVersion` est la version de l'entitlement lue par le client : une version périmée
+    renvoie 409 au lieu d'écraser une écriture concurrente.
+    """
+
+    userId: uuid.UUID
+    stateVersion: int
+
+
+class AllocationResponse(BaseModel):
+    """Siège d'entitlement, tel que renvoyé après attribution ou révocation (BE-046)."""
+
+    id: uuid.UUID
+    entitlementId: uuid.UUID
+    organizationId: uuid.UUID
+    userId: uuid.UUID
+    grantedBy: uuid.UUID
+    grantedAt: datetime
+    revokedAt: datetime | None = None
+
+    model_config = {"from_attributes": True}

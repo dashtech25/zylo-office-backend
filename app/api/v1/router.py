@@ -5,6 +5,7 @@ from app.api.v1.endpoints import health
 from app.auth.router import router as auth_router
 from app.billing.router import current_organization_router as billing_current_organization_router
 from app.billing.lecture_router import router as billing_lecture_router
+from app.billing.allocation_router import router as billing_allocation_router
 from app.billing.router import router as billing_router
 from app.files.router import router as files_router
 from app.identity.router import router as organizations_router
@@ -52,6 +53,8 @@ api_router.include_router(organization_audit_router, prefix="/organizations", ta
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(billing_router, prefix="/billing", tags=["billing"])
 api_router.include_router(billing_lecture_router, prefix="/organizations", tags=["billing"])
+# BE-046 : attribution et révocation des sièges d'entitlement (sous /organizations/{id}/entitlements).
+api_router.include_router(billing_allocation_router, prefix="/organizations", tags=["billing"])
 api_router.include_router(operator_router, prefix="/admin", tags=["operator"])
 api_router.include_router(operator_admin_router, prefix="/admin", tags=["operator"])
 api_router.include_router(internal_health_router, tags=["health"])

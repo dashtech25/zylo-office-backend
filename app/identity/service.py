@@ -8,7 +8,9 @@ from app.audit.permissions import AUDIT_LOG_VIEW
 from app.audit.service import record_audit_event
 from app.billing.permissions import (
     BILLING_INVOICE_READ,
+    ORGANIZATION_ENTITLEMENT_ALLOCATE,
     ORGANIZATION_ENTITLEMENT_READ,
+    ORGANIZATION_ENTITLEMENT_REVOKE,
     SUBSCRIPTION_MANAGE,
     SUBSCRIPTION_READ,
 )
@@ -56,6 +58,8 @@ OWNER_DEFAULT_PERMISSIONS = [
     (SUBSCRIPTION_READ, "billing", "Consulter l'abonnement, les droits et les entitlements de l'organisation."),
     (BILLING_INVOICE_READ, "billing", "Consulter les factures et tentatives de paiement de l'organisation."),
     (ORGANIZATION_ENTITLEMENT_READ, "billing", "Consulter les entitlements de l'organisation désignée par son identifiant (BE-045)."),
+    (ORGANIZATION_ENTITLEMENT_ALLOCATE, "billing", "Attribuer un siège d'entitlement à un membre de l'organisation (BE-046)."),
+    (ORGANIZATION_ENTITLEMENT_REVOKE, "billing", "Révoquer le siège d'entitlement d'un membre de l'organisation (BE-046)."),
     (CURRENCY_READ, "shared", "Consulter le référentiel des devises."),
     (CURRENCY_MANAGE, "shared", "Créer/modifier le référentiel des devises."),
     (EXCHANGE_RATE_READ, "shared", "Consulter les taux de change."),

@@ -15,6 +15,7 @@ from app.modules_registry.router import router as modules_router
 from app.rbac.module_router import router as rbac_module_router
 from app.notifications.router import router as notifications_router
 from app.rbac.router import router as rbac_router
+from app.rbac.roles_lecture import router as roles_lecture_router
 from app.audit.router import router as audit_router
 from app.shared.currency_router import currency_router, exchange_rate_router
 from app.shared.export_router import export_router
@@ -33,6 +34,8 @@ api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(account_router, prefix="/account", tags=["account"])
 api_router.include_router(modules_router, prefix="/modules", tags=["modules"])
 api_router.include_router(rbac_router, prefix="/rbac", tags=["rbac"])
+# BE-016 : lecture des rôles de l organisation courante (lecture seule).
+api_router.include_router(roles_lecture_router, prefix="/organizations", tags=["rbac"])
 api_router.include_router(rbac_module_router, prefix="/rbac", tags=["rbac"])
 api_router.include_router(audit_router, prefix="/audit", tags=["audit"])
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])

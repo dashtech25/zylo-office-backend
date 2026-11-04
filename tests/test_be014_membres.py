@@ -145,11 +145,12 @@ async def test_be014_ca1_refus_distinct_de_la_liste_vide_et_de_l_erreur(client: 
     assert refus_appartenance.status_code == 404, refus_appartenance.text
     assert proprietaire["userId"] not in refus_appartenance.text
 
-    # Organisation réellement vide au sens de la liste : seul le propriétaire, donc une
-    # liste de longueur 1 et non une liste vide ; l'état vide ne se confond pas avec l'erreur.
-    liste = await client.get("/api/v1/organizations/current/members", headers=_entetes(proprietaire, o1))
+    # Organisation sans autre membre que son propriétaire : liste de longueur 1, réponse 200.
+    # Cet état ne se confond ni avec le refus (403/404) ni avec une erreur.
+    seul = await _creer_organisation(client, proprietaire, "Organisation seule")
+    liste = await client.get("/api/v1/organizations/current/members", headers=_entetes(proprietaire, seul))
     assert liste.status_code == 200, liste.text
-    assert len(liste.json()) == 1
+    assert [entree["userId"] for entree in liste.json()] == [proprietaire["userId"]]
 
 
 async def test_be014_ca2_refus_sans_permission_de_retrait_garde_l_appartenance(client: AsyncClient):

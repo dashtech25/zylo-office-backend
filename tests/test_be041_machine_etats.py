@@ -37,6 +37,24 @@ def _erreur_code(exc: pytest.ExceptionInfo) -> str:
     return exc.value.code
 
 
+async def _utilisateur_reel() -> uuid.UUID:
+    """Crée un utilisateur en base et renvoie son identifiant.
+
+    BE-056 publie un événement d'audit par transition réussie ; `audit_event.actorUserId` référence
+    `user.id`. Un acteur de test doit donc être un vrai utilisateur, sinon l'insertion échoue.
+    """
+    from app.identity.models import User
+
+    async with AsyncSessionLocal() as db:
+        utilisateur = User(
+            email=f"be041-{uuid.uuid4().hex[:12]}@zylo-office-test.example.com",
+            hashedPassword="non-utilisable", fullName="Acteur BE-041",
+        )
+        db.add(utilisateur)
+        await db.commit()
+        return utilisateur.id
+
+
 async def _transition(
     db,
     *,
@@ -56,7 +74,7 @@ async def _transition(
         id_sujet=sujet,
         vers_etat=vers_etat,
         version_attendue=version,
-        acteur_id=acteur if acteur is not None else uuid.uuid4(),
+        acteur_id=acteur if acteur is not None else await _utilisateur_reel(),
         origine=origine,
         cle_idempotence=cle,
         operation_id=operation_id,
@@ -142,7 +160,7 @@ async def test_ca3_version_attendue_differente_est_refusee_en_conflit():
 async def test_ca4_chaque_transition_reussie_journalise_acteur_origine_et_operation():
     async with AsyncSessionLocal() as db:
         sujet = uuid.uuid4()
-        acteur = uuid.uuid4()
+        acteur = await _utilisateur_reel()
         operation = uuid.uuid4()
         ligne = await _transition(
             db,

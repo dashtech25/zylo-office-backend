@@ -127,3 +127,35 @@ class ModuleVersionAdminResponse(BaseModel):
     publishedAt: datetime | None
 
     model_config = {"from_attributes": True}
+class ModuleAuditEventResponse(BaseModel):
+    """Un événement de transition de module, tel que lu par `GET /organizations/{id}/module-audit` (BE-056).
+
+    `moduleId` vient du scope de l'événement (nul si la transition n'en portait pas). La charge utile
+    est celle, minimale, écrite à la publication : états et versions, jamais de secret.
+    """
+
+    id: uuid.UUID
+    eventName: str
+    subjectType: str | None
+    subjectId: uuid.UUID | None
+    moduleId: uuid.UUID | None
+    actorId: uuid.UUID
+    origin: str | None
+    correlationId: str | None
+    payloadMinimal: dict | None
+    createdAt: datetime
+
+    @classmethod
+    def from_evenement(cls, evenement) -> "ModuleAuditEventResponse":
+        return cls(
+            id=evenement.id,
+            eventName=evenement.eventName,
+            subjectType=evenement.subjectType,
+            subjectId=evenement.subjectId,
+            moduleId=evenement.scopeResourceId,
+            actorId=evenement.actorUserId,
+            origin=evenement.origin,
+            correlationId=evenement.correlationId,
+            payloadMinimal=evenement.payloadMinimal,
+            createdAt=evenement.createdAt,
+        )

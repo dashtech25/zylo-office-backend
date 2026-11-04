@@ -34,6 +34,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.modules_registry.evenements import publier_evenement_transition
 from app.modules_registry.models import ORIGINES_TRANSITION, ModuleStateTransition
 
 TYPE_SUJET_INSTALLATION = "tenant_module"
@@ -158,6 +159,7 @@ async def transitionner(
     organisation_id: uuid.UUID | None = None,
     motif: str | None = None,
     operation_id: uuid.UUID | None = None,
+    module_id: uuid.UUID | None = None,
 ) -> ModuleStateTransition:
     """Applique la transition du sujet vers `vers_etat` et l'inscrit dans le journal.
 
@@ -166,9 +168,13 @@ async def transitionner(
     - `acteur_id` : utilisateur ou identité de service qui agit, obligatoire ;
     - `origine` : une valeur de `ORIGINES_TRANSITION` ;
     - `cle_idempotence` : clé fournie par l'appelant, unique par sujet ;
-    - `operation_id` : identifiant de l'opération, généré si absent (renvoyé par la ligne).
+    - `operation_id` : identifiant de l'opération, généré si absent (renvoyé par la ligne) ;
+    - `module_id` : module auquel se rapporte l'installation (BE-056) ; devient le scope de
+      l'événement publié et permet le filtre `moduleId` de la lecture d'audit.
 
-    Renvoie la ligne de journal créée, ou la ligne initiale en cas de rejeu. Lève `AppError` :
+    Renvoie la ligne de journal créée, ou la ligne initiale en cas de rejeu. Une transition réussie
+    publie exactement un événement (BE-056, `evenements.publier_evenement_transition`) dans la même
+    transaction ; un rejeu ou une transition refusée n'en publie aucun. Lève `AppError` :
     `MODULE_ACTOR_REQUIRED` (401), `MODULE_TRANSITION_ORIGIN_INVALID` (422),
     `MODULE_STATE_VERSION_CONFLICT` (409), `MODULE_TRANSITION_NOT_ALLOWED` (409).
 
@@ -236,4 +242,5 @@ async def transitionner(
             message="Version d'état modifiée par une autre commande concurrente.",
             status_code=409,
         )
+    await publier_evenement_transition(db, ligne, module_id=module_id)
     return ligne

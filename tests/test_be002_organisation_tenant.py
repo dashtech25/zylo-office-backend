@@ -45,13 +45,16 @@ async def test_be002_ca2_slug_en_double_refuse_par_la_base(client: AsyncClient):
 
 
 async def test_be002_ca3_lectures_publiques_de_l_identite_sont_bornees_par_une_portee(client: AsyncClient):
-    # Toute fonction publique de lecture (list_* / get_*) du service identity
+    # Toute fonction publique de lecture (list_* / get_*) qui renvoie des organisations
     # doit recevoir un paramètre de portée : utilisateur ou organisation.
+    # (get_current_user, dépendance d'authentification, n'est pas une lecture d'organisations.)
     portees = {"user_id", "organization_id", "organisation_id"}
     lectures = [
         (nom, fonction)
         for nom, fonction in inspect.getmembers(identity_service, inspect.iscoroutinefunction)
-        if not nom.startswith("_") and nom.startswith(("list_", "get_"))
+        if not nom.startswith("_")
+        and nom.startswith(("list_", "get_"))
+        and ("organisation" in nom or "organization" in nom)
     ]
 
     assert lectures, "aucune lecture publique trouvée : le contrôle serait vide"

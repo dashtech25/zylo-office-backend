@@ -37,6 +37,7 @@ from app.shared.storage_router import storage_router
 from app.operator.router import router as operator_router
 from app.operator.health import admin_router as operator_admin_router
 from app.operator.health import internal_router as internal_health_router
+from app.operator.admin_audit_router import router as admin_audit_router
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
@@ -71,6 +72,8 @@ api_router.include_router(billing_allocation_router, prefix="/organizations", ta
 api_router.include_router(billing_consent_router, prefix="/billing", tags=["billing"])
 api_router.include_router(operator_router, prefix="/admin", tags=["operator"])
 api_router.include_router(operator_admin_router, prefix="/admin", tags=["operator"])
+# BE-122 : journal d'audit administratif, lecture seule (GET /admin/audit-events).
+api_router.include_router(admin_audit_router, prefix="/admin", tags=["admin-audit"])
 api_router.include_router(internal_health_router, tags=["health"])
 api_router.include_router(zylo_liquid_router, prefix="/zylo-liquid", tags=["zylo-liquid"])
 api_router.include_router(files_router, prefix="/zylo-liquid", tags=["files"])

@@ -211,11 +211,9 @@ async def test_be260_ca3_lecture_par_le_proprietaire_renvoie_les_entrees(client:
 
 async def test_be260_ca4_membre_de_b_ne_lit_pas_l_organisation_a(client: AsyncClient, registered_user: dict, organization: dict):
     """CA-4 : un utilisateur de l'organisation B qui appelle
-    `GET /api/v1/organizations/{A}/audit` reçoit 403 et aucune ligne de A.
+    `GET /api/v1/organizations/{A}/audit` reçoit 404 et aucune ligne de A.
 
-    Attention : le garde d'appartenance existant (T-010, `require_organization_member`)
-    répond 404 uniforme à un non-membre. Ce test suit la définition (403) ; le conflit
-    est signalé dans le rapport."""
+    Décision T-010 : hors portée = 404 (QE-FON-19)."""
     user_a, org_a = await _utilisateur_et_organisation(registered_user, organization)
     action = f"test.be260.ca4.{uuid.uuid4().hex[:8]}"
     await _enregistrer_entree_test(org_a, user_a, action, "Entrée confidentielle de A BE260")
@@ -226,7 +224,7 @@ async def test_be260_ca4_membre_de_b_ne_lit_pas_l_organisation_a(client: AsyncCl
         headers={"Authorization": f"Bearer {autre['accessToken']}"},
     )
 
-    assert res.status_code == 403, res.text
+    assert res.status_code == 404, res.text
     assert "Entrée confidentielle de A BE260" not in res.text
 
 

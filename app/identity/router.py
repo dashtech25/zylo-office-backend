@@ -31,6 +31,35 @@ router = APIRouter()
 # jamais un nouveau module pour une seule route.
 users_router = APIRouter()
 
+# BE-020 : profil de compte en lecture seule, préfixe /account. Volontairement
+# sans route d'édition : PUT et PATCH sur le même chemin renvoient 405 (FastAPI
+# répond 405 quand le chemin existe mais que la méthode n'y est pas déclarée).
+account_router = APIRouter()
+
+
+@account_router.get(
+    "/profile",
+    response_model=UserResponse,
+    summary="Lire le profil de l'utilisateur de la session (lecture seule)",
+)
+async def get_account_profile(current_user: User = Depends(get_current_user)) -> User:
+    """Renvoie le profil de l'utilisateur authentifié par la session, et lui seul.
+
+    Intention (BE-020, CA-3) : aucun identifiant d'utilisateur n'est lu dans la
+    requête (ni chemin, ni paramètre, ni en-tête). Le profil vient uniquement de
+    la session validée par `get_current_user`, ce qui rend impossible de lire le
+    profil d'un autre compte par manipulation de la requête.
+
+    Refus : sans session valide, 401 (`get_current_user`). Un compte qui doit
+    changer son mot de passe reçoit 403 `password_change_required`, comme les
+    autres routes métier ; seul GET /auth/me reste accessible dans ce cas.
+
+    Le schéma `UserResponse` ne contient ni condensat de mot de passe ni secret.
+    Aucune route d'édition n'existe ici : le profil se modifie par les routes
+    dédiées du socle (changement de mot de passe, BE-018).
+    """
+    return current_user
+
 
 @users_router.patch("/{user_id}", response_model=UserResponse)
 async def update_user_profile(

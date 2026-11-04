@@ -10,6 +10,17 @@ from app.shared.models import SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMix
 
 
 class Organization(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
+    """Organisation cliente : tenant racine (BE-002).
+
+    Colonnes clés : `name` (nom affiché), `slug` (identifiant stable, unique en
+    base : un second enregistrement au même slug est refusé par la contrainte
+    d'unicité), `status` (défaut `active`). La suppression est logique
+    (`deletedAt`, SoftDeleteMixin). Le schéma vient de la migration
+    `4b1cccdb5fd5` ; aucune migration supplémentaire n'est requise par BE-002.
+    Aucune lecture publique ne renvoie plusieurs organisations sans paramètre de
+    portée (voir app/identity/service.py::list_user_organizations).
+    """
+
     __tablename__ = "organization"
     __table_args__ = {"comment": "Organisation cliente de Zylo Office — tenant racine du système multi-organisation."}
 
@@ -19,6 +30,17 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
+    """Utilisateur global (BE-003) : une seule ligne par personne, quel que soit
+    le nombre d'organisations auxquelles elle appartient (rattachement dans
+    `organizationUser`, BE-004).
+
+    `email` est unique, et un index unique sur `lower(email)` (uq_user_email_lower)
+    refuse deux comptes qui ne diffèrent que par la casse. `hashedPassword` ne
+    contient jamais de mot de passe en clair : seul le condensat bcrypt produit
+    par app/core/security.py::hash_password y est stocké. `status` vaut `active`,
+    `suspended` ou `pending`. Un utilisateur inexistant n'obtient aucune session.
+    """
+
     __tablename__ = "user"
     # Intention (T-013) : unicité de l'e-mail sans tenir compte de la casse.
     # L'e-mail est normalisé en minuscules à l'écriture ; cet index bloque aussi

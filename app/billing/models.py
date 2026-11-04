@@ -333,3 +333,24 @@ class PlanVersionSnapshot(Base):
     capturedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     sourceCatalogueRef: Mapped[str] = mapped_column(String(64), nullable=False, comment="Identifiant de la ligne planVersion source.")
     snapshotJson: Mapped[dict] = mapped_column(JSON, nullable=False, comment="Contenu figé de l'offre et de sa version.")
+
+
+class ConsentRecord(Base):
+    """Preuve d'un consentement versionné (BE-076), append-only.
+
+    Une ligne est écrite à chaque consentement ou correction et n'est jamais modifiée :
+    une migration pose un trigger PostgreSQL qui refuse UPDATE et DELETE (CA-2). Une
+    correction est une nouvelle ligne dont `correctionOfId` pointe l'entrée d'origine.
+    `consentTextVersion` identifie le texte accepté ; `scope` est le périmètre
+    (payeur, tenant, beneficiaire). `accountId` référence le compte payeur `billing_payer`.
+    """
+    __tablename__ = "consent_record"
+    __table_args__ = {"comment": "Consentement versionné d'une personne pour un compte payeur, append-only (BE-076)."}
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    personId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False, index=True, comment="Personne qui consent.")
+    accountId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("billing_payer.id"), nullable=False, index=True, comment="Compte payeur concerné.")
+    consentTextVersion: Mapped[str] = mapped_column(String(64), nullable=False, comment="Identifiant de version du texte accepté.")
+    scope: Mapped[str] = mapped_column(String(30), nullable=False, comment="Périmètre du consentement (payeur, tenant, beneficiaire).")
+    recordedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="Heure d'enregistrement serveur.")
+    correctionOfId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("consent_record.id"), nullable=True, index=True, comment="Entrée d'origine corrigée, nulle hors correction.")

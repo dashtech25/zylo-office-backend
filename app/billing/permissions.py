@@ -28,3 +28,7 @@ ORGANIZATION_ENTITLEMENT_REVOKE = "organization.entitlement.revoke"
 # BE-075 : lecture interne du catalogue figé (snapshotJson). Aucune permission client
 # directe sur le catalogue : ce code n'est accordé à aucun rôle par défaut.
 BILLING_CATALOGUE_READ = "billing.catalogue.read"
+# BE-076 (QE-FAC-03, recommandation appliquée) : enregistrer un consentement versionné pour un
+# compte payeur. Porte les rôles ACTF-04 (acheteur) et ACTF-05 (contact de facturation) ; accordée
+# au propriétaire via OWNER_DEFAULT_PERMISSIONS (app/identity/service.py). Sans elle : 403 FORBIDDEN.
+BILLING_CONSENT_RECORD = "billing.consent.record"

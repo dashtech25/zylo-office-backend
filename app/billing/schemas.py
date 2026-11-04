@@ -1,7 +1,9 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CreatePlanRequest(BaseModel):
@@ -156,3 +158,26 @@ class AllocationResponse(BaseModel):
     revokedAt: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class ConsentCreate(BaseModel):
+    """Corps de `POST /billing/consents` (BE-076). `correctionOfId` n'est renseigné que pour une correction."""
+
+    accountId: uuid.UUID
+    consentTextVersion: str = Field(min_length=1, max_length=64)
+    scope: Literal["payeur", "tenant", "beneficiaire"]
+    correctionOfId: uuid.UUID | None = None
+
+
+class ConsentResponse(BaseModel):
+    """Consentement enregistré (BE-076) : version du texte, personne, compte, heure, scope."""
+
+    id: uuid.UUID
+    personId: uuid.UUID
+    accountId: uuid.UUID
+    consentTextVersion: str
+    scope: str
+    recordedAt: datetime
+    correctionOfId: uuid.UUID | None
+
+    model_config = ConfigDict(from_attributes=True)

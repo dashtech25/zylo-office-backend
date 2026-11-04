@@ -1,3 +1,22 @@
+"""Contrat d'erreurs de l'API (BE-001, décision D1).
+
+Toute réponse d'erreur de `/api/v1` a la forme :
+
+    {"error": {"code", "message", "field_errors", "details"}, "request_id"}
+
+- `code` : `validation_error` (422), `internal_error` (500), `http_<statut>`
+  pour une erreur HTTP Starlette (404, 405, ...), ou le code métier d'une
+  `AppError`.
+- `field_errors` : chemin pointé sans préfixe `body`/`query`/`path`.
+- `details` : vide, sauf pour les erreurs de validation (liste Pydantic sans
+  `input` ni `ctx`, qui peuvent contenir des secrets ou des objets Python).
+- `request_id` : identique à l'en-tête `X-Request-Id` (et `X-Correlation-Id`),
+  posé par `RequestIdMiddleware` (app/core/middleware.py).
+
+Les gestionnaires sont enregistrés par `register_exception_handlers`, appelé
+une seule fois dans app/main.py. Ne pas redéfinir cette enveloppe ailleurs.
+"""
+
 import logging
 
 from fastapi import FastAPI, Request, status
@@ -100,6 +119,9 @@ def _validation_field_errors(errors: list[dict]) -> dict[str, list[str]]:
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
+        """Renvoie une `AppError` avec son code, son statut, ses détails et ses
+        en-têtes propres (ex. Retry-After). Journalise en avertissement, sans
+        le corps de la requête."""
         logger.warning("app_error", extra={"code": exc.code, "path": request.url.path})
         return _error_response(
             exc.status_code, exc.code, exc.message, exc.details, exc.headers, exc.field_errors, request
@@ -107,6 +129,8 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        """Erreur de validation de la requête : 422, code `validation_error`,
+        `field_errors` par chemin, `details` sans `input` ni `ctx`."""
         return _error_response(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "validation_error",
@@ -118,19 +142,26 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def handle_http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        """Erreur HTTP Starlette (404 route inconnue, 405 méthode non permise,
+        erreurs levées par les routes) : code `http_<statut>`. Le message
+        Starlette est repris tel quel s'il est textuel ; `details` reste vide
+        (contrat BE-001)."""
         message = exc.detail if isinstance(exc.detail, str) else "La requête n’a pas pu être traitée."
-        details = [] if isinstance(exc.detail, str) else [{"detail": exc.detail}]
         return _error_response(
             exc.status_code,
             f"http_{exc.status_code}",
             message,
-            details=details,
+            details=[],
             headers=exc.headers,
             request=request,
         )
 
     @app.exception_handler(Exception)
     async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+        """Erreur non prévue : 500, code `internal_error`, message générique.
+        La trace part dans le journal (événement `unhandled_error`, avec le
+        request_id), jamais dans la réponse. Ce gestionnaire tourne hors de
+        `RequestIdMiddleware`, d'où la lecture du request_id dans `request.state`."""
         logger.exception(
             "unhandled_error",
             extra={"path": request.url.path, "request_id": getattr(request.state, "request_id", None)},

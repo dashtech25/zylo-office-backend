@@ -1,3 +1,15 @@
+"""Middlewares ASGI transverses (BE-001).
+
+- `RequestIdMiddleware` : un request ID par requête, repris du client s'il
+  respecte le motif, sinon généré ; posé dans `scope["state"]`, dans la
+  contextvar `request_id_ctx` (journaux) et dans les en-têtes
+  `X-Request-Id` et `X-Correlation-Id` de la réponse.
+- `TimingMiddleware` : journalise les requêtes lentes et leur coût SQL.
+
+Les deux sont en ASGI pur, pour ne pas bufferiser les réponses en flux.
+Le format des erreurs est dans app/core/errors.py.
+"""
+
 import logging
 import re
 import time
@@ -16,10 +28,17 @@ _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
 def _request_id(headers) -> str:
-    """Accepte un identifiant de corrélation borné, sinon en génère un."""
-    candidate = headers.get("x-request-id") or headers.get("x-correlation-id")
-    if candidate is not None and _REQUEST_ID_PATTERN.fullmatch(candidate):
-        return candidate
+    """Retient le premier identifiant client valide parmi X-Request-Id puis
+    X-Correlation-Id ; sinon génère un UUID.
+
+    Chaque en-tête est jugé séparément : un X-Request-Id invalide ne doit pas
+    écarter un X-Correlation-Id valide (CA-6 de BE-001). Le motif borne la
+    longueur et le jeu de caractères, car la valeur est reprise dans les
+    journaux et dans les en-têtes de réponse."""
+    for nom in ("x-request-id", "x-correlation-id"):
+        candidate = headers.get(nom)
+        if candidate is not None and _REQUEST_ID_PATTERN.fullmatch(candidate):
+            return candidate
     return str(uuid.uuid4())
 
 

@@ -19,6 +19,7 @@ from app.rbac.module_router import router as rbac_module_router
 from app.notifications.router import router as notifications_router
 from app.rbac.router import router as rbac_router
 from app.rbac.roles_lecture import router as roles_lecture_router
+from app.audit.router import organization_audit_router
 from app.audit.router import router as audit_router
 from app.shared.currency_router import currency_router, exchange_rate_router
 from app.shared.export_router import export_router
@@ -43,6 +44,7 @@ api_router.include_router(rbac_router, prefix="/rbac", tags=["rbac"])
 api_router.include_router(roles_lecture_router, prefix="/organizations", tags=["rbac"])
 api_router.include_router(rbac_module_router, prefix="/rbac", tags=["rbac"])
 api_router.include_router(audit_router, prefix="/audit", tags=["audit"])
+api_router.include_router(organization_audit_router, prefix="/organizations", tags=["audit"])
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(billing_router, prefix="/billing", tags=["billing"])
 api_router.include_router(billing_lecture_router, prefix="/organizations", tags=["billing"])

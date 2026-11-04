@@ -15,6 +15,21 @@ Toute réponse d'erreur de `/api/v1` a la forme :
 
 Les gestionnaires sont enregistrés par `register_exception_handlers`, appelé
 une seule fois dans app/main.py. Ne pas redéfinir cette enveloppe ailleurs.
+
+Table des codes (BE-220) :
+
+| Statut | Code                         | Origine                                        | field_errors / details |
+|--------|------------------------------|------------------------------------------------|------------------------|
+| 401    | code métier de AppError      | non authentifié (jeton absent ou invalide)     | vide                   |
+| 403    | `permission_denied` ou métier | refus de permission au sein de l'organisation  | vide                   |
+| 404    | code métier, ou `http_404`   | ressource absente ou hors périmètre (uniforme) | vide                   |
+| 405    | `http_405`                   | méthode non permise sur une route connue       | vide                   |
+| 409    | code métier de AppError      | conflit de version ou d'état                   | vide                   |
+| 422    | `validation_error`           | validation de la requête                       | renseignés             |
+| 500    | `internal_error`             | exception non prévue, sans trace dans la réponse | vide                 |
+
+`http_<statut>` reste le code des erreurs HTTP Starlette sans code métier
+(route inconnue, méthode non permise) : il est figé par les tests BE-001.
 """
 
 import logging
@@ -80,6 +95,10 @@ def _error_response(
     field_errors: dict[str, list[str]] | None = None,
     request: Request | None = None,
 ) -> JSONResponse:
+    """Construit la réponse d'erreur unique. Le request ID vient de
+    `request.state` (posé par RequestIdMiddleware), à défaut de la contextvar
+    `request_id_ctx`. Il est reporté dans le corps et dans les en-têtes
+    `X-Request-Id` et `X-Correlation-Id`, pour que le client puisse le citer."""
     request_id = (
         getattr(getattr(request, "state", None), "request_id", None)
         or request_id_ctx.get()
@@ -117,6 +136,13 @@ def _validation_field_errors(errors: list[dict]) -> dict[str, list[str]]:
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    """Enregistre les quatre gestionnaires de l'enveloppe d'erreur sur `app` :
+    `AppError`, `RequestValidationError`, `StarletteHTTPException` et `Exception`
+    (filet de sécurité 500). Appelée une seule fois, dans app/main.py : un
+    second appel doublerait les gestionnaires sans effet visible mais
+    trompeur. L'ordre n'a pas d'importance : Starlette choisit le gestionnaire
+    le plus spécifique de la classe d'exception levée."""
+
     @app.exception_handler(AppError)
     async def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
         """Renvoie une `AppError` avec son code, son statut, ses détails et ses

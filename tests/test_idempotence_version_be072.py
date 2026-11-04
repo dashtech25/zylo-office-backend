@@ -36,7 +36,7 @@ async def _identifiant_utilisateur(client: AsyncClient, access_token: str) -> uu
 
 async def _nouvel_utilisateur(client: AsyncClient) -> uuid.UUID:
     """Second principal, distinct du `registered_user` de la fixture."""
-    email = f"be072-{uuid.uuid4().hex[:10]}@example.test"
+    email = f"be072-{uuid.uuid4().hex[:10]}@zylo-office-test.example.com"
     password = "TestPassword123!"
     await client.post("/api/v1/auth/register", json={"email": email, "password": password, "fullName": "Autre"})
     login = await client.post("/api/v1/auth/login", json={"email": email, "password": password})

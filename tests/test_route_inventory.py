@@ -65,11 +65,11 @@ def test_gardes_manuelles_correspondent_a_des_routes_existantes():
 def test_routes_operateur_reconnaissent_la_dependance_du_routeur():
     infos = {i.cle: i for i in inventaire(app)}
     attendues = {
-        "GET /api/v1/operator/organizations",
-        "GET /api/v1/operator/organizations/{organization_id}",
-        "GET /api/v1/operator/health",
-        "GET /api/v1/operator/requests/{request_id}",
-        "GET /api/v1/operator/payment-events/{event_id}",
+        "GET /api/v1/admin/organizations",
+        "GET /api/v1/admin/organizations/{organization_id}",
+        "GET /api/v1/admin/health",
+        "GET /api/v1/admin/requests/{request_id}",
+        "GET /api/v1/admin/payment-events/{event_id}",
     }
     assert attendues <= infos.keys()
     assert all(infos[cle].garde_operateur for cle in attendues)

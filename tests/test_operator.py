@@ -9,7 +9,7 @@ from sqlalchemy import select
 async def test_operator_endpoints_deny_by_default(client: AsyncClient, registered_user: dict, monkeypatch):
     monkeypatch.delenv("OPERATOR_READ_USER_IDS", raising=False)
     headers = {"Authorization": f"Bearer {registered_user['accessToken']}"}
-    response = await client.get("/api/v1/operator/organizations", headers=headers)
+    response = await client.get("/api/v1/admin/organizations", headers=headers)
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "operator_access_denied"
 
@@ -22,7 +22,7 @@ async def test_operator_allowlist_is_read_only_and_returns_redacted_metadata(
     monkeypatch.setenv("OPERATOR_READ_USER_IDS", me.json()["id"])
 
     listed = await client.get(
-        "/api/v1/operator/organizations?limit=20&offset=0",
+        "/api/v1/admin/organizations?limit=20&offset=0",
         headers={**headers, "X-Request-Id": "operator-list-audit"},
     )
     assert listed.status_code == 200
@@ -30,7 +30,7 @@ async def test_operator_allowlist_is_read_only_and_returns_redacted_metadata(
     assert "email" not in listed.text
 
     overview = await client.get(
-        f"/api/v1/operator/organizations/{organization['id']}",
+        f"/api/v1/admin/organizations/{organization['id']}",
         headers={**headers, "X-Request-Id": "operator-org-audit"},
     )
     assert overview.status_code == 200
@@ -39,17 +39,17 @@ async def test_operator_allowlist_is_read_only_and_returns_redacted_metadata(
     assert "email" not in overview.text
 
     health = await client.get(
-        "/api/v1/operator/health", headers={**headers, "X-Request-Id": "operator-health-test"}
+        "/api/v1/admin/health", headers={**headers, "X-Request-Id": "operator-health-test"}
     )
     assert health.status_code == 200
     assert health.json() == {"status": "ok", "database": "ok", "requestId": "operator-health-test"}
 
     trace = await client.get(
-        "/api/v1/operator/requests/no-persisted-trace",
+        "/api/v1/admin/requests/no-persisted-trace",
         headers={**headers, "X-Request-Id": "operator-trace-miss"},
     )
     assert trace.status_code == 200
-    assert trace.json() == {"requestId": "no-persisted-trace", "found": False, "events": []}
+    assert trace.json() == {"requestId": "no-persisted-trace", "found": False, "outcome": "not_found", "events": []}
     assert "summary" not in trace.text
 
     request_id = "persisted-trace-test-1"
@@ -62,14 +62,14 @@ async def test_operator_allowlist_is_read_only_and_returns_redacted_metadata(
             request_id=request_id, eventId=uuid.uuid4().hex,
         ))
         await db.commit()
-    persisted_trace = await client.get(f"/api/v1/operator/requests/{request_id}", headers=headers)
+    persisted_trace = await client.get(f"/api/v1/admin/requests/{request_id}", headers=headers)
     assert persisted_trace.status_code == 200
     assert persisted_trace.json()["found"] is True
     assert "private-person@example.test" not in persisted_trace.text
     assert "summary" not in persisted_trace.text
 
     missing_event = await client.get(
-        "/api/v1/operator/payment-events/no-such-event",
+        "/api/v1/admin/payment-events/no-such-event",
         headers={**headers, "X-Request-Id": "operator-payment-miss"},
     )
     assert missing_event.status_code == 404
@@ -94,6 +94,6 @@ async def test_malformed_operator_allowlist_does_not_grant_access(
 ):
     monkeypatch.setenv("OPERATOR_READ_USER_IDS", "*,not-a-uuid")
     headers = {"Authorization": f"Bearer {registered_user['accessToken']}"}
-    response = await client.get("/api/v1/operator/health", headers=headers)
+    response = await client.get("/api/v1/admin/health", headers=headers)
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "operator_access_denied"

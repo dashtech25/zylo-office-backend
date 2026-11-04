@@ -65,6 +65,10 @@ ROUTES_PUBLIQUES: dict[str, str] = {
     "POST /api/v1/export/docx": "Conversion d'un tableau fourni par l'appelant, authentifiée (get_current_user), sans accès à la base. 2026-10-09.",
     "POST /api/v1/import/xlsx": "Lecture d'un fichier fourni par l'appelant, authentifiée (get_current_user), sans accès à la base. 2026-10-09.",
     "GET /api/v1/notifications/vapid-public-key": "Clé publique VAPID (non secrète), lue avant tout abonnement, aucune donnée d'organisation. 2026-10-09 (T-004b lot 2).",
+    "GET /api/v1/account/profile": "Profil de l'utilisateur de la session uniquement (get_current_user, aucun identifiant lu dans la requête). Portée utilisateur. BE-020.",
+    "POST /api/v1/auth/password-reset/request": "Demande de réinitialisation par adresse, publique par nature ; réponse uniforme, limitée par T-012.",
+    "POST /api/v1/auth/password-reset/confirm": "Confirmation par jeton à usage unique reçu hors API, vérifié et consommé dans le service ; limitée par T-012.",
+    "GET /api/v1/internal/ready": "Readiness réservée au réseau interne : 404 hors HEALTH_INTERNAL_NETWORKS (contrôle dans la route, sans session). BE-032.",
 }
 
 # Routes sans dépendance FastAPI dont le contrôle de sécurité est effectué

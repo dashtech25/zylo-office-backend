@@ -28,6 +28,17 @@ from app.core.errors import AppError
 from app.identity.models import Organization
 
 
+@pytest.fixture(autouse=True)
+async def _pool_neuf_par_test():
+    """Chaque test a sa propre boucle d'événements ; le pool de `engine` ne doit pas
+    garder de connexion d'une boucle fermée (même garde que la fixture `client`)."""
+    from app.core.database import engine
+
+    await engine.dispose()
+    yield
+    await engine.dispose()
+
+
 async def _organisation(db, nom: str) -> Organization:
     organisation = Organization(name=nom, slug=f"be029-{uuid.uuid4().hex[:12]}", status="active")
     db.add(organisation)
@@ -272,3 +283,11 @@ async def test_evenement_non_verifie_jamais_traite():
     assert erreur.value.code == "webhook_signature_invalid"
     assert await _nombre_evenements(event_id) == 0
     assert await _statut_tentative(tentative.id) == "pending"
+
+
+async def creer_tentative_de_test(nom: str = "Org BE-029 partage") -> uuid.UUID:
+    """Identifiant d'une tentative `pending` réelle, pour les autres suites de webhook."""
+    async with AsyncSessionLocal() as db:
+        org = await _organisation(db, nom)
+        tentative = await _tentative(db, org.id)
+    return tentative.id

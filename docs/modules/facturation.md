@@ -23,14 +23,20 @@ erreurs suivent `{error:{code,message,field_errors,details},request_id}`.
   fournisseur n'est appelé.
 - `GET /billing/payment-provider` — expose `provider`, `mode`,
   `configured` et `checkoutAvailable` pour l'interface.
-- `POST /billing/webhooks/flutterwave` — protégé par `verif-hash` comparé en
-  temps constant au secret `FLUTTERWAVE_WEBHOOK_SECRET`. Les événements sont
-  dédupliqués sur `(provider,eventId)` et seul un digest du corps est conservé.
-  Une répétition identique reçoit `duplicate:true`; le même identifiant avec
-  un digest différent reçoit `409 webhook_event_conflict`.
-  L'événement est enregistré comme `recorded_unverified`; il ne règle aucune
-  facture et n'active aucun abonnement. Sans secret, réponse 503; signature
-  incorrecte, 401.
+- `POST /billing/webhooks/flutterwave` — route (BE-083) : vérifie `verif-hash`
+  en temps constant contre `FLUTTERWAVE_WEBHOOK_SECRET` (secret absent 503,
+  signature incorrecte 401), puis délègue à `app/billing/webhooks.py` (BE-029) :
+  - référence `data.tx_ref` = `paymentAttempt.id` ; inconnue ou hors périmètre
+    -> `404 webhook_reference_unknown`, rien n'est écrit ;
+  - doublon (même `(provider,eventId)` et même digest) -> `duplicate:true`, aucun
+    effet rejoué ;
+  - même identifiant, contenu différent -> évènement en `quarantined`
+    (`quarantinedAt`, `quarantineDigest`), contenu non appliqué, `409 webhook_event_conflict` ;
+  - `charge.completed` avec `status` `successful` ou `failed` -> tentative
+    `pending` passe à `reported_successful` / `reported_failed` (non vérifié
+    côté serveur) ; tout autre évènement -> `outcome=ignored`, sans entitlement.
+  Seul un digest SHA-256 du corps est conservé. Aucun évènement ne règle une
+  facture ni n'active un abonnement.
 
 Les mutations d'abonnement/facture/paiement sont derrière
 `billing.subscription.manage`; la lecture est réservée aux membres du tenant.

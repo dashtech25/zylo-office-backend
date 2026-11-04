@@ -1,19 +1,16 @@
 import uuid
-import hashlib
 import hmac
-import json
 import os
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, Request
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.billing import entitlements as calcul_entitlements
 from app.billing import service
-from app.billing.models import Invoice, PaymentWebhookEvent, Plan, PlanVersion, Subscription
+from app.billing.models import Invoice, Plan, PlanVersion, Subscription
 from app.billing.payment_provider import FlutterwaveTestProvider
+from app.billing.webhooks import traiter_evenement_webhook
 from app.billing.permissions import SUBSCRIPTION_MANAGE, SUBSCRIPTION_READ
 from app.billing.schemas import (
     CreateInvoiceRequest, CreateSubscriptionRequest, EntitlementResponse, InvoiceResponse,
@@ -169,9 +166,11 @@ async def flutterwave_webhook(
     verif_hash: str | None = Header(default=None, alias="verif-hash"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Records authenticated events idempotently; it never settles an invoice.
+    """Entrée webhook Flutterwave : vérifie le secret, puis délègue à BE-029.
 
-    Settlement awaits a separate server-to-server transaction verification.
+    La vérification de `verif-hash` reste ici (la route appartient à BE-083). Le traitement
+    (référence, idempotence, quarantaine, effet) est dans app/billing/webhooks.py. Ce
+    endpoint ne règle jamais une facture ni n'accorde d'entitlement.
     """
     secret = os.getenv("FLUTTERWAVE_WEBHOOK_SECRET", "")
     if not secret:
@@ -179,55 +178,11 @@ async def flutterwave_webhook(
     if not verif_hash or not hmac.compare_digest(verif_hash, secret):
         raise AppError(code="webhook_signature_invalid", message="Signature de webhook invalide.", status_code=401)
     raw = await request.body()
-    try:
-        payload = json.loads(raw)
-    except (ValueError, UnicodeDecodeError) as exc:
-        raise AppError(code="webhook_payload_invalid", message="Payload webhook invalide.", status_code=400) from exc
-    event_data = payload.get("data") if isinstance(payload, dict) else None
-    event_id = str(payload.get("id") or (event_data or {}).get("id") or "") if isinstance(payload, dict) else ""
-    event_type = str(payload.get("event") or payload.get("type") or "unknown") if isinstance(payload, dict) else "unknown"
-    if isinstance(payload, dict) and not payload.get("id") and isinstance(event_data, dict):
-        # Flutterwave v3 events may expose only the transaction ID; include
-        # status so a pending -> successful transition is not mistaken for a
-        # duplicate delivery of the earlier event.
-        event_id = f"{event_type}:{event_id}:{event_data.get('status', 'unknown')}"
-    if not event_id or len(event_id) > 160:
-        raise AppError(code="webhook_event_id_missing", message="Identifiant d'événement manquant ou invalide.", status_code=400)
-    previous = await db.scalar(select(PaymentWebhookEvent).where(
-        PaymentWebhookEvent.provider == "flutterwave", PaymentWebhookEvent.eventId == event_id
-    ))
-    if previous is not None:
-        if previous.payloadDigest != hashlib.sha256(raw).hexdigest():
-            raise AppError(
-                code="webhook_event_conflict",
-                message="Cet identifiant d'événement a déjà été reçu avec un contenu différent.",
-                status_code=409,
-            )
-        return PaymentWebhookAck(received=True, duplicate=True)
-    payload_digest = hashlib.sha256(raw).hexdigest()
-    db.add(PaymentWebhookEvent(
-        provider="flutterwave", eventId=event_id, eventType=event_type,
-        payloadDigest=payload_digest, signatureVerified=True,
-        requestId=getattr(request.state, "request_id", None),
-        processedAt=datetime.now(timezone.utc), outcome="recorded_unverified",
-    ))
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        existing = await db.scalar(select(PaymentWebhookEvent).where(
-            PaymentWebhookEvent.provider == "flutterwave", PaymentWebhookEvent.eventId == event_id
-        ))
-        if existing is None:
-            raise
-        if existing.payloadDigest != payload_digest:
-            raise AppError(
-                code="webhook_event_conflict",
-                message="Cet identifiant d'événement a déjà été reçu avec un contenu différent.",
-                status_code=409,
-            )
-        return PaymentWebhookAck(received=True, duplicate=True)
-    return PaymentWebhookAck(received=True, duplicate=False)
+    resultat = await traiter_evenement_webhook(
+        db, corps=raw, signature_verifiee=True,
+        request_id=getattr(request.state, "request_id", None),
+    )
+    return PaymentWebhookAck(received=True, duplicate=resultat.duplicate)
 
 
 # BE-026 : lecture de l'abonnement et des entitlements de l'organisation COURANTE.

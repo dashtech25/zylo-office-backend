@@ -11,6 +11,7 @@ from httpx import AsyncClient
 
 from app.billing import service
 from app.core.database import AsyncSessionLocal
+from tests.test_be029_webhooks_paiement import creer_tentative_de_test
 
 
 async def creer_plan_catalogue(code: str, prix: int = 1000) -> None:
@@ -132,7 +133,12 @@ async def test_billing_reads_invoices_and_blocks_unconfigured_checkout_without_a
 
 async def test_flutterwave_webhook_requires_secret_and_deduplicates_event(client: AsyncClient, monkeypatch):
     monkeypatch.delenv("FLUTTERWAVE_WEBHOOK_SECRET", raising=False)
-    payload = {"id": f"evt-{uuid.uuid4().hex}", "event": "charge.completed", "data": {"id": "fake"}}
+    # BE-029 : un évènement n'est traité que si sa référence (tx_ref) vise une tentative réelle.
+    tentative_id = await creer_tentative_de_test("Org test_billing webhook")
+    payload = {
+        "id": f"evt-{uuid.uuid4().hex}", "event": "charge.completed",
+        "data": {"id": "fake", "tx_ref": str(tentative_id), "status": "successful"},
+    }
     unavailable = await client.post("/api/v1/billing/webhooks/flutterwave", json=payload)
     assert unavailable.status_code == 503
     assert unavailable.json()["error"]["code"] == "PROVIDER_UNAVAILABLE"
@@ -155,7 +161,7 @@ async def test_flutterwave_webhook_requires_secret_and_deduplicates_event(client
     assert duplicate.json() == {"received": True, "duplicate": True}
     conflict = await client.post(
         "/api/v1/billing/webhooks/flutterwave",
-        json={**payload, "data": {"id": "different"}},
+        json={**payload, "data": {"id": "different", "tx_ref": str(tentative_id), "status": "successful"}},
         headers={"verif-hash": "test-only-webhook-secret"},
     )
     assert conflict.status_code == 409

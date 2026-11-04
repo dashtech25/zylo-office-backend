@@ -21,6 +21,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+
+from tests.test_be029_webhooks_paiement import creer_tentative_de_test
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
@@ -156,12 +158,14 @@ async def test_ca2_entitlement_expire_renvoie_etat_expired():
 async def test_ca3_webhook_seul_ne_cree_aucun_entitlement(client, monkeypatch):
     """CA-3 : un événement de webhook authentifié est enregistré sans créer d'entitlement."""
     monkeypatch.setenv("FLUTTERWAVE_WEBHOOK_SECRET", "secret-be024-webhook")
+    # BE-029 : la référence doit viser une tentative réelle, sinon l'évènement est refusé.
+    tentative_id = await creer_tentative_de_test("Org BE-024 CA-3")
     avant = await _nombre_entitlements()
 
     reponse = await client.post(
         "/api/v1/billing/webhooks/flutterwave",
         json={"id": f"evt-{uuid.uuid4().hex}", "event": "charge.completed",
-              "data": {"id": 42, "status": "successful"}},
+              "data": {"id": 42, "tx_ref": str(tentative_id), "status": "successful"}},
         headers={"verif-hash": "secret-be024-webhook"},
     )
 

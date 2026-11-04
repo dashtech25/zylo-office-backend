@@ -198,6 +198,11 @@ class PaymentAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class PaymentWebhookEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Table d'idempotence des évènements webhook de paiement (BE-029).
+
+    Une ligne par (fournisseur, identifiant d'évènement). Le contenu n'est jamais stocké :
+    seule son empreinte SHA-256 (`payloadDigest`) l'est. Traitée par app/billing/webhooks.py.
+    """
     __tablename__ = "paymentWebhookEvent"
     __table_args__ = (UniqueConstraint("provider", "eventId", name="uq_paymentWebhookEvent_provider_event"),)
 
@@ -208,4 +213,9 @@ class PaymentWebhookEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     signatureVerified: Mapped[bool] = mapped_column(Boolean, nullable=False)
     requestId: Mapped[str | None] = mapped_column(String(128), nullable=True)
     processedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # `outcome` : received | recorded_unverified | applied | ignored | quarantined (BE-029).
     outcome: Mapped[str] = mapped_column(String(40), nullable=False, default="received")
+    # Quarantaine (BE-029, CA-5) : renseignées seulement si un contenu contradictoire arrive
+    # avec le même identifiant ; ce contenu n'est jamais appliqué.
+    quarantinedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    quarantineDigest: Mapped[str | None] = mapped_column(String(64), nullable=True)

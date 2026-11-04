@@ -17,12 +17,53 @@ from app.modules_registry.schemas import (
     InstalledModuleResponse,
     ModuleResponse,
     OrganizationModuleResponse,
+    SetModuleActivationRequest,
 )
+from app.rbac.guards import get_current_organization_id
 from app.rbac.service import require_permission
 from app.shared.pagination import PaginationParams, paginate
 from app.shared.schemas import Page
 
 router = APIRouter()
+
+# Routes du catalogue rattachées à l'organisation courante (BE-022), montées sous `/organizations` :
+# l'organisation est choisie par l'en-tête `X-Organization-Id`, validée par l'appartenance active.
+organizations_modules_router = APIRouter()
+
+
+@organizations_modules_router.get(
+    "/current/modules",
+    response_model=list[InstalledModuleResponse],
+    summary="Catalogue des modules avec leur état d'activation pour l'organisation courante",
+)
+async def list_current_organization_modules(
+    organization_id: uuid.UUID = Depends(get_current_organization_id), db: AsyncSession = Depends(get_db)
+) -> list[InstalledModuleResponse]:
+    """Lecture ouverte à tout membre actif de l'organisation courante. Un non-membre ne reçoit
+    jamais le catalogue (refus par `get_current_organization_id`)."""
+    return await service.list_installed_modules(db, organization_id)
+
+
+@organizations_modules_router.put(
+    "/current/modules/{module_id}/activation",
+    response_model=OrganizationModuleResponse,
+    summary="Activer ou désactiver un module pour l'organisation courante",
+    dependencies=[Depends(require_permission(MODULE_MANAGE))],
+)
+async def set_current_organization_module_activation(
+    module_id: uuid.UUID,
+    data: SetModuleActivationRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> OrganizationModule:
+    """Active (`active: true`) ou désactive (`active: false`) le module `module_id` du catalogue.
+
+    Exige la permission `modules.module.manage` (403 sinon, sans modification). Module absent du
+    catalogue ou inconnu de l'application : 404. Module `incompatible` : 409, activation seulement.
+    Chaque transition écrit une entrée d'audit et ne touche qu'à l'organisation courante.
+    """
+    return await service.set_module_activation(db, organization_id, current_user.id, module_id, data.active)
 
 
 @router.get("", response_model=Page[ModuleResponse])

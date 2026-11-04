@@ -28,6 +28,15 @@ class ActivateModuleRequest(BaseModel):
     moduleCode: str
 
 
+class SetModuleActivationRequest(BaseModel):
+    """Corps de `PUT /organizations/current/modules/{moduleId}/activation` (BE-022).
+
+    `active` vrai active le module pour l'organisation courante, faux le désactive. Le module
+    cible est porté par le chemin (son identifiant de catalogue), jamais par le corps."""
+
+    active: bool
+
+
 class InstalledModuleResponse(BaseModel):
     """Catalogue complet croisé avec le statut d'installation pour une
     organisation donnée — 'inactive' par défaut si le module n'a jamais été
@@ -35,6 +44,7 @@ class InstalledModuleResponse(BaseModel):
     la fois au tableau de bord (App Launcher, ne montrer que 'active') et à
     la marketplace de modules (montrer tout le catalogue avec son statut)."""
 
+    moduleId: uuid.UUID
     moduleCode: str
     name: str
     description: str | None

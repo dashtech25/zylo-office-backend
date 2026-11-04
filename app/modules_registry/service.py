@@ -10,7 +10,7 @@ from app.audit.service import record_audit_event
 from app.billing.models import Subscription, SubscriptionEntitlement
 from app.core.database import get_db
 from app.core.errors import AppError
-from app.modules_registry.etats import etat_module, etat_ouvre_acces
+from app.modules_registry.etats import ETAT_INCOMPATIBLE, etat_depuis_ligne, etat_module, etat_ouvre_acces
 from app.modules_registry.models import Module, OrganizationModule
 from app.modules_registry.schemas import InstalledModuleResponse
 from app.rbac.models import Permission, Role, RolePermission
@@ -110,9 +110,26 @@ async def get_or_create_module(db: AsyncSession, code: str, name: str, descripti
 async def activate_module(
     db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, module_code: str
 ) -> OrganizationModule:
+    """Active `module_code` pour l'organisation, avec audit (`modulesRegistry.module.activate`).
+
+    Ordre des contrôles : droit d'entitlement (403), puis état registre (404 inconnu/absent,
+    409 incompatible), puis écriture de la ligne `organizationModule`, seed des rôles du module,
+    grant au owner, audit. Un seul commit pour l'ensemble.
+    """
     await assert_module_entitled(db, organization_id, module_code)
-    result = await db.execute(select(Module).where(Module.code == module_code))
-    if result.scalar_one_or_none() is None:
+    ligne = (await db.execute(select(Module).where(Module.code == module_code))).scalar_one_or_none()
+    # Porte d'entrée unique de l'activation (BE-022, CA-4) : seul un module `disponible` au registre
+    # peut être activé. Un code non reconnu ou sans ligne est `inconnu`/`absent` (404) ; un manifeste
+    # d'une version non supportée est `incompatible` (409). Une désactivation n'est pas soumise à cette
+    # porte : elle doit toujours rester possible pour retirer un module.
+    etat = etat_depuis_ligne(module_code, ligne)
+    if etat == ETAT_INCOMPATIBLE:
+        raise AppError(
+            code="module_incompatible",
+            message=f"Le module '{module_code}' est incompatible avec cette version de Zylo Office.",
+            status_code=409,
+        )
+    if not etat_ouvre_acces(etat):
         raise AppError(code="module_not_found", message=f"Module inconnu : {module_code}.", status_code=404)
 
     result = await db.execute(
@@ -168,6 +185,10 @@ async def activate_module(
 async def deactivate_module(
     db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, module_code: str
 ) -> OrganizationModule:
+    """Désactive `module_code` pour l'organisation (statut `inactive`), avec audit
+    (`modulesRegistry.module.deactivate`). Aucune contrainte de registre : on peut toujours retirer
+    un module, même devenu `incompatible`. 404 si le module n'a jamais été activé ici.
+    """
     result = await db.execute(
         select(OrganizationModule).where(
             OrganizationModule.organizationId == organization_id, OrganizationModule.moduleCode == module_code
@@ -190,6 +211,23 @@ async def deactivate_module(
     await db.commit()
     await db.refresh(org_module)
     return org_module
+
+
+async def set_module_activation(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, module_id: uuid.UUID, active: bool
+) -> OrganizationModule:
+    """Point d'entrée de `PUT /organizations/current/modules/{moduleId}/activation` (BE-022).
+
+    Résout le module par son identifiant de catalogue (404 s'il n'existe pas), puis délègue à
+    `activate_module` ou `deactivate_module` : la règle de registre, l'entitlement et l'audit ne
+    sont écrits qu'à un seul endroit.
+    """
+    module = (await db.execute(select(Module).where(Module.id == module_id))).scalar_one_or_none()
+    if module is None:
+        raise AppError(code="module_not_found", message="Module inconnu.", status_code=404)
+    if active:
+        return await activate_module(db, organization_id, actor_user_id, module.code)
+    return await deactivate_module(db, organization_id, actor_user_id, module.code)
 
 
 async def is_module_active(db: AsyncSession, organization_id: uuid.UUID, module_code: str) -> bool:
@@ -316,6 +354,7 @@ async def list_installed_modules(db: AsyncSession, organization_id: uuid.UUID) -
         )
         result.append(
             InstalledModuleResponse(
+                moduleId=module.id,
                 moduleCode=module.code,
                 name=module.name,
                 description=module.description,

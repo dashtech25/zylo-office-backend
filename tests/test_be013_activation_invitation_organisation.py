@@ -243,5 +243,6 @@ async def test_jeton_inconnu_et_jeton_utilise_repondent_de_la_meme_facon(client:
     utilise = await _activer(client, jeton, password=MOT_DE_PASSE_NOUVEAU, fullName="Nouvelle Personne")
     inconnu = await _activer(client, "jeton-inconnu-" + uuid.uuid4().hex, password=MOT_DE_PASSE_NOUVEAU, fullName="X Y")
     assert utilise.status_code == inconnu.status_code == 400
-    assert utilise.json() == inconnu.json()
+    # Même corps d'erreur ; seul `request_id`, propre à chaque requête, diffère.
+    assert utilise.json()["error"] == inconnu.json()["error"]
     assert hashlib.sha256(jeton.encode()).hexdigest() != jeton

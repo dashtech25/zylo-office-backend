@@ -18,8 +18,8 @@ et `list_organization_invitations`, routes `/organizations/current/invitations`.
 Ce flux vise une adresse, pas forcément un compte : il utilise la table
 `organizationInvitation` (et non `userInvitation`). Le jeton n'est envoyé que par
 e-mail, stocké haché, et la permission `organization.members.invite` est exigée.
-L'acceptation par le destinataire relève de BE-013 : le lien envoyé pointe pour
-l'instant vers la page d'activation existante.
+L'acceptation par le destinataire (BE-013) passe par `activate_account` : le lien
+envoyé pointe vers la page d'activation, qui appelle `POST /auth/activate`.
 
 Décision de sécurité : un compte `User` est global (une seule identité pour
 toutes les organisations). Une désactivation décidée par une organisation
@@ -61,6 +61,7 @@ ACTION_ACTIVATE = "identity.user.activate"
 ACTION_SUSPEND = "identity.user.suspend"
 ACTION_REACTIVATE = "identity.user.reactivate"
 ACTION_ORGANIZATION_INVITATION = "identity.organization.invitation.create"
+ACTION_ACCEPTATION_ORGANISATION = "identity.organization.invitation.accept"
 
 
 def _empreinte(jeton: str) -> str:
@@ -244,12 +245,131 @@ async def reissue_invitation(
     return ReissuedInvitationResponse(userId=user.id, invitationExpiresAt=expire)
 
 
-async def activate_account(db: AsyncSession, jeton: str, mot_de_passe: str) -> User:
-    """Activation par jeton à usage unique. Le jeton est consommé par une seule
-    mise à jour conditionnelle (usedAt, expiration, non révoqué) : deux requêtes
-    concurrentes ne peuvent pas réussir toutes les deux. Toute erreur répond
-    `invitation_invalid` (400), sans distinguer inconnu, expiré, utilisé ou révoqué."""
+def _invalide() -> AppError:
+    return AppError(code="invitation_invalid", message="Ce lien d'activation est invalide ou expiré.", status_code=400)
+
+
+async def activate_account(
+    db: AsyncSession, jeton: str, mot_de_passe: str | None = None, nom_complet: str | None = None
+) -> User:
+    """Point d'entrée unique de `POST /auth/activate` (T-049 et BE-013).
+
+    Résolution du jeton : d'abord une invitation à rejoindre une organisation
+    (`organizationInvitation`, BE-012), puis un jeton d'activation de compte créé
+    (`userInvitation`, T-049). Les deux tables ne partagent aucune empreinte, donc
+    l'ordre n'a pas d'effet sur le résultat. Tout jeton inconnu, expiré, utilisé
+    ou révoqué répond `invitation_invalid` (400), sans distinguer les cas.
+
+    Le jeton est consommé par une seule mise à jour conditionnelle : deux requêtes
+    concurrentes ne peuvent pas réussir toutes les deux.
+    """
     maintenant = datetime.now(timezone.utc)
+    invitation_org = (
+        await db.execute(
+            update(OrganizationInvitation)
+            .where(
+                OrganizationInvitation.tokenHash == _empreinte(jeton),
+                OrganizationInvitation.status == "pending",
+                OrganizationInvitation.expiresAt > maintenant,
+            )
+            .values(status="accepted")
+            .returning(
+                OrganizationInvitation.email,
+                OrganizationInvitation.organizationId,
+                OrganizationInvitation.roleId,
+            )
+        )
+    ).first()
+    if invitation_org is not None:
+        return await _accepte_invitation_organisation(db, invitation_org, mot_de_passe, nom_complet, maintenant)
+    return await _active_compte_cree(db, jeton, mot_de_passe, maintenant)
+
+
+async def _accepte_invitation_organisation(
+    db: AsyncSession,
+    invitation,
+    mot_de_passe: str | None,
+    nom_complet: str | None,
+    maintenant: datetime,
+) -> User:
+    """Acceptation d'une invitation à rejoindre `invitation.organizationId` (BE-013).
+
+    - Personne sans compte : création d'un compte `active` ; `mot_de_passe` et
+      `nom_complet` sont alors obligatoires (422 sinon) et la politique commune
+      (T-013) s'applique, e-mail et nom compris.
+    - Personne avec un compte actif : aucun nouveau mot de passe n'est demandé ni
+      modifié ; le compte rejoint l'organisation. Un compte suspendu, supprimé ou
+      en attente d'activation par une autre organisation est refusé (400 uniforme).
+    - Appartenance à l'organisation de l'invitation uniquement (CA-4) ; le rôle
+      proposé, s'il existe, est attribué dans cette même organisation.
+    Le rollback annule la consommation du jeton en cas d'erreur.
+    """
+    email = invitation.email
+    user = await db.scalar(select(User).where(User.email == email))
+    if user is None:
+        if not mot_de_passe or not nom_complet:
+            await db.rollback()
+            raise AppError(
+                code="account_details_required",
+                message="Le mot de passe et le nom complet sont requis pour créer le compte.",
+                status_code=422,
+            )
+        try:
+            verifie_mot_de_passe(mot_de_passe, email=email, nom_complet=nom_complet)
+        except PolitiqueMotDePasseErreur as exc:
+            await db.rollback()
+            raise erreur_api(exc) from exc
+        user = User(email=email, fullName=nom_complet, hashedPassword=hash_password(mot_de_passe), status="active")
+        db.add(user)
+        await db.flush()
+    elif user.deletedAt is not None or user.status != "active":
+        # Suspendu, supprimé, ou `pending` (compte créé par une organisation, pas
+        # encore activé : son titulaire doit d'abord utiliser son propre lien).
+        await db.rollback()
+        raise _invalide()
+
+    appartenance = await db.scalar(
+        select(OrganizationUser.id).where(
+            OrganizationUser.organizationId == invitation.organizationId,
+            OrganizationUser.userId == user.id,
+        )
+    )
+    if appartenance is None:
+        db.add(OrganizationUser(organizationId=invitation.organizationId, userId=user.id))
+    if invitation.roleId is not None:
+        role_deja_attribue = await db.scalar(
+            select(UserRole.id).where(
+                UserRole.organizationId == invitation.organizationId,
+                UserRole.userId == user.id,
+                UserRole.roleId == invitation.roleId,
+            )
+        )
+        if role_deja_attribue is None:
+            db.add(
+                UserRole(
+                    userId=user.id,
+                    organizationId=invitation.organizationId,
+                    roleId=invitation.roleId,
+                    resourceType=None,
+                    resourceId=None,
+                )
+            )
+    await record_audit_event(
+        db,
+        invitation.organizationId,
+        user.id,
+        action=ACTION_ACCEPTATION_ORGANISATION,
+        entity_type="User",
+        entity_id=user.id,
+        summary=f"Acceptation de l'invitation à rejoindre l'organisation par {email}",
+    )
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def _active_compte_cree(db: AsyncSession, jeton: str, mot_de_passe: str | None, maintenant: datetime) -> User:
+    """Activation d'un compte créé par une organisation (T-049, `userInvitation`)."""
     resultat = await db.execute(
         update(UserInvitation)
         .where(
@@ -262,15 +382,17 @@ async def activate_account(db: AsyncSession, jeton: str, mot_de_passe: str) -> U
         .returning(UserInvitation.userId, UserInvitation.organizationId)
     )
     ligne = resultat.first()
-    invalide = AppError(code="invitation_invalid", message="Ce lien d'activation est invalide ou expiré.", status_code=400)
     if ligne is None:
         await db.rollback()
-        raise invalide
+        raise _invalide()
 
     user = await db.get(User, ligne.userId)
     if user is None or user.status != "pending" or user.deletedAt is not None:
         await db.rollback()
-        raise invalide
+        raise _invalide()
+    if not mot_de_passe:
+        await db.rollback()
+        raise AppError(code="password_required", message="Le mot de passe est requis pour activer ce compte.", status_code=422)
 
     # Politique commune (T-013), vérifiée une fois le titulaire connu : e-mail et
     # nom interdits dans le mot de passe. En cas de refus, le rollback annule la
@@ -392,8 +514,8 @@ async def update_user_status(
 
 
 def _corps_invitation_organisation(nom_organisation: str, jeton: str, expire: datetime) -> str:
-    # Le lien pointe vers la page d'activation actuelle ; l'acceptation d'une
-    # invitation à rejoindre une organisation relève de BE-013.
+    # Le lien pointe vers la page d'activation ; son acceptation est traitée par
+    # `activate_account` (BE-013).
     lien = f"{settings.ACTIVATION_URL_BASE}#token={jeton}"
     return (
         f"Vous êtes invité à rejoindre l'organisation « {nom_organisation} » sur Zylo Office.\n"

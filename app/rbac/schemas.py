@@ -38,6 +38,12 @@ class UpdateRolePermissionsRequest(BaseModel):
     permissionCodes: list[str]
 
 
+class ReplaceMemberRolesRequest(BaseModel):
+    """Ensemble cible des rôles transverses d'un membre (BE-015). Voir `app/rbac/affectation_membres.py`."""
+
+    roleIds: list[uuid.UUID]
+
+
 class AssignRoleRequest(BaseModel):
     userId: uuid.UUID
     roleId: uuid.UUID

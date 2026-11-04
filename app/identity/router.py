@@ -32,8 +32,10 @@ from app.identity.schemas import (
     UpdateUserStatusRequest,
     UserStatusResponse,
 )
+from app.rbac import affectation_membres
 from app.rbac.guards import get_current_organization_id
-from app.rbac.schemas import OrganizationMemberResponse
+from app.rbac.permissions import ROLE_MANAGE
+from app.rbac.schemas import OrganizationMemberResponse, ReplaceMemberRolesRequest
 from app.rbac.service import require_permission
 
 router = APIRouter()
@@ -191,6 +193,26 @@ async def remove_current_member(
     et l'acteur ne l'est pas, 409 `last_owner` si le retrait viderait l'organisation
     de son dernier propriétaire actif. Détail et audit : `app/identity/membres.py`."""
     await membres.remove_member(db, organization_id, current_user, user_id)
+
+
+@router.put(
+    "/current/members/{user_id}/roles",
+    response_model=OrganizationMemberResponse,
+    summary="Fixer les rôles transverses d'un membre de l'organisation courante (BE-015)",
+    dependencies=[Depends(require_permission(ROLE_MANAGE))],
+)
+async def replace_current_member_roles(
+    user_id: uuid.UUID,
+    data: ReplaceMemberRolesRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Remplace les rôles transverses du membre par `roleIds` et renvoie le membre mis à jour.
+    Refus : 403 sans `rbac.role.manage`, 403 `owner_assignment_forbidden` pour le rôle propriétaire
+    sans être propriétaire, 404 si la cible n'est pas membre ou si un rôle est d'une autre
+    organisation, 409 `last_owner`, 403 `privilege_escalation_denied`. Détail : `app/rbac/affectation_membres.py`."""
+    return await affectation_membres.replace_member_roles(db, organization_id, current_user, user_id, data.roleIds)
 
 
 @router.post("", response_model=OrganizationResponse, status_code=201)

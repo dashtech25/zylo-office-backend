@@ -1,11 +1,14 @@
+import re
 import uuid
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.audit.models import AuditLog
+from app.audit.models import AuditEvent, AuditLog
 from app.audit.permissions import AUDIT_LOG_VIEW
 from app.core.errors import AppError
+from app.core.logging import request_id_ctx
 from app.rbac.models import Permission, UserPermissionGrant
 
 # Import différé (pas au niveau module) : `app.rbac.service` importe
@@ -13,11 +16,39 @@ from app.rbac.models import Permission, UserPermissionGrant
 # rbac (attribution de rôle, grant...) — un import au niveau module créerait
 # un cycle d'import (audit.service -> rbac.service -> audit.service).
 
+RESULTATS_AUDIT = ("success", "refused", "error")
+TYPES_ACTEUR_AUDIT = ("humain", "service", "systeme")
+
+# Clés dont la valeur ne doit jamais être stockée dans `changes` (BE-007 CA-4).
+# Le motif couvre les variantes courantes (password, newPassword, accessToken,
+# refresh_token, client_secret, hashedPassword, mot de passe…). Une clé qui
+# correspond est remplacée par REDACTION, sans effacer la clé elle-même : on
+# sait qu'une valeur existait, sans jamais la journaliser.
+_CLE_SENSIBLE = re.compile(r"password|passwd|secret|token|hash|cookie|api[_-]?key|mot_?de_?passe", re.IGNORECASE)
+REDACTION = "[masqué]"
+
+
+def _retirer_secrets(valeur: Any) -> Any:
+    """Parcourt récursivement `changes` et remplace la valeur de toute clé
+    sensible par REDACTION.
+
+    Les listes et dictionnaires imbriqués sont traités de la même façon. Le
+    parcours ne modifie pas l'objet d'origine : il retourne une copie, pour que
+    l'appelant conserve ses données intactes après l'écriture."""
+    if isinstance(valeur, dict):
+        return {
+            cle: (REDACTION if _CLE_SENSIBLE.search(str(cle)) else _retirer_secrets(sous_valeur))
+            for cle, sous_valeur in valeur.items()
+        }
+    if isinstance(valeur, list):
+        return [_retirer_secrets(element) for element in valeur]
+    return valeur
+
 
 async def record_audit_event(
     db: AsyncSession,
-    organization_id: uuid.UUID,
-    actor_user_id: uuid.UUID,
+    organization_id: uuid.UUID | None,
+    actor_user_id: uuid.UUID | None,
     action: str,
     entity_type: str,
     entity_id: uuid.UUID | None,
@@ -27,13 +58,67 @@ async def record_audit_event(
     scope_resource_id: uuid.UUID | None = None,
     ip_address: str | None = None,
     user_agent: str | None = None,
-) -> AuditLog:
-    """Point d'appel unique pour toute action sensible (§18) — n'effectue
-    volontairement PAS son propre `commit()` : l'appelant l'inclut dans la
-    même transaction que l'action métier qu'il journalise, pour garantir
-    qu'un audit n'est jamais enregistré si l'action elle-même a échoué (et
-    inversement)."""
-    entry = AuditLog(
+    *,
+    result: str = "success",
+    actor_type: str = "humain",
+    reason: str | None = None,
+    approval_id: str | None = None,
+    visibility: str | None = None,
+    data_classification: str | None = None,
+) -> AuditEvent:
+    """Écrit exactement une entrée dans la table unique `audit_event` (BE-007).
+
+    Règles de l'écriture :
+    - un acteur et une organisation sont obligatoires ; sinon AppError
+      `audit_invalid_write` est levée et aucune ligne n'est ajoutée (CA-3) ;
+    - le request ID est repris de la contextvar `request_id_ctx`, posée par
+      `RequestIdMiddleware`. Hors requête HTTP (tâche de fond, script), un
+      identifiant `sans-requete-<uuid>` est généré pour que la colonne reste
+      obligatoire (CA-2) ;
+    - `changes` est copié et ses valeurs sensibles sont masquées avant
+      l'écriture (CA-4) : mot de passe, jeton, secret, condensat, cookie ;
+    - `eventId` est un UUID nouveau, distinct de la clé primaire (unicité
+      métier, colonne `eventId`) ;
+    - `result` vaut `success`, `refused` ou `error` ; `actor_type` vaut
+      `humain`, `service` ou `systeme`. Toute autre valeur est refusée.
+
+    N'effectue volontairement PAS son propre `commit()` : l'appelant l'inclut
+    dans la même transaction que l'action métier journalisée, pour qu'un audit
+    ne soit jamais enregistré si l'action a échoué, et inversement.
+
+    Le paramètre `organization_id` isole l'entrée : elle n'est jamais écrite
+    sous une autre organisation que celle qui est passée (CA-5).
+
+    Les paramètres positionnels existants sont inchangés ; `result`,
+    `actor_type`, `reason`, `approval_id`, `visibility`, `data_classification`
+    sont keyword-only et optionnels."""
+    if organization_id is None:
+        raise AppError(
+            code="audit_invalid_write",
+            message="Écriture d'audit refusée : organisation absente.",
+            status_code=500,
+        )
+    if actor_user_id is None:
+        raise AppError(
+            code="audit_invalid_write",
+            message="Écriture d'audit refusée : acteur absent.",
+            status_code=500,
+        )
+    if result not in RESULTATS_AUDIT:
+        raise AppError(
+            code="audit_invalid_write",
+            message=f"Résultat d'audit inconnu : {result!r}.",
+            status_code=500,
+        )
+    if actor_type not in TYPES_ACTEUR_AUDIT:
+        raise AppError(
+            code="audit_invalid_write",
+            message=f"Type d'acteur d'audit inconnu : {actor_type!r}.",
+            status_code=500,
+        )
+
+    request_id = request_id_ctx.get() or f"sans-requete-{uuid.uuid4()}"
+    entry = AuditEvent(
         organizationId=organization_id,
         actorUserId=actor_user_id,
         action=action,
@@ -42,9 +127,18 @@ async def record_audit_event(
         scopeResourceType=scope_resource_type,
         scopeResourceId=scope_resource_id,
         summary=summary,
-        changes=changes,
+        changes=_retirer_secrets(changes) if changes is not None else None,
         ipAddress=ip_address,
         userAgent=user_agent,
+        request_id=request_id,
+        result=result,
+        eventId=str(uuid.uuid4()),
+        actorType=actor_type,
+        reason=reason,
+        approvalId=approval_id,
+        schemaVersion=1,
+        visibility=visibility,
+        dataClassification=data_classification,
     )
     db.add(entry)
     await db.flush()

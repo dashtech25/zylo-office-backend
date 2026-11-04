@@ -36,6 +36,15 @@ CRM_READ = "crm.contact.read"
 CRM_MANAGE = "crm.contact.manage"
 
 
+@pytest.fixture(autouse=True)
+def _crm_reconnu_du_registre(monkeypatch):
+    """Le registre (BE-021) ne tient pour `disponible` que les codes reconnus par l'application.
+    Le module CRM de test doit donc y figurer, sinon son état est `inconnu` et l'accès est refusé."""
+    import app.modules_registry.etats as etats
+
+    monkeypatch.setattr(etats, "CODES_MODULES_CONNUS", etats.CODES_MODULES_CONNUS | {CRM})
+
+
 def _h(token: str, org_id: str) -> dict:
     return {"Authorization": f"Bearer {token}", "X-Organization-Id": org_id}
 
@@ -141,7 +150,7 @@ async def _module_assignments(org_id: str, user_id: str, module_code: str) -> in
 async def _audit_actions(org_id: str) -> list[str]:
     async with AsyncSessionLocal() as db:
         rows = await db.execute(
-            text('SELECT action FROM "auditLog" WHERE "organizationId" = :org'),
+            text('SELECT action FROM audit_event WHERE "organizationId" = :org'),
             {"org": uuid.UUID(org_id)},
         )
         return [r[0] for r in rows.all()]

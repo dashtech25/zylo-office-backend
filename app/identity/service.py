@@ -4,7 +4,7 @@ from fastapi import Depends, Header
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.audit.permissions import AUDIT_LOG_VIEW
+from app.audit.permissions import AUDIT_LOG_VIEW, ORGANIZATION_AUDIT_READ
 from app.audit.service import record_audit_event
 from app.billing.permissions import (
     BILLING_INVOICE_READ,
@@ -52,6 +52,7 @@ OWNER_DEFAULT_PERMISSIONS = [
     (ROLE_MANAGE, "rbac", "Créer des rôles et modifier leurs permissions, attribuer/retirer un rôle."),
     (GRANT_MANAGE, "rbac", "Accorder ou refuser une permission individuelle, révoquer un grant."),
     (AUDIT_LOG_VIEW, "audit", "Consulter le journal d'audit."),
+    (ORGANIZATION_AUDIT_READ, "audit", "Consulter le journal des transitions de modules de l'organisation (BE-056)."),
     (SUBSCRIPTION_MANAGE, "billing", "Gérer les abonnements de l'organisation."),
     (SUBSCRIPTION_READ, "billing", "Consulter l'abonnement, les droits et les entitlements de l'organisation."),
     (BILLING_INVOICE_READ, "billing", "Consulter les factures et tentatives de paiement de l'organisation."),

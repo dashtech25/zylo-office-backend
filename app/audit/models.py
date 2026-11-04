@@ -20,7 +20,7 @@ Valeurs de référence :
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,6 +40,7 @@ class AuditEvent(UUIDPrimaryKeyMixin, Base):
     __table_args__ = (
         CheckConstraint("result IN ('success', 'refused', 'error')", name="ck_audit_event_result"),
         CheckConstraint("\"actorType\" IN ('humain', 'service', 'systeme')", name="ck_audit_event_actorType"),
+        Index("ix_audit_event_organizationId_createdAt", "organizationId", "createdAt"),
         {"comment": "Journal d'audit métier unique : qui a fait quoi, sur quel élément, quand, avec quel résultat."},
     )
 
@@ -84,6 +85,20 @@ class AuditEvent(UUIDPrimaryKeyMixin, Base):
     # Valeurs de visibilité et de classification : NON DÉFINI (à trancher avec BE-033).
     visibility: Mapped[str | None] = mapped_column(String(32), nullable=True)
     dataClassification: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # Colonnes ajoutées par BE-056 (événements de transition de module, voir
+    # app/modules_registry/evenements.py). Toutes nulles pour les entrées d'audit métier existantes.
+    # subjectType / subjectId : sujet de la transition (ex. `tenant_module`, identifiant d'installation).
+    subjectType: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    subjectId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    # eventName : nom de l'événement publié (ex. `ModuleSuspended`), nul pour une entrée d'audit métier.
+    eventName: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    # origin : origine de la transition (client, commercial, security, support, automation, platform).
+    origin: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # correlationId : identifiant de corrélation (X-Request-Id, sinon identifiant d'opération).
+    correlationId: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    # payloadMinimal : charge utile minimale, sans secret ni contenu métier (contrôlée à l'écriture).
+    payloadMinimal: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 # Alias de compatibilité : les modules existants importent encore `AuditLog`.

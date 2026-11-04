@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, Index, UniqueConstraint, func, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -123,6 +123,11 @@ class Invoice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     idempotencyKey: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True)
     # Verrou optimiste (BE-072), voir app/billing/idempotency.py.
     version: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
+    # BE-086 : cycle brouillon -> finalisée. Renseignés à la finalisation (app/billing/invoices.py),
+    # NULL tant que la facture est un brouillon ou une facture émise avant BE-086.
+    taxSnapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="Prix, devise et taxe figés à la finalisation (BE-078).")
+    total: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="Total TTC en unités mineures, figé à la finalisation.")
+    finalizedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Date de finalisation ; non NULL = facture append-only.")
 
 
 class IdempotencyRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):

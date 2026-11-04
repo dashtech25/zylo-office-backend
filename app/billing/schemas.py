@@ -104,6 +104,9 @@ class InvoiceResponse(BaseModel):
     status: str
     issuedAt: datetime
     paidAt: datetime | None = None
+    # BE-086 : renseignés à la finalisation (NULL sur un brouillon).
+    total: int | None = None
+    finalizedAt: datetime | None = None
 
     model_config = {"from_attributes": True}
 

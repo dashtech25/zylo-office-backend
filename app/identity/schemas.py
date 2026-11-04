@@ -106,3 +106,21 @@ class AccountActivatedResponse(BaseModel):
     id: uuid.UUID
     email: str
     status: str
+
+
+class CreateOrganizationInvitationRequest(BaseModel):
+    """POST /organizations/current/invitations. `roleId` est facultatif : le rôle
+    proposé doit appartenir à l'organisation courante, sinon 404."""
+
+    email: EmailStr = Field(max_length=320)
+    roleId: uuid.UUID | None = None
+
+
+class OrganizationInvitationResponse(BaseModel):
+    """Invitation telle qu'exposée par l'API. Le jeton n'y figure jamais."""
+
+    id: uuid.UUID
+    email: str
+    roleId: uuid.UUID | None
+    status: str
+    expiresAt: datetime

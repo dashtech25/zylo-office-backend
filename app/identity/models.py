@@ -130,3 +130,44 @@ class UserInvitation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     expiresAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     usedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revokedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class OrganizationInvitation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Invitation d'une personne à rejoindre une organisation (BE-012).
+
+    Contrairement à `userInvitation` (activation d'un compte déjà créé, T-021),
+    le destinataire n'a pas forcément de compte : la table porte donc son
+    adresse (`email`, normalisée en minuscules) et non un `userId`.
+
+    Colonnes : `roleId` est le rôle proposé (nullable, doit appartenir à
+    l'organisation) ; `status` vaut `pending` à la création, `revoked` ou
+    `accepted` plus tard (acceptation hors périmètre de BE-012). Seule
+    l'empreinte SHA-256 du jeton est stockée (`tokenHash`) ; le jeton n'existe
+    en clair que dans le message envoyé au destinataire.
+
+    Invariant : une seule invitation `pending` par couple (organisation,
+    adresse), garanti par l'index partiel ci-dessous, pour qu'une course entre
+    deux créations ne produise pas deux invitations ouvertes.
+    """
+
+    __tablename__ = "organizationInvitation"
+    __table_args__ = (
+        Index(
+            "uq_organizationInvitation_pending_per_email",
+            "organizationId",
+            "email",
+            unique=True,
+            postgresql_where=text("\"status\" = 'pending'"),
+        ),
+        {"comment": "Invitation à rejoindre une organisation : destinataire, rôle proposé, état, expiration (jeton haché)."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True
+    )
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    roleId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("role.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", server_default="pending")
+    tokenHash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expiresAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    createdByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False)

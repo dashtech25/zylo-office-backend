@@ -36,19 +36,17 @@ from httpx import ASGITransport, AsyncClient
 
 BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Garde de base de test (T-005). Intention : pytest vide la base à chaque
-# session (TRUNCATE de toutes les tables). Il ne doit donc JAMAIS pointer vers
-# une base de développement ou partagée. Règles :
+# Garde de base de test (T-005, durcie par BE-221). Intention : pytest vide la
+# base à chaque session (TRUNCATE de toutes les tables). Il ne doit donc JAMAIS
+# pointer vers une base de développement, de recette ou partagée. Règles :
 #  - TEST_DATABASE_URL doit être définie et non vide, sans valeur de repli ;
-#  - le nom de base doit suivre le motif zylo_t<NNN>[a-z]?_test, créé par
-#    scripts/dev/env_tache.sh (une base par tâche) ;
-#  - seule exception : zylo_office_test, héritée de l'ancien repli, et
-#    uniquement si ZYLO_TEST_TOLERER_ZYLO_OFFICE_TEST=1 est posée explicitement.
+#  - le nom de base doit suivre EXACTEMENT le motif zylo_t<NNN>_test (NNN sur
+#    trois chiffres), créé par scripts/dev/env_tache.sh (une base par tâche) ;
+#  - aucune exception : zylo_office_test (ancien repli) est refusée, même si
+#    l'ancien opt-in ZYLO_TEST_TOLERER_ZYLO_OFFICE_TEST=1 est posé.
 # Les noms zylo, zylo_office, zylo_dev, zylo_liquid, zylo_recette ne passent
 # jamais, quel que soit le port ou l'hôte.
-MOTIF_BASE_DE_TEST = re.compile(r"^zylo_t[0-9]{3}[a-z]?_test$")
-BASE_TOLEREE_OPT_IN = "zylo_office_test"
-VARIABLE_OPT_IN = "ZYLO_TEST_TOLERER_ZYLO_OFFICE_TEST"
+MOTIF_BASE_DE_TEST = re.compile(r"^zylo_t[0-9]{3}_test$")
 COMMANDE_ENV_TACHE = "scripts/dev/env_tache.sh creer <NNN> back"
 
 
@@ -73,15 +71,12 @@ def verifie_base_de_test(url: str | None) -> None:
             returncode=3,
         )
     for nom in _noms_de_base(url):
-        if nom == BASE_TOLEREE_OPT_IN and os.environ.get(VARIABLE_OPT_IN) == "1":
-            continue
         if not MOTIF_BASE_DE_TEST.match(nom):
             pytest.exit(
                 f"Base refusée : « {nom} » n'est pas une base de test (motif attendu : "
-                f"zylo_t<NNN>[a-z]?_test). pytest vide cette base à chaque session. "
+                f"zylo_t<NNN>_test). pytest vide cette base à chaque session. "
                 f"Créez la base de la tâche avec {COMMANDE_ENV_TACHE} et exportez son "
-                "TEST_DATABASE_URL. zylo_office_test n'est tolérée qu'avec "
-                f"{VARIABLE_OPT_IN}=1.",
+                "TEST_DATABASE_URL. zylo_office_test n'est plus admise.",
                 returncode=3,
             )
 

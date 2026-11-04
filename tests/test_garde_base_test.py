@@ -66,6 +66,8 @@ def test_variable_vide_refusee():
         "postgresql+asyncpg://remy@/zylo_t05_test?host=/var/run/postgresql",
         "postgresql+asyncpg://remy@/zylo_t005_test_copie?host=/var/run/postgresql",
         "postgresql+asyncpg://remy@/zylo_t005A_test?host=/var/run/postgresql",
+        # BE-221 : suffixe lettre hors du motif zylo_t<NNN>_test
+        "postgresql+asyncpg://remy@/zylo_t005a_test?host=/var/run/postgresql",
         "postgresql+asyncpg://remy@/zylo_t005_test?host=/var/run/postgresql&dbname=zylo",
         "postgresql+asyncpg://remy@/?host=/var/run/postgresql",
     ],
@@ -82,19 +84,20 @@ def test_zylo_office_test_refusee_sans_opt_in():
     assert "n'est pas une base de test" in _sortie(res)
 
 
-def test_zylo_office_test_tolree_avec_opt_in_explicite():
+def test_zylo_office_test_refusee_meme_avec_ancien_opt_in():
+    # BE-221 : l'ancien opt-in ZYLO_TEST_TOLERER_ZYLO_OFFICE_TEST n'a plus d'effet.
     res = _collecte(
         "postgresql+asyncpg://zylo_office:x@localhost:5432/zylo_office_test",
         opt_in="1",
     )
-    assert res.returncode == 0, _sortie(res)
+    assert res.returncode != 0, _sortie(res)
+    assert "n'est pas une base de test" in _sortie(res)
 
 
 @pytest.mark.parametrize(
     "url",
     [
         "postgresql+asyncpg://remy@/zylo_t005_test?host=/var/run/postgresql",
-        "postgresql+asyncpg://remy@/zylo_t005a_test?host=/var/run/postgresql",
         "postgresql+asyncpg://zylo_office:x@localhost:5433/zylo_t041_test",
     ],
 )

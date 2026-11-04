@@ -10,7 +10,7 @@ Toutes les routes sont sous `/api/v1/notifications` et exigent une session authe
 |---|---|---|
 | `GET /inbox?limit=20&offset=0&unreadOnly=false` | Liste paginée personnelle dans l'organisation active. `limit` est borné à 1–100; le tri est stable, `createdAt DESC, id DESC`. | `{data: NotificationInboxItem[], meta: {total, limit, offset}}` |
 | `GET /inbox/{item_id}` | Détail d'un item appartenant à l'utilisateur courant et à l'organisation active. | `NotificationInboxItem`; 404 identique pour ID absent, autre utilisateur ou autre organisation. |
-| `PATCH /inbox/{item_id}/read` | Marque comme lu; répétition idempotente. Aucun archivage/suppression n'est exposé. | Item actualisé; 404 hors portée personnelle. |
+| `PATCH /inbox/{item_id}` (alias `PATCH /inbox/{item_id}/read`, masqué du schéma) | Marque comme lu; répétition idempotente. Aucun archivage/suppression n'est exposé. | Item actualisé; 404 hors portée personnelle. |
 
 `NotificationInboxItem` retourne seulement `id`, `category`, `title`, `body`, `createdAt`, `readAt`. Le destinataire et l'organisation ne sont pas sérialisés. `title`/`body` sont du texte brut; les clients les rendent échappés, jamais comme HTML.
 

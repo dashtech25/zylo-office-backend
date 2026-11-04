@@ -13,6 +13,7 @@ Règles de l'arborescence : un fichier, un sujet ; les rapports de livraison et 
 - [audit/](audit/README.md)
 - [core/](core/README.md)
 - [modules/](modules/README.md)
+- [operations/](operations/README.md)
 - [plans/](plans/README.md)
 - [process/](process/README.md)
 - [questions/](questions/README.md)

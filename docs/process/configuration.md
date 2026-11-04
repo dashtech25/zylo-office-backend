@@ -54,6 +54,7 @@ Source : `app/core/config.py` (préfixe `AUTH_RATE_LIMIT_`), logique dans `app/a
 | `AUTH_RATE_LIMIT_LOCK_BASE_SECONDS` | `60` | Premier verrou ; doublé à chaque échec au-delà du seuil. |
 | `AUTH_RATE_LIMIT_LOCK_MAX_SECONDS` | `900` | Plafond de la durée du verrou. |
 | `AUTH_RATE_LIMIT_TRUSTED_PROXIES` | `[]` | Adresses des proxys de confiance. `X-Forwarded-For` n'est lu que si le pair direct y figure. |
+| `AUTH_PUBLIC_REGISTRATION_ENABLED` | `false` | Libre-service désactivé par défaut. Les comptes passent par l'invitation tant que l'inscription publique n'est pas approuvée. |
 
 Réponse en cas de verrou : HTTP 429, code `rate_limited`, en-tête `Retry-After` (secondes). Le corps ne dépend pas de l'existence du compte.
 

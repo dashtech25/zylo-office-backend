@@ -8,12 +8,14 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.identity.models import OrganizationUser, User
 from app.notifications import service as notifications_service
-from app.notifications.models import PushSubscription
+from app.notifications.models import NotificationInboxItem, PushSubscription
 from tests.conftest import unique_email
 
 PUSH_URL = "/api/v1/notifications/push-subscriptions"
 VAPID_URL = "/api/v1/notifications/vapid-public-key"
+INBOX_URL = "/api/v1/notifications/inbox"
 
 
 def _payload(endpoint: str) -> dict:
@@ -29,13 +31,34 @@ async def _second_user(client) -> dict:
     password = "TestPassword123!"
     await client.post("/api/v1/auth/register", json={"email": email, "password": password, "fullName": "Autre"})
     login = (await client.post("/api/v1/auth/login", json={"email": email, "password": password})).json()
-    return {"accessToken": login["accessToken"]}
+    return {"email": email, "accessToken": login["accessToken"]}
 
 
 async def _row_count(endpoint: str) -> int:
     async with AsyncSessionLocal() as db:
         rows = (await db.execute(select(PushSubscription).where(PushSubscription.endpoint == endpoint))).scalars().all()
         return len(rows)
+
+
+async def _user_id(email: str) -> uuid.UUID:
+    async with AsyncSessionLocal() as db:
+        return await db.scalar(select(User.id).where(User.email == email))
+
+
+async def _create_inbox_item(organization_id: str, recipient_user_id: uuid.UUID, source_event_id: uuid.UUID):
+    async with AsyncSessionLocal() as db:
+        item = await notifications_service.create_inbox_item(
+            db,
+            organization_id=uuid.UUID(organization_id),
+            recipient_user_id=recipient_user_id,
+            source_event_type="test.explicit",
+            source_event_id=source_event_id,
+            category="test",
+            title="Message de test",
+            body="Contenu de test",
+        )
+        await db.commit()
+        return item.id
 
 
 async def test_vapid_public_key_endpoint_returns_configured_key(client):
@@ -119,3 +142,84 @@ async def test_handler_alert_created_est_awaitable_par_publish(monkeypatch):
         alert_id=uuid.uuid4(), alert_type="test", severity="low", station_id=uuid.uuid4(), truck_id=None,
     )
     assert journal_erreurs == []
+
+
+async def test_inbox_est_vide_et_exige_une_session(client, registered_user, organization):
+    unauthorized = await client.get(INBOX_URL)
+    assert unauthorized.status_code in (401, 403)
+
+    response = await client.get(INBOX_URL, headers=_headers(registered_user, organization))
+    assert response.status_code == 200, response.text
+    assert response.json() == {"data": [], "meta": {"total": 0, "limit": 20, "offset": 0}}
+
+
+async def test_inbox_isole_chaque_destinataire_et_marque_lu_de_facon_idempotente(client, registered_user, organization):
+    owner_id = await _user_id(registered_user["email"])
+    other = await _second_user(client)
+    other_id = await _user_id(other["email"])
+    async with AsyncSessionLocal() as db:
+        db.add(OrganizationUser(userId=other_id, organizationId=uuid.UUID(organization["id"])))
+        await db.commit()
+
+    source_event_id = uuid.uuid4()
+    item_id = await _create_inbox_item(organization["id"], owner_id, source_event_id)
+    owner_headers = _headers(registered_user, organization)
+    other_headers = {"Authorization": f"Bearer {other['accessToken']}", "X-Organization-Id": organization["id"]}
+
+    owner_list = await client.get(INBOX_URL, headers=owner_headers)
+    assert owner_list.status_code == 200, owner_list.text
+    assert owner_list.json()["meta"]["total"] == 1
+    item = owner_list.json()["data"][0]
+    assert item["id"] == str(item_id)
+    assert "recipientUserId" not in item and "organizationId" not in item
+
+    other_list = await client.get(INBOX_URL, headers=other_headers)
+    assert other_list.status_code == 200, other_list.text
+    assert other_list.json()["data"] == []
+    assert other_list.json()["meta"]["total"] == 0
+    assert (await client.get(f"{INBOX_URL}/{item_id}", headers=other_headers)).status_code == 404
+    assert (await client.patch(f"{INBOX_URL}/{item_id}/read", headers=other_headers)).status_code == 404
+
+    other_organization = await client.post(
+        "/api/v1/organizations",
+        json={"name": "Autre organisation", "slug": f"autre-{uuid.uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {registered_user['accessToken']}"},
+    )
+    assert other_organization.status_code == 201, other_organization.text
+    other_org_headers = {
+        "Authorization": f"Bearer {registered_user['accessToken']}",
+        "X-Organization-Id": other_organization.json()["id"],
+    }
+    assert (await client.get(INBOX_URL, headers=other_org_headers)).json()["data"] == []
+    assert (await client.get(f"{INBOX_URL}/{item_id}", headers=other_org_headers)).status_code == 404
+
+    first_read = await client.patch(f"{INBOX_URL}/{item_id}/read", headers=owner_headers)
+    assert first_read.status_code == 200, first_read.text
+    read_at = first_read.json()["readAt"]
+    assert read_at is not None
+    second_read = await client.patch(f"{INBOX_URL}/{item_id}/read", headers=owner_headers)
+    assert second_read.status_code == 200, second_read.text
+    assert second_read.json()["readAt"] == read_at
+    unread = await client.get(f"{INBOX_URL}?unreadOnly=true", headers=owner_headers)
+    assert unread.status_code == 200
+    assert unread.json()["meta"]["total"] == 0
+
+
+async def test_create_inbox_item_is_idempotent_par_evenement_et_destinataire(client, registered_user, organization):
+    recipient_id = await _user_id(registered_user["email"])
+    event_id = uuid.uuid4()
+    first_id = await _create_inbox_item(organization["id"], recipient_id, event_id)
+    second_id = await _create_inbox_item(organization["id"], recipient_id, event_id)
+
+    assert first_id == second_id
+    async with AsyncSessionLocal() as db:
+        rows = (
+            await db.execute(
+                select(NotificationInboxItem).where(
+                    NotificationInboxItem.organizationId == uuid.UUID(organization["id"]),
+                    NotificationInboxItem.recipientUserId == recipient_id,
+                    NotificationInboxItem.sourceEventId == event_id,
+                )
+            )
+        ).scalars().all()
+    assert len(rows) == 1

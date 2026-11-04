@@ -15,5 +15,6 @@
 - [bonnes-pratiques/](bonnes-pratiques/README.md)
 - [decisions/](decisions/README.md)
 - [modules/](modules/README.md)
+- [notifications/](notifications/README.md)
 - [performance/](performance/README.md)
 - [securite/](securite/README.md)

@@ -29,6 +29,9 @@ PREFIXES_APPARTENANCE = (
 )
 # Gardes de permission : exigent un code de permission précis.
 PREFIXES_PERMISSION = ("require_permission", "require_any_permission", "require_module_permission")
+# Les routes support plateforme ont un périmètre d'accès distinct des rôles
+# tenant : elles exigent l'utilisateur courant ET l'allowlist opérateur.
+PREFIXES_GARDE_OPERATEUR = ("require_operator",)
 # Préfixe des routes d'un module métier (CLAUDE.md : un dossier par module).
 PREFIXES_MODULE = ("/api/v1/zylo-liquid", "/api/v1/zylo-tanker")
 
@@ -40,7 +43,7 @@ ROUTES_PUBLIQUES: dict[str, str] = {
     "GET /": "Racine d'accueil, aucune donnée. 2026-10-09.",
     "GET /api/v1/health": "Sonde de santé. 2026-10-09.",
     "GET /api/v1/health/error-demo": "Démonstration du format d'erreur, sans donnée. A retirer en production. 2026-10-09.",
-    "POST /api/v1/auth/register": "Inscription : public par nature, limitée par T-012. 2026-10-09.",
+    "POST /api/v1/auth/register": "Endpoint masqué par défaut; AUTH_PUBLIC_REGISTRATION_ENABLED=true n'est admis que si ENVIRONMENT=development ou test (le validateur Settings refuse production/staging). Libre-service sans décision produit réservé aux tests et au développement local. 2026-11-02.",
     "POST /api/v1/auth/login": "Connexion : public par nature, limitée par T-012. 2026-10-09.",
     "POST /api/v1/auth/activate": "Activation d'un compte par jeton à usage unique reçu hors API (T-021) : jeton vérifié et consommé dans le service, limitée par T-012. 2026-10-09.",
     "POST /api/v1/auth/refresh": "Rafraîchissement par jeton de session, sans organisation. 2026-10-09.",
@@ -55,14 +58,21 @@ ROUTES_PUBLIQUES: dict[str, str] = {
     # --- Catalogues : lecture seule, publics en attendant la décision IAM-020 ---
     "GET /api/v1/modules": "Catalogue des modules (aucune donnée d'organisation). Passera authentifié si la décision catalogues-publics est confirmée (IAM-020). 2026-10-09.",
     "GET /api/v1/billing/plans": "Catalogue de plans, lecture seule (création par API retirée par T-019, option A de T-050). Passera authentifié si IAM-020 est confirmée. 2026-10-09.",
+    "GET /api/v1/billing/payment-provider": "Métadonnées statiques du provider de test (configured=false, checkoutAvailable=false), sans donnée tenant ni secret. 2026-11-02.",
     # --- Utilitaires authentifiés, sans lecture ni écriture en base ---
     "POST /api/v1/export/xlsx": "Conversion d'un tableau fourni par l'appelant, authentifiée (get_current_user), sans accès à la base. 2026-10-09.",
     "POST /api/v1/export/docx": "Conversion d'un tableau fourni par l'appelant, authentifiée (get_current_user), sans accès à la base. 2026-10-09.",
     "POST /api/v1/import/xlsx": "Lecture d'un fichier fourni par l'appelant, authentifiée (get_current_user), sans accès à la base. 2026-10-09.",
-    # --- Webhooks GPS : pas de JWT, secret d'ingestion propre à l'organisation ---
-    "POST /api/v1/zylo-liquid/gps/ingest": "Webhook GPS : secret d'ingestion de l'organisation (en-tête X-GPS-Ingest-Secret) vérifié dans le service (invalid_ingest_secret, 401). 2026-10-09.",
-    "POST /api/v1/zylo-tanker/gps/ingest": "Webhook GPS : secret d'ingestion de l'organisation (en-tête X-GPS-Ingest-Secret) vérifié dans le service (invalid_ingest_secret, 401). 2026-10-09.",
     "GET /api/v1/notifications/vapid-public-key": "Clé publique VAPID (non secrète), lue avant tout abonnement, aucune donnée d'organisation. 2026-10-09 (T-004b lot 2).",
+}
+
+# Routes sans dépendance FastAPI dont le contrôle de sécurité est effectué
+# explicitement dans le handler/service. Les classer comme publiques serait
+# trompeur : le webhook exige une signature HMAC avant toute lecture/écriture.
+ROUTES_GARDEES_MANUELLEMENT: dict[str, str] = {
+    "POST /api/v1/billing/webhooks/flutterwave": "Signature Flutterwave verif-hash comparée en temps constant avant lecture du payload ou accès aux événements; secret absent -> 503, signature invalide -> 401. 2026-11-02.",
+    "POST /api/v1/zylo-liquid/gps/ingest": "Secret d'ingestion propre à l'organisation dans X-GPS-Ingest-Secret, vérifié en service avant traitement; absence/invalide -> 401. 2026-10-09.",
+    "POST /api/v1/zylo-tanker/gps/ingest": "Secret d'ingestion propre à l'organisation dans X-GPS-Ingest-Secret, vérifié en service avant traitement; absence/invalide -> 401. 2026-10-09.",
 }
 
 
@@ -73,6 +83,7 @@ class RouteInfo:
     name: str
     appartenance: bool
     permissions: tuple[str, ...]
+    garde_operateur: bool
     module_routes: bool
 
     @property
@@ -104,6 +115,7 @@ def inventaire(app) -> list[RouteInfo]:
         appels = _dependances(route.dependant, []) + list(ctx_deps)
         noms = [getattr(c, "__qualname__", "") for c in appels if c is not None]
         appartenance = any(n.split(".")[0].startswith(PREFIXES_APPARTENANCE) for n in noms)
+        garde_operateur = any(n.split(".")[0].startswith(PREFIXES_GARDE_OPERATEUR) for n in noms)
         permissions = []
         for call in appels:
             if call is None:
@@ -123,6 +135,7 @@ def inventaire(app) -> list[RouteInfo]:
                     name=route.name,
                     appartenance=appartenance,
                     permissions=tuple(sorted(set(permissions))),
+                    garde_operateur=garde_operateur,
                     module_routes=chemin.startswith(PREFIXES_MODULE),
                 )
             )
@@ -137,8 +150,9 @@ def matrice_markdown(infos: list[RouteInfo]) -> str:
         if info.permissions:
             for code in info.permissions:
                 par_permission.setdefault(code, []).append(f"`{info.method} {info.path}`")
-        elif not info.appartenance:
-            sans.append(f"`{info.method} {info.path}`")
+        elif not info.appartenance and not info.garde_operateur and info.cle not in ROUTES_GARDEES_MANUELLEMENT:
+            justification = ROUTES_PUBLIQUES.get(info.cle, "NON CLASSÉE — revoir la garde avant livraison")
+            sans.append(f"`{info.method} {info.path}` — {justification}")
     lignes = [
         "# Matrice d'autorisation (T-023)",
         "",
@@ -154,4 +168,9 @@ def matrice_markdown(infos: list[RouteInfo]) -> str:
         lignes.append(f"| `{code}` | {'<br>'.join(par_permission[code])} |")
     lignes += ["", "## Routes sans permission ni appartenance", ""]
     lignes += [f"- {r}" for r in sans] or ["Aucune."]
+    lignes += ["", "## Routes protégées par allowlist opérateur", ""]
+    routes_operateur = [f"`{info.method} {info.path}`" for info in infos if info.garde_operateur]
+    lignes += [f"- {r} — `require_operator` (session utilisateur + allowlist serveur `OPERATOR_READ_USER_IDS`)." for r in routes_operateur] or ["Aucune."]
+    lignes += ["", "## Routes avec contrôle manuel documenté", ""]
+    lignes += [f"- `{cle}` — {raison}" for cle, raison in sorted(ROUTES_GARDEES_MANUELLEMENT.items())] or ["Aucune."]
     return "\n".join(lignes) + "\n"

@@ -18,7 +18,10 @@ class JsonFormatter(logging.Formatter):
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
-            "requestId": request_id_ctx.get(),
+            # Les exceptions 500 sont journalisées par le gestionnaire
+            # Starlette externe après la réinitialisation de la contextvar.
+            # Le handler leur passe alors l'ID récupéré depuis request.state.
+            "requestId": getattr(record, "request_id", None) or request_id_ctx.get(),
         }
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)

@@ -4,6 +4,8 @@
 
 ## Contenu
 
+- [Facturation et paiements (socle P0)](facturation.md)
+- [Console support opérateur (lecture seule)](operator.md)
 - [affectation-par-module/](affectation-par-module/README.md)
 - [identite/](identite/README.md)
 - [zylo-liquid/](zylo-liquid/README.md)

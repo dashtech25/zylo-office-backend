@@ -13,6 +13,7 @@
 | `POST /auth/login` | oui | oui (sauf IP déjà connue du titulaire) | identifiants refusés (401) |
 | `POST /auth/register` | oui | oui | email déjà utilisé (409) |
 | `POST /auth/refresh` | oui | non (pas d'email dans la requête) | jeton invalide, expiré, révoqué ou utilisateur inactif (401) |
+| `POST /auth/activate` | oui | non (le jeton est la preuve, aucune identité n'est utilisée pour le compteur) | jeton inconnu, expiré, déjà utilisé ou révoqué (`400 invitation_invalid`) |
 
 Les réponses 422 (validation) et 5xx ne sont jamais comptées.
 
@@ -52,6 +53,7 @@ Aucun mot de passe, aucun email. Le journal ne remplace pas une rétention de s�
 - **Register : le 409 `email_already_used` révèle toujours l'existence d'un compte** (IAM-015). La réponse neutre exige une confirmation par email, qui n'existe pas. Hors T-012 ; la limitation réduit seulement le rythme d'énumération.
 - **Attaque distribuée sur un compte** : chaque IP a son propre compteur. Un verrou global par compte est volontairement absent (REV-S-07 : il servirait de déni de service). Une attaque depuis de nombreuses IP n'est donc freinée que par le plafond par IP.
 - **Pas de route de réinitialisation de mot de passe** dans le code actuel : rien à limiter sur ce point.
+- Activation : les échecs `invitation_invalid` sont comptés par IP; après possession d'un jeton valide, le compteur d'échecs de cette action/IP est remis à zéro. Une erreur de politique du mot de passe n'est pas comptée, car elle survient après validation du jeton.
 - **Partage d'IP (NAT, entreprise)** : un plafond par IP peut bloquer des utilisateurs légitimes derrière la même adresse. Calibrer `AUTH_RATE_LIMIT_MAX_FAILURES_PER_IP` en production.
 - **Non vérifié ici** : le comportement derrière le proxy de production (`TRUSTED_PROXIES` à renseigner), et le test Playwright sur build prod (T-012, critère « connexion refusée avec message générique ») : le frontend n'est pas modifié par cette tâche.
 - **Multi-instance** : les compteurs sont dans PostgreSQL, donc partagés entre processus. Un verrou n'est pas perdu au redémarrage.

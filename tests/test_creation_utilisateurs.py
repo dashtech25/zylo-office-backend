@@ -369,6 +369,52 @@ async def test_activation_a_usage_unique_puis_connexion_possible(client: AsyncCl
     assert user.status == "active"
 
 
+async def test_activation_valide_remet_a_zero_le_compteur_ip_de_jetons_invalides(
+    client: AsyncClient, monkeypatch
+):
+    # Créer l'organisation et son invitation avec les seuils normaux : les
+    # compteurs IP d'authentification sont persistants entre tests.
+    createur = await _proprietaire(client)
+    compte = await _creer_compte(client, createur)
+    jeton = _jeton_de_la_derniere_invitation(compte["email"])
+
+    monkeypatch.setattr(settings, "AUTH_RATE_LIMIT_MAX_FAILURES_PER_IP", 2)
+    monkeypatch.setattr(settings, "AUTH_RATE_LIMIT_TRUSTED_PROXIES", ["127.0.0.1"])
+    # Le compteur IP est persistant en base pendant la suite. Une IP fixe peut
+    # donc hériter du verrou laissé par un autre test exécuté précédemment.
+    ip_client = uuid.uuid4().int & 0xFFFFFF
+    headers = {"X-Forwarded-For": f"10.{(ip_client >> 16) & 0xFF}.{(ip_client >> 8) & 0xFF}.{ip_client & 0xFF}"}
+
+    invalide = await client.post(
+        URL_ACTIVATION,
+        json={"token": "jeton-invalide-avec-longueur-suffisante", "password": MOT_DE_PASSE_NOUVEAU},
+        headers=headers,
+    )
+    assert invalide.status_code == 400
+
+    active = await client.post(
+        URL_ACTIVATION,
+        json={"token": jeton, "password": MOT_DE_PASSE_NOUVEAU},
+        headers=headers,
+    )
+    assert active.status_code == 200, active.text
+
+    # Sans remise à zéro lors du succès, le verrou s'activerait au prochain essai.
+    for _ in range(2):
+        retry = await client.post(
+            URL_ACTIVATION,
+            json={"token": "jeton-invalide-avec-longueur-suffisante", "password": MOT_DE_PASSE_NOUVEAU},
+            headers=headers,
+        )
+        assert retry.status_code == 400
+    bloque = await client.post(
+        URL_ACTIVATION,
+        json={"token": "jeton-invalide-avec-longueur-suffisante", "password": MOT_DE_PASSE_NOUVEAU},
+        headers=headers,
+    )
+    assert bloque.status_code == 429
+
+
 async def test_jeton_refuse_au_second_usage(client: AsyncClient):
     createur = await _proprietaire(client)
     compte = await _creer_compte(client, createur)

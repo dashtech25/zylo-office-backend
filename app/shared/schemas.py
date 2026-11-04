@@ -1,6 +1,6 @@
 from typing import Generic, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 T = TypeVar("T")
 
@@ -21,3 +21,19 @@ class Page(BaseModel, Generic[T]):
 
 class ErrorDetail(BaseModel):
     error: dict
+
+
+class ApiErrorBody(BaseModel):
+    """Corps commun des erreurs HTTP de l'API; succès existants inchangés."""
+
+    code: str
+    message: str
+    field_errors: dict[str, list[str]] = Field(default_factory=dict)
+    details: list[dict] = Field(default_factory=list)
+
+
+class ApiErrorResponse(BaseModel):
+    """Enveloppe d'erreur commune; request_id correspond à X-Request-Id."""
+
+    error: ApiErrorBody
+    request_id: str

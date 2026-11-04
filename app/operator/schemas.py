@@ -63,3 +63,26 @@ class OperatorPaymentEvent(BaseModel):
     createdAt: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ComposantSante(BaseModel):
+    """Statut d'un composant technique, sans message d'erreur ni URL (BE-240).
+
+    `status` vaut `ok`, `unavailable` ou `unknown`. Ces trois valeurs sont
+    documentées dans `app/operator/health.py`.
+    """
+
+    name: str
+    status: str
+
+
+class StatutTechnique(BaseModel):
+    """Réponse de la readiness interne et du statut opérateur (BE-240).
+
+    `status` est `ready` seulement si tous les composants sont `ok`. `verifiedAt`
+    est l'horodatage UTC de la vérification.
+    """
+
+    status: str
+    verifiedAt: datetime
+    components: list[ComposantSante]

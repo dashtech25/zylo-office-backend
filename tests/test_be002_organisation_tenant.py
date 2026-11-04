@@ -2,6 +2,9 @@
 
 Tests écrits d'après la définition `### BE-002` de
 implementation-backend/tasks-socle-tenant-identite.md, avant le code.
+
+CA-4 (test_be002_ca4_...) est reporté à BE-009 : garde de contexte tenant
+(décision de l'étape B). Voir la définition de BE-009 avant de réactiver ce test.
 """
 
 import inspect
@@ -63,6 +66,7 @@ async def test_be002_ca3_lectures_publiques_de_l_identite_sont_bornees_par_une_p
         assert parametres & portees, f"{nom} ne reçoit aucun paramètre de portée"
 
 
+@pytest.mark.skip(reason="CA-4 relève de BE-009 : garde de contexte tenant, décision de l'étape B")
 async def test_be002_ca4_lecture_de_repository_sans_contexte_organisation_refusee(client: AsyncClient):
     # Contrat cible : une lecture de repository sans contexte d'organisation lève
     # AppError. Le module app/identity/repository.py n'existe pas encore (BE-009).

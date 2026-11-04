@@ -95,6 +95,14 @@ class Subscription(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     startDate: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     endDate: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     renewedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Résiliation (BE-090) : mode demandé et date d'effet. `cancelMode` est nul tant qu'aucune
+    # résiliation n'a été demandée ; `cancelEffectiveAt` est alors la fin de période (`endDate`).
+    cancelMode: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, comment="Mode de résiliation : end_of_period ou immediate (BE-090).",
+    )
+    cancelEffectiveAt: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="Date d'effet de la résiliation (BE-090).",
+    )
     # Verrou optimiste (BE-072) : incrémenté à chaque écriture versionnée, voir app/billing/idempotency.py.
     version: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
 

@@ -45,6 +45,28 @@ class SubscriptionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class EntitlementResponse(BaseModel):
+    """Entitlement d'une organisation, état calculé à la lecture (BE-026).
+
+    Aucun champ fournisseur de paiement : la lecture ne renvoie que les droits
+    métier et leur état (`etat`), jamais de référence de transaction ou de secret.
+    """
+
+    id: uuid.UUID
+    organizationId: uuid.UUID | None = None
+    subscriptionId: uuid.UUID
+    moduleCode: str
+    entitlementCode: str
+    offreId: uuid.UUID | None = None
+    capaciteId: uuid.UUID | None = None
+    quotaLimite: int | None = None
+    niveauApplication: str
+    sourceAttribution: str
+    etat: str
+
+    model_config = {"from_attributes": True}
+
+
 class CreateInvoiceRequest(BaseModel):
     subscriptionId: uuid.UUID
 

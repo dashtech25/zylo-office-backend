@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.alerts.router import router as alerts_router
 from app.api.v1.endpoints import health
 from app.auth.router import router as auth_router
+from app.billing.router import current_organization_router as billing_current_organization_router
 from app.billing.router import router as billing_router
 from app.files.router import router as files_router
 from app.identity.router import router as organizations_router
@@ -31,6 +32,7 @@ api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 api_router.include_router(organizations_router, prefix="/organizations", tags=["organizations"])
+api_router.include_router(billing_current_organization_router, prefix="/organizations", tags=["billing"])
 api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(account_router, prefix="/account", tags=["account"])
 api_router.include_router(organizations_modules_router, prefix="/organizations", tags=["modules"])

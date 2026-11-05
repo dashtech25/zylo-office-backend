@@ -160,17 +160,26 @@ async def start_payment_attempt(
     return await service.start_payment_attempt(db, organization_id, invoice_id, idempotency_key)
 
 
-@router.post("/webhooks/flutterwave", response_model=PaymentWebhookAck)
+@router.post("/provider-events", response_model=PaymentWebhookAck, summary="Ingestion d'un évènement fournisseur de paiement")
+@router.post("/webhooks/flutterwave", response_model=PaymentWebhookAck, include_in_schema=False)
 async def flutterwave_webhook(
     request: Request,
     verif_hash: str | None = Header(default=None, alias="verif-hash"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Entrée webhook Flutterwave : vérifie le secret, puis délègue à BE-029.
+    """Entrée des évènements fournisseur de paiement : vérifie la signature, puis délègue à BE-029.
 
-    La vérification de `verif-hash` reste ici (la route appartient à BE-083). Le traitement
-    (référence, idempotence, quarantaine, effet) est dans app/billing/webhooks.py. Ce
-    endpoint ne règle jamais une facture ni n'accorde d'entitlement.
+    Route canonique : `POST /api/v1/billing/provider-events` (BE-083). L'ancienne
+    adresse `/webhooks/flutterwave` reste servie, sans être documentée, pour les
+    appels existants ; les deux chemins sont le même handler, sans second code.
+
+    Contrat de signature (ACTF-11) : l'en-tête `verif-hash` doit égaler le secret
+    `FLUTTERWAVE_WEBHOOK_SECRET`. Secret non configuré : 503 `PROVIDER_UNAVAILABLE`.
+    Signature absente ou fausse : 401 `webhook_signature_invalid`, sans lecture du corps
+    ni écriture. Signature valide : le corps brut est transmis tel quel à
+    `traiter_evenement_webhook` (BE-029), avec `signature_verifiee=True`. La route
+    n'applique aucune règle métier. Ce endpoint ne règle jamais une facture ni
+    n'accorde d'entitlement.
     """
     secret = os.getenv("FLUTTERWAVE_WEBHOOK_SECRET", "")
     if not secret:

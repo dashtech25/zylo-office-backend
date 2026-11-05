@@ -88,7 +88,8 @@ def test_declaration_sans_effet_refusee():
         ReglageDeclare(key="be237.sans.effet", owner="test", scope="tenant", secret=False, effect="")
 
 
-async def test_registre_refuse_un_reglage_sans_proprietaire_en_base():
+async def test_registre_refuse_un_reglage_sans_proprietaire_en_base(client):
+    # `client` réinitialise le pool du moteur pour la boucle courante (voir conftest).
     """La contrainte de table refuse une ligne sans propriétaire, même hors du code Python."""
     async with AsyncSessionLocal() as db:
         db.add(
@@ -99,7 +100,8 @@ async def test_registre_refuse_un_reglage_sans_proprietaire_en_base():
         await db.rollback()
 
 
-async def test_registre_refuse_une_portee_hors_ensemble_en_base():
+async def test_registre_refuse_une_portee_hors_ensemble_en_base(client):
+    # `client` réinitialise le pool du moteur pour la boucle courante (voir conftest).
     async with AsyncSessionLocal() as db:
         db.add(SettingsRegistry(key=_cle(), owner="test", scopeKind="global", secret=False, effect="immediat"))
         with pytest.raises(IntegrityError):

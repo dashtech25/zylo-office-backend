@@ -136,6 +136,11 @@ async def authenticate_user(db: AsyncSession, data: LoginRequest) -> User:
         raise AppError(code="invalid_credentials", message="Email ou mot de passe incorrect.", status_code=401)
     if not verify_password(data.password, user.hashedPassword):
         raise AppError(code="invalid_credentials", message="Email ou mot de passe incorrect.", status_code=401)
+    # Verrouillage (BE-187, CA-4) : refus 401 et non 403, pour qu'un compte verrouillé
+    # ne soit pas distinguable d'un identifiant erroné ; contrôlé après le mot de passe
+    # pour ne pas révéler l'état du compte à qui ne le connaît pas.
+    if user.status == "locked":
+        raise AppError(code="account_locked", message="Email ou mot de passe incorrect.", status_code=401)
     if user.status != "active":
         raise AppError(code="account_inactive", message="Ce compte n'est pas actif.", status_code=403)
     return user

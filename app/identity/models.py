@@ -72,6 +72,11 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     # généré côté serveur, jamais choisi par la personne) — force un
     # changement via POST /auth/change-password avant utilisation normale.
     mustChangePassword: Mapped[bool] = mapped_column(nullable=False, server_default="false")
+    # Verrou de version (BE-187) : +1 à chaque transition de statut réussie
+    # (app/identity/cycle_de_vie_utilisateur.py), comme organization.version (BE-233).
+    version: Mapped[int] = mapped_column(
+        nullable=False, server_default="1", comment="Version de l'utilisateur (BE-187) ; incrémentée à chaque transition de statut."
+    )
 
 
 class OrganizationUser(UUIDPrimaryKeyMixin, TimestampMixin, Base):

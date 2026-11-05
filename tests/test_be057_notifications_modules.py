@@ -23,6 +23,7 @@ Points de la définition non tranchés dans ces tests :
 """
 
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 from httpx import AsyncClient
@@ -54,9 +55,10 @@ async def _id_utilisateur(email: str) -> uuid.UUID:
         return (await db.execute(select(User.id).where(User.email == email))).scalar_one()
 
 
-async def _membre(client: AsyncClient, organisation: uuid.UUID, avec_lecture_module: bool) -> uuid.UUID:
+async def _membre(client: AsyncClient, organisation: uuid.UUID, accordant: uuid.UUID, avec_lecture_module: bool) -> uuid.UUID:
     """Crée un utilisateur rattaché à `organisation`. Si `avec_lecture_module`, lui accorde
-    `organization.module.read` par un grant individuel `allow` sur toute l'organisation."""
+    `organization.module.read` par un grant individuel `allow` sur toute l'organisation (accordé
+    par `accordant`, exigé par la colonne `grantedByUserId`)."""
     email = f"be057-{uuid.uuid4().hex[:10]}@zylo-office-test.example.com"
     await client.post("/api/v1/auth/register", json={"email": email, "password": MOT_DE_PASSE, "fullName": "Membre BE-057"})
     identifiant = await _id_utilisateur(email)
@@ -67,7 +69,8 @@ async def _membre(client: AsyncClient, organisation: uuid.UUID, avec_lecture_mod
             db.add(
                 UserPermissionGrant(
                     organizationId=organisation, userId=identifiant, permissionId=permission.id, effect="allow",
-                    resourceType=None, resourceId=None,
+                    resourceType=None, resourceId=None, grantedByUserId=accordant,
+                    validFrom=datetime.now(timezone.utc),
                 )
             )
         await db.commit()
@@ -101,6 +104,21 @@ async def _cycle_jusqu_a_suspension(organisation: uuid.UUID, acteur: uuid.UUID, 
         return evenement.eventId
 
 
+async def _recipients_attendus(organisation: uuid.UUID, acteur: uuid.UUID, candidats: set[uuid.UUID]) -> set[uuid.UUID]:
+    """Destinataires attendus : les candidats qui ont `organization.module.read` selon la liste des
+    permissions effectives (oracle indépendant de la notification). Le propriétaire de l'organisation
+    est aussi membre : s'il détient la permission par son rôle, il est destinataire légitime."""
+    from app.rbac.service import list_effective_permission_codes
+
+    attendus: set[uuid.UUID] = set()
+    async with AsyncSessionLocal() as db:
+        for candidat in candidats | {acteur}:
+            codes = await list_effective_permission_codes(db, organisation, candidat)
+            if ORGANIZATION_MODULE_READ in codes and candidat in candidats | {acteur}:
+                attendus.add(candidat)
+    return attendus
+
+
 async def _elements_du_evenement(evenement_id: str) -> list[NotificationInboxItem]:
     async with AsyncSessionLocal() as db:
         return list(
@@ -115,17 +133,18 @@ async def _elements_du_evenement(evenement_id: str) -> list[NotificationInboxIte
 async def test_ca1_suspension_une_notification_par_destinataire_autorise(client: AsyncClient, registered_user: dict, organization: dict):
     organisation = uuid.UUID(organization["id"])
     acteur = await _id_utilisateur(registered_user["email"])
-    destinataire_a = await _membre(client, organisation, avec_lecture_module=True)
-    destinataire_b = await _membre(client, organisation, avec_lecture_module=True)
-    sans_droit = await _membre(client, organisation, avec_lecture_module=False)
+    destinataire_a = await _membre(client, organisation, acteur, avec_lecture_module=True)
+    destinataire_b = await _membre(client, organisation, acteur, avec_lecture_module=True)
+    sans_droit = await _membre(client, organisation, acteur, avec_lecture_module=False)
 
     evenement_id = await _cycle_jusqu_a_suspension(organisation, acteur, uuid.uuid4(), uuid.uuid4())
 
     elements = await _elements_du_evenement(evenement_id)
     destinataires = {element.recipientUserId for element in elements}
-    assert len(elements) == 2
-    assert destinataires == {destinataire_a, destinataire_b}
-    assert sans_droit not in destinataires
+    attendus = await _recipients_attendus(organisation, acteur, {destinataire_a, destinataire_b, sans_droit})
+    assert {destinataire_a, destinataire_b} <= attendus
+    assert sans_droit not in attendus
+    assert destinataires == attendus
 
 
 async def test_ca1_rejeu_de_la_notification_ne_cree_aucun_doublon(client: AsyncClient, registered_user: dict, organization: dict):
@@ -134,8 +153,9 @@ async def test_ca1_rejeu_de_la_notification_ne_cree_aucun_doublon(client: AsyncC
 
     organisation = uuid.UUID(organization["id"])
     acteur = await _id_utilisateur(registered_user["email"])
-    await _membre(client, organisation, avec_lecture_module=True)
+    membre = await _membre(client, organisation, acteur, avec_lecture_module=True)
     evenement_id = await _cycle_jusqu_a_suspension(organisation, acteur, uuid.uuid4(), uuid.uuid4())
+    attendus = await _recipients_attendus(organisation, acteur, {membre})
     avant = len(await _elements_du_evenement(evenement_id))
 
     async with AsyncSessionLocal() as db:
@@ -144,29 +164,33 @@ async def test_ca1_rejeu_de_la_notification_ne_cree_aucun_doublon(client: AsyncC
         await notifier_destinataires_evenement(db, evenement)
         await db.commit()
 
-    assert avant == 1
+    assert membre in attendus
+    assert avant == len(attendus)
     assert len(await _elements_du_evenement(evenement_id)) == avant
 
 
 async def test_ca2_destinataire_sans_permission_ne_recoit_aucune_notification(client: AsyncClient, registered_user: dict, organization: dict):
     organisation = uuid.UUID(organization["id"])
     acteur = await _id_utilisateur(registered_user["email"])
-    sans_droit = await _membre(client, organisation, avec_lecture_module=False)
+    sans_droit = await _membre(client, organisation, acteur, avec_lecture_module=False)
 
     evenement_id = await _cycle_jusqu_a_suspension(organisation, acteur, uuid.uuid4(), uuid.uuid4())
 
+    assert sans_droit not in await _recipients_attendus(organisation, acteur, {sans_droit})
     async with AsyncSessionLocal() as db:
         recus = await db.scalar(
             select(func.count()).select_from(NotificationInboxItem).where(NotificationInboxItem.recipientUserId == sans_droit)
         )
     assert recus == 0
-    assert await _elements_du_evenement(evenement_id) == []
+    destinataires = {element.recipientUserId for element in await _elements_du_evenement(evenement_id)}
+    assert sans_droit not in destinataires
+    assert destinataires == await _recipients_attendus(organisation, acteur, {sans_droit})
 
 
 async def test_ca3_notification_sans_secret_ni_motif_libre(client: AsyncClient, registered_user: dict, organization: dict):
     organisation = uuid.UUID(organization["id"])
     acteur = await _id_utilisateur(registered_user["email"])
-    await _membre(client, organisation, avec_lecture_module=True)
+    await _membre(client, organisation, acteur, avec_lecture_module=True)
 
     evenement_id = await _cycle_jusqu_a_suspension(organisation, acteur, uuid.uuid4(), uuid.uuid4(), motif=MOTIF_SECRET)
 
@@ -182,7 +206,7 @@ async def test_ca3_notification_sans_secret_ni_motif_libre(client: AsyncClient, 
 async def test_ca4_notification_jamais_adressee_a_une_autre_organisation(client: AsyncClient, registered_user: dict, organization: dict):
     organisation_a = uuid.UUID(organization["id"])
     acteur = await _id_utilisateur(registered_user["email"])
-    membre_a = await _membre(client, organisation_a, avec_lecture_module=True)
+    membre_a = await _membre(client, organisation_a, acteur, avec_lecture_module=True)
 
     res = await client.post(
         "/api/v1/organizations",
@@ -191,11 +215,12 @@ async def test_ca4_notification_jamais_adressee_a_une_autre_organisation(client:
     )
     assert res.status_code in (200, 201), res.text
     organisation_b = uuid.UUID(res.json()["id"])
-    membre_b = await _membre(client, organisation_b, avec_lecture_module=True)
+    membre_b = await _membre(client, organisation_b, acteur, avec_lecture_module=True)
 
     evenement_id = await _cycle_jusqu_a_suspension(organisation_a, acteur, uuid.uuid4(), uuid.uuid4())
 
     elements = await _elements_du_evenement(evenement_id)
-    assert {element.recipientUserId for element in elements} == {membre_a}
+    assert {element.recipientUserId for element in elements} == await _recipients_attendus(organisation_a, acteur, {membre_a})
+    assert membre_a in {element.recipientUserId for element in elements}
     assert all(element.organizationId == organisation_a for element in elements)
     assert membre_b not in {element.recipientUserId for element in elements}

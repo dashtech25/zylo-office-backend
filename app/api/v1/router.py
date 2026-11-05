@@ -28,6 +28,7 @@ from app.billing.reconciliation.router import router as billing_reconciliation_r
 from app.files.router import router as files_router
 from app.identity.router import router as organizations_router
 from app.integrations.router import router as connecteurs_router
+from app.tenants.router import router as tenants_router
 from app.identity.router import account_router
 from app.identity.router import users_router
 from app.location.router import router as location_router
@@ -111,6 +112,7 @@ api_router.include_router(operations_router, prefix="/operations", tags=["operat
 api_router.include_router(rbac_router, prefix="/rbac", tags=["rbac"])
 # BE-162 : routes des connecteurs d'intégration (registre BE-160).
 api_router.include_router(connecteurs_router, tags=["integrations"])
+api_router.include_router(tenants_router)
 api_router.include_router(liens_router, tags=["integrations"])
 # BE-016 : lecture des rôles de l organisation courante (lecture seule).
 api_router.include_router(roles_lecture_router, prefix="/organizations", tags=["rbac"])

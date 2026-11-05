@@ -114,7 +114,7 @@ async def commande_de_l_initiateur(db: AsyncSession, command_id: uuid.UUID, acto
     return commande
 
 
-async def _lire_tenant_cible(db: AsyncSession, commande: AdminCommand) -> Organization:
+async def lire_tenant_cible(db: AsyncSession, commande: AdminCommand) -> Organization:
     """Organisation visée par la commande ; 422 si le type ou l'identifiant ne se lit pas."""
     if commande.targetObjectType != TYPE_OBJET_TENANT:
         raise AppError(
@@ -136,7 +136,7 @@ async def _lire_tenant_cible(db: AsyncSession, commande: AdminCommand) -> Organi
     return organisation
 
 
-def _etat_observable(commande: AdminCommand, organisation: Organization) -> dict[str, Any]:
+def etat_observable(commande: AdminCommand, organisation: Organization) -> dict[str, Any]:
     """Champs de la cible qui entrent dans l'empreinte (QE-ADM-09)."""
     return {
         "tenantId": str(commande.tenantId),
@@ -174,12 +174,12 @@ async def creer_preview(db: AsyncSession, commande: AdminCommand) -> AdminComman
             message="La durée de prévisualisation n'est pas configurée.",
             status_code=503,
         )
-    organisation = await _lire_tenant_cible(db, commande)
+    organisation = await lire_tenant_cible(db, commande)
     if commande.targetVersionExpected is not None and organisation.version != commande.targetVersionExpected:
         lever_conflit_de_version(organisation.version, organisation.updatedAt)
 
     maintenant = datetime.now(timezone.utc)
-    etat = _etat_observable(commande, organisation)
+    etat = etat_observable(commande, organisation)
     preview = AdminCommandPreview(
         commandId=commande.commandId,
         stateSnapshotHash=empreinte_etat(etat),
@@ -224,8 +224,8 @@ async def confirmer_preview(db: AsyncSession, commande: AdminCommand, preview_id
         await db.commit()
         raise erreur_preview_invalide(RAISON_EXPIREE)
 
-    organisation = await _lire_tenant_cible(db, commande)
-    if empreinte_etat(_etat_observable(commande, organisation)) != preview.stateSnapshotHash:
+    organisation = await lire_tenant_cible(db, commande)
+    if empreinte_etat(etat_observable(commande, organisation)) != preview.stateSnapshotHash:
         preview.invalidatedReason = RAISON_ETAT_MODIFIE
         await db.commit()
         raise erreur_preview_invalide(RAISON_ETAT_MODIFIE)

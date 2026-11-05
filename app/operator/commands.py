@@ -61,7 +61,7 @@ class AdminCommand(Base):
     __tablename__ = "admin_command"
     __table_args__ = (
         UniqueConstraint("actorId", "idempotencyKey", name="uq_admin_command_actor_idempotency"),
-        CheckConstraint("status IN ('intention', 'approuvee', 'rejetee')", name="ck_admin_command_status"),
+        CheckConstraint("status IN ('intention', 'approuvee', 'rejetee', 'executee', 'echec', 'resultat_inconnu')", name="ck_admin_command_status"),
         CheckConstraint("\"commandVersion\" >= 1", name="ck_admin_command_version"),
         {"comment": "Intentions de commande opérateur, idempotentes par acteur (BE-124)."},
     )

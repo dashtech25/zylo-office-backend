@@ -604,3 +604,28 @@ class Refund(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     approverId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=True, comment="Approbateur humain distinct du demandeur (ACTF-08).")
     reason: Mapped[str] = mapped_column(Text, nullable=False, comment="Motif obligatoire (geste sensible, BE-073).")
     request_id: Mapped[str] = mapped_column(String(120), nullable=False, comment="Clé de requête (Idempotency-Key) : avec paymentAttemptId, unique.")
+
+
+class Dispute(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Litige (dispute) ouvert par le fournisseur sur un paiement (BE-094).
+
+    Une ligne par litige fournisseur. Ouverture et clôture ne viennent que d'un évènement
+    fournisseur (BE-083, traité par BE-029) : aucune route d'écriture publique. `providerRef`
+    (identifiant du litige chez le fournisseur) est unique : un même litige reçu deux fois ne
+    crée jamais une seconde ligne. Statuts : `opened`, `evidence_due`, `under_review` (ouverts),
+    `won`, `lost`, `withdrawn` (clos). Les colonnes exactes sont NON DÉFINIES dans la définition
+    (QE-FAC-04) : schéma retenu ici.
+    """
+
+    __tablename__ = "dispute"
+    __table_args__ = (
+        {"comment": "Litige fournisseur sur un paiement (BE-094) : ouverture et clôture par évènement fournisseur."},
+    )
+
+    paymentAttemptId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("paymentAttempt.id"), nullable=False, index=True,
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, comment="opened | evidence_due | under_review | won | lost | withdrawn.")
+    providerRef: Mapped[str] = mapped_column(String(160), nullable=False, unique=True, comment="Identifiant du litige chez le fournisseur.")
+    openedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Date de réception de l'ouverture.")
+    resolvedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Date de clôture (won, lost, withdrawn).")

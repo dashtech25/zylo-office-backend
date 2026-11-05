@@ -51,6 +51,10 @@ Contrat, dans l'ordre d'exécution de `traiter_evenement_webhook` :
    trace. Une insertion concurrente du même évènement (violation de la contrainte
    unique) annule la transaction et est traitée comme un doublon.
 
+Litiges (BE-094) : les évènements `dispute.opened` et `dispute.resolved` sont appliqués par
+`app/billing/disputes/service.py` dans la même transaction (étape 5). Un litige ne déclenche
+jamais de remboursement.
+
 Ce module ne fait aucun appel réseau au fournisseur et ne lit jamais le contenu
 complet pour le stocker : seule l'empreinte SHA-256 du corps brut est conservée
 (`payloadDigest`), ce qui évite de persister données de carte ou secrets marchands.
@@ -69,6 +73,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.billing.models import Invoice, PaymentAttempt, PaymentWebhookEvent, Subscription
+from app.billing.disputes.service import TYPES_EVENEMENT_LITIGE, appliquer_evenement_litige
 from app.core.errors import AppError
 
 FOURNISSEUR_FLUTTERWAVE = "flutterwave"
@@ -206,6 +211,10 @@ async def traiter_evenement_webhook(
             outcome = "applied"
         else:
             outcome = "ignored_state"
+    elif type_evt in TYPES_EVENEMENT_LITIGE:
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        reference_litige = str(data.get("id") or "") or None
+        outcome = await appliquer_evenement_litige(db, tentative, type_evt, statut, reference_litige)
 
     db.add(PaymentWebhookEvent(
         provider=FOURNISSEUR_FLUTTERWAVE,

@@ -281,13 +281,39 @@ class EntitlementAllocation(UUIDPrimaryKeyMixin, Base):
 
 
 class PaymentAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Tentative de paiement (BE-028 pour une facture, BE-082 pour un checkout).
+
+    Table unique `paymentAttempt` : une tentative porte soit une facture (`invoiceId`), soit un
+    checkout (`checkoutId`), jamais les deux pour un même usage. Machine d'état BE-082 :
+    `created -> submitted -> pending | requires_action | unknown | succeeded | failed | cancelled`.
+    `unknown` signifie que l'issue fournisseur est inconnue (délai dépassé) : ce n'est jamais un
+    échec. Aucune colonne ne porte de donnée de carte (CA-5 de BE-082).
+    """
+
     __tablename__ = "paymentAttempt"
     __table_args__ = (
         UniqueConstraint("idempotencyKey", name="uq_paymentAttempt_idempotency"),
         UniqueConstraint("provider", "providerReference", name="uq_paymentAttempt_provider_reference"),
     )
 
-    invoiceId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("invoice.id"), nullable=False, index=True)
+    invoiceId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("invoice.id"), nullable=True, index=True,
+        comment="Facture payée (BE-028) ; NULL pour une tentative de checkout.",
+    )
+    checkoutId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("checkout.id"), nullable=True, index=True,
+        comment="Checkout soumis (BE-082) ; NULL pour une tentative de facture.",
+    )
+    installmentRef: Mapped[str | None] = mapped_column(
+        String(80), nullable=True, comment="Référence de l'échéance payée, si le paiement est fractionné (NON DÉFINI, QE-FAC-04).",
+    )
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1",
+        comment="Verrou optimiste (BE-072), incrémenté à chaque transition.",
+    )
+    submittedAt: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="Instant de l'appel au fournisseur (état `submitted`).",
+    )
     provider: Mapped[str] = mapped_column(String(40), nullable=False)
     mode: Mapped[str] = mapped_column(String(20), nullable=False, default="test")
     idempotencyKey: Mapped[str] = mapped_column(String(120), nullable=False)

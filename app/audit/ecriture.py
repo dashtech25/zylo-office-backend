@@ -83,8 +83,11 @@ async def _ecrire_audit(
     resume: str,
     changes: dict | None,
     result: str,
+    motif: str | None = None,
 ) -> None:
     """Écrit l'entrée d'audit `result` via `record_audit_event`, dans le savepoint courant.
+
+    `motif` (BE-227 CA-1) est stocké dans la colonne `reason` ; `None` pour les lectures.
 
     Toute exception de l'écriture (contrainte, injection de test, invariant d'audit) est
     convertie en `ErreurCatalogue` `AUDIT_WRITE_FAILED` (500). La cause est gardée dans
@@ -101,6 +104,7 @@ async def _ecrire_audit(
             resume,
             changes,
             result=result,
+            reason=motif,
         )
     except Exception as exc:
         raise ErreurCatalogue(CodeErreur.AUDIT_WRITE_FAILED, detail=f"{type(exc).__name__}: {exc}") from exc
@@ -116,6 +120,8 @@ async def executer_mutation_sensible(
     resume: str,
     mutation: Callable[[AsyncSession], Awaitable[T]],
     changes: dict | None = None,
+    *,
+    motif: str | None = None,
 ) -> T:
     """Exécute une mutation sensible et son entrée d'audit dans un même savepoint (CA-1).
 
@@ -136,13 +142,17 @@ async def executer_mutation_sensible(
     - `resume` : texte court pré-rendu, 500 caractères au plus ;
     - `mutation` : coroutine recevant la session ; elle ne doit pas appeler `commit()` ;
     - `changes` : détail facultatif, masqué des secrets par `record_audit_event`.
+    - `motif` : justification de l'action (BE-227 CA-1), stockée dans `reason`. Optionnel
+      pour ne pas casser les appelants existants ; une action privilégiée nouvelle le passe.
 
     Retour : la valeur rendue par `mutation`. L'appelant doit encore `commit()`.
     """
     emetteur = _verifier_emetteur(identite, organization_id)
     async with db.begin_nested():
         resultat = await mutation(db)
-        await _ecrire_audit(db, emetteur, organization_id, action, entity_type, entity_id, resume, changes, "success")
+        await _ecrire_audit(
+            db, emetteur, organization_id, action, entity_type, entity_id, resume, changes, "success", motif=motif
+        )
     return resultat
 
 

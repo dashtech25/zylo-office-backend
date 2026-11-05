@@ -57,3 +57,32 @@ class ModifierPreferenceRequest(BaseModel):
     vaut désinscription de la catégorie."""
 
     consentement: bool
+
+
+class NotificationResponse(BaseModel):
+    """Notification d'un destinataire (BE-171). `motifSuppression` n'est renseigné que
+    pour `statut = supprimee`. Aucune adresse de destinataire n'y figure."""
+
+    id: uuid.UUID
+    eventId: uuid.UUID
+    categorieCode: str
+    statut: str
+    motifSuppression: str | None
+    creeAt: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class LivraisonResponse(BaseModel):
+    """Une tentative de remise à un canal (BE-171, CA-2). Ne porte aucun champ de
+    destinataire : seuls le canal (nom opaque), le résultat et les dates de tentative."""
+
+    id: uuid.UUID
+    canal: str
+    tentativeNo: int
+    resultat: str
+    codeErreur: str | None
+    prochaineTentativeAt: datetime | None
+    creeAt: datetime
+
+    model_config = {"from_attributes": True}

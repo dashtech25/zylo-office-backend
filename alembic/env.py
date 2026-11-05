@@ -21,6 +21,7 @@ from app.billing import models as billing_models  # noqa: F401
 from app.files import models as files_models  # noqa: F401
 from app.core import idempotency as idempotency_models  # noqa: F401
 from app.identity import models as identity_models  # noqa: F401
+from app.integrations import models as integrations_models  # noqa: F401
 from app.location import models as location_models  # noqa: F401
 from app.modules.zylo_liquid import models as zylo_liquid_models  # noqa: F401
 from app.modules.zylo_tanker import models as zylo_tanker_models  # noqa: F401

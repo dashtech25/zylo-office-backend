@@ -196,6 +196,14 @@ class Settings(BaseSettings):
     # que si l'adresse du pair direct figure dans cette liste. Vide = aucun proxy.
     AUTH_RATE_LIMIT_TRUSTED_PROXIES: list[str] = []
 
+    # Quotas (BE-191) : deux familles configurées séparément. Quota produit : nombre
+    # de requêtes par fenêtre, par tenant (décision produit, QE-API-17). Limite
+    # technique : protection de l'infrastructure, indépendante du produit.
+    QUOTA_PRODUIT_MAX_REQUETES: int = 600
+    QUOTA_PRODUIT_FENETRE_SECONDES: int = 60
+    LIMITE_TECHNIQUE_MAX_REQUETES: int = 1200
+    LIMITE_TECHNIQUE_FENETRE_SECONDES: int = 60
+
     # Réseaux internes autorisés à lire la readiness (`/api/v1/internal/ready`,
     # BE-240), en notation CIDR. Vide = aucun réseau interne : la route répond 404
     # pour tout le monde. Seule l'adresse du pair direct est comparée (pas de

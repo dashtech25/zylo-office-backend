@@ -19,6 +19,22 @@ class Page(BaseModel, Generic[T]):
     meta: PageMeta
 
 
+class PageCurseurMeta(BaseModel):
+    """Métadonnées d'une page par curseur (BE-191). `next_cursor` est absent
+    (None) sur la dernière page ; sinon il se repasse tel quel en `cursor`."""
+
+    limit: int
+    next_cursor: str | None
+
+
+class PageCurseur(BaseModel, Generic[T]):
+    """Enveloppe des listes par curseur (BE-191). Pas de `total` : compter
+    coûte une requête de plus et n'est pas garanti stable entre deux pages."""
+
+    data: list[T]
+    meta: PageCurseurMeta
+
+
 class ErrorDetail(BaseModel):
     error: dict
 

@@ -276,18 +276,16 @@ async def test_be245_ca4_exercice_sans_droit_operateur_donne_403(db, base_jetabl
 async def test_be245_ca5_donnee_purgee_avant_sauvegarde_non_ressuscitee(
     db, operateur, base_jetable: str, tmp_path: Path
 ):
-    from app.core.database import AsyncSessionLocal
     from app.operator.restauration_verifiee import exercer_restauration
     from app.parametres.models import SettingDefinition
 
     table = SettingDefinition.__table__
     cle = f"test.be245.purge.{uuid.uuid4().hex[:10]}"
-    async with AsyncSessionLocal() as session:
-        session.add(SettingDefinition(key=cle, scopeKind="organisation", owner="test-be245", valueType="texte", sensitive=False))
-        await session.commit()
-    async with AsyncSessionLocal() as session:
-        await session.execute(delete(SettingDefinition).where(table.c.key == cle))
-        await session.commit()
+    # Session du fixture `db` (même boucle d'événements que le test) : pas de moteur global.
+    db.add(SettingDefinition(key=cle, scopeKind="organisation", owner="test-be245", valueType="texte", sensitive=False))
+    await db.commit()
+    await db.execute(delete(SettingDefinition).where(table.c.key == cle))
+    await db.commit()
 
     sauvegarde, fichier = await _sauvegarde_enregistree(db, tmp_path)
     exercice = await exercer_restauration(db, operateur.id, sauvegarde, fichier, base_jetable, etapes=_etapes_sans_effet())

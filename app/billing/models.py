@@ -576,3 +576,31 @@ class EntitlementSourceEvent(UUIDPrimaryKeyMixin, Base):
     )
     outcome: Mapped[str] = mapped_column(String(40), nullable=False)
     createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Refund(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Remboursement d'un paiement réussi (BE-093), avec approbation humaine obligatoire.
+
+    Une ligne par demande. `request_id` porte la clé de requête (en-tête `Idempotency-Key`) : le
+    couple (`paymentAttemptId`, `request_id`) est unique, donc une même demande rejouée ne crée
+    jamais une seconde ligne. Statuts : `requested` (approbation enregistrée, envoi pas encore fait),
+    `pending` (envoyé ou issue inconnue, à réconcilier BE-095), `succeeded`, `failed`.
+    Les colonnes exactes sont NON DÉFINIES dans la définition (QE-FAC-04) : schéma retenu ici.
+    L'approbateur est aussi tracé dans l'audit `billing.refund.approve`.
+    """
+
+    __tablename__ = "refund"
+    __table_args__ = (
+        UniqueConstraint("paymentAttemptId", "request_id", name="uq_refund_payment_request"),
+        {"comment": "Remboursement d'un paiement réussi (BE-093) : approbation humaine avant tout envoi fournisseur."},
+    )
+
+    paymentAttemptId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("paymentAttempt.id"), nullable=False, index=True,
+    )
+    amount: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="Montant remboursé en unités mineures, strictement positif.")
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, comment="Devise du paiement d'origine, copiée à la demande.")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="requested", comment="requested | pending | succeeded | failed.")
+    approverId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=True, comment="Approbateur humain distinct du demandeur (ACTF-08).")
+    reason: Mapped[str] = mapped_column(Text, nullable=False, comment="Motif obligatoire (geste sensible, BE-073).")
+    request_id: Mapped[str] = mapped_column(String(120), nullable=False, comment="Clé de requête (Idempotency-Key) : avec paymentAttemptId, unique.")

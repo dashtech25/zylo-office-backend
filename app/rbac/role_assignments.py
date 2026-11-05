@@ -62,7 +62,8 @@ class AdminRoleAssignment(UUIDPrimaryKeyMixin, Base):
     `scope` vaut `platform` ou `tenant:<uuid>` (même format que l'en-tête
     `X-Admin-Scope`, voir app/operator/scope.py). `grantedBy` est l'auteur de
     l'attribution, conservé pour la traçabilité. `revokedAt` est renseigné par
-    une révocation (route à venir) ; aucune ligne n'est jamais supprimée."""
+    la route `POST .../{assignment_id}/revoke` (BE-146) ; aucune ligne n'est
+    jamais supprimée. `revokedBy` est l'administrateur qui a révoqué."""
 
     __tablename__ = "admin_role_assignment"
     __table_args__ = (
@@ -76,6 +77,7 @@ class AdminRoleAssignment(UUIDPrimaryKeyMixin, Base):
     grantedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expiresAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revokedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revokedBy: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=True)
 
 
 def _refus(code: str, message: str, status_code: int = 422) -> AppError:
@@ -160,3 +162,41 @@ async def has_platform_authority(db: AsyncSession, user_id: uuid.UUID) -> bool:
         .limit(1)
     )
     return (await db.execute(stmt)).first() is not None
+
+
+class AffectationDejaRevoquee(AppError):
+    """Révocation d'une affectation déjà révoquée (409, BE-146).
+
+    Une seconde révocation ne réécrit jamais `revokedAt` ni `revokedBy` : la date
+    de la première révocation reste la preuve de fin d'autorité."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code="admin_role_assignment_already_revoked",
+            message="Cette affectation est déjà révoquée.",
+            status_code=409,
+        )
+
+
+async def revoquer_affectation(
+    db: AsyncSession,
+    ligne: AdminRoleAssignment,
+    *,
+    revoked_by: uuid.UUID,
+) -> AdminRoleAssignment:
+    """Marque l'affectation révoquée, sans la supprimer, sans la valider ni la commiter.
+
+    BE-146 CA-4 : la ligne et ses colonnes d'origine (actorId, roleCode, scope,
+    grantedAt, expiresAt) restent intactes ; seules `revokedAt` et `revokedBy`
+    sont renseignées. Lève 409 si la ligne est déjà révoquée. L'appelant écrit
+    l'entrée d'audit dans la même transaction et gère le commit.
+
+    La fin d'autorité par échéance n'est pas une écriture : `has_platform_authority`
+    compare `expiresAt` à l'horloge à chaque requête, sans action humaine (CA-1).
+    """
+    if ligne.revokedAt is not None:
+        raise AffectationDejaRevoquee()
+    ligne.revokedAt = datetime.now(timezone.utc)
+    ligne.revokedBy = revoked_by
+    await db.flush()
+    return ligne

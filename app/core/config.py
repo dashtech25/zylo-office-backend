@@ -130,6 +130,9 @@ class Settings(BaseSettings):
     # BE-173 (QE-PAR-07) : durée de rétention d'un export d'audit, en secondes. Aucune
     # valeur par défaut : sans configuration, une demande d'export est refusée (503).
     AUDIT_EXPORT_EXPIRATION_SECONDS: int | None = None
+    # BE-243 (QE-EXP-12) : durée de vie d'un export de données (sujet ou tenant), en secondes.
+    # Aucune valeur par défaut : sans configuration, une demande est refusée (503).
+    EXPORT_EXPIRATION_SECONDS: int | None = None
     STORAGE_S3_ENDPOINT_URL: str | None = None
     STORAGE_S3_BUCKET: str = "zylo-office-documents"
     STORAGE_S3_ACCESS_KEY: str | None = None

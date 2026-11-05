@@ -23,6 +23,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 
 from app.core.database import AsyncSessionLocal, engine
+from app.core.errors import register_exception_handlers
 from app.identity.models import OrganizationUser, User
 from app.main import app as application_complete
 from app.modules_registry.models import Module, OrganizationModule
@@ -46,6 +47,27 @@ ROUTES_HORS_CHEMIN: dict[str, str] = {
     "POST /api/v1/modules/organizations/{organization_id}/activate": "Module désigné dans le corps (moduleCode). QE-BE054-02.",
     "POST /api/v1/modules/organizations/{organization_id}/deactivate": "Module désigné dans le corps (moduleCode). QE-BE054-02.",
 }
+
+
+class _CodesConnusDeTest:
+    """Liste des codes de module reconnus, étendue aux seuls modules synthétiques de ce test.
+
+    Même mécanisme que BE-053 : un code `be054...` absent de `CODES_MODULES_CONNUS` serait
+    classé inconnu et refusé avant toute évaluation. Seul le préfixe `be054` est ouvert.
+    """
+
+    def __init__(self, reels: frozenset[str]):
+        self._reels = reels
+
+    def __contains__(self, code: object) -> bool:
+        return code in self._reels or (isinstance(code, str) and code.startswith("be054"))
+
+
+@pytest.fixture(autouse=True)
+def _modules_de_test_reconnus(monkeypatch):
+    from app.modules_registry import etats
+
+    monkeypatch.setattr(etats, "CODES_MODULES_CONNUS", _CodesConnusDeTest(etats.CODES_MODULES_CONNUS))
 
 
 @pytest.fixture(autouse=True)
@@ -120,6 +142,8 @@ async def _compter(table) -> int:
 def _application_de_test(action: str, *, exige_entitlement: bool | None) -> FastAPI:
     garde = require_module_action(action, exige_entitlement=exige_entitlement)
     mini = FastAPI()
+    # Sans ces gestionnaires, AppError remonte au client de test au lieu de produire 403/404.
+    register_exception_handlers(mini)
 
     @mini.get("/t/{organization_id}/modules/{module_id}", dependencies=[Depends(garde)])
     async def lire(organization_id: uuid.UUID, module_id: uuid.UUID) -> dict:
@@ -147,17 +171,19 @@ def _porte_la_garde(route) -> bool:
 
 
 def test_ca1_toutes_les_routes_de_module_portent_la_garde():
+    """Toute route `/organizations/{organization_id}/modules/{module_id}` porte la garde ;
+    les seules routes de module sans garde sont celles de ROUTES_HORS_CHEMIN (exceptions datées)."""
     manquantes = []
     vues = set()
     for chemin, route, _ctx_deps in _iter_routes(application_complete.router):
-        if PREFIXE_ROUTES_MODULE not in chemin and "/current/modules/{module_id}" not in chemin:
-            continue
         for methode in sorted(route.methods):
             cle = f"{methode} {chemin}"
             if cle in ROUTES_HORS_CHEMIN:
                 vues.add(cle)
                 continue
-            if not _porte_la_garde(route):
+            if PREFIXE_ROUTES_MODULE in chemin and not _porte_la_garde(route):
+                manquantes.append(cle)
+            if "/current/modules/{module_id}" in chemin and not _porte_la_garde(route):
                 manquantes.append(cle)
     assert manquantes == [], f"Routes de module sans {NOM_GARDE} : {manquantes}"
     assert vues == set(ROUTES_HORS_CHEMIN), "Une exception de ROUTES_HORS_CHEMIN ne correspond plus à une route réelle"

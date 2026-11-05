@@ -27,7 +27,9 @@ from httpx import AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
-from app.core.database import AsyncSessionLocal
+import pytest
+
+from app.core.database import AsyncSessionLocal, engine
 from app.core.errors import AppError
 from app.rbac.role_assignments import AdminRoleAssignment
 
@@ -68,8 +70,9 @@ async def _creer_incident(owner: str = "exploitation-plateforme", tenant_id: uui
 
     async with AsyncSessionLocal() as db:
         incident = await creer_incident(db, severite="high", owner=owner, tenant_id=tenant_id)
+        identifiant = str(incident.id)
         await db.commit()
-        return str(incident.id)
+        return identifiant
 
 
 # --- CA-1 : owner, état et horodatage obligatoires ---------------------------------
@@ -91,7 +94,7 @@ async def test_be247_ca1_incident_sans_owner_refuse_par_la_base():
         try:
             await db.execute(
                 text(
-                    "INSERT INTO incidents (id, severity, owner, state, occurredAt) "
+                    "INSERT INTO incidents (id, severity, owner, state, \"occurredAt\") "
                     "VALUES (:id, 'high', NULL, 'ouvert', now())"
                 ).bindparams(id=uuid.uuid4())
             )
@@ -134,14 +137,21 @@ async def test_be247_ca2_chronologie_reconstructible_dans_l_ordre(client: AsyncC
     assert chronologie == types
 
 
-async def test_be247_ca2_update_et_delete_sur_evenement_refuses_par_la_base():
+@pytest.fixture
+async def pool_de_boucle_courante():
+    """Repart d'un pool neuf lié à la boucle d'événements du test (même précédent que BE-241)."""
+    await engine.dispose()
+    yield
+
+
+async def test_be247_ca2_update_et_delete_sur_evenement_refuses_par_la_base(pool_de_boucle_courante):
     from app.operator.incidents import ajouter_evenement
 
     incident_id = await _creer_incident()
     async with AsyncSessionLocal() as db:
         evenement = await ajouter_evenement(db, uuid.UUID(incident_id), type_evenement="detection", resume="origine")
-        await db.commit()
         evenement_id = evenement.id
+        await db.commit()
 
     async with AsyncSessionLocal() as db:
         try:

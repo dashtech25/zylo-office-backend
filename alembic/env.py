@@ -29,6 +29,7 @@ from app.modules.zylo_tanker import models as zylo_tanker_models  # noqa: F401
 from app.modules_registry import models as modules_registry_models  # noqa: F401
 from app.notifications import models as notifications_models  # noqa: F401
 from app.operator import alertes_models as operator_alertes_models  # noqa: F401
+from app.operator import incidents_models as operator_incidents_models  # noqa: F401
 from app.operator import secrets_models as operator_secrets_models  # noqa: F401
 from app.parametres import models as parametres_models  # noqa: F401
 from app.rbac import models as rbac_models  # noqa: F401

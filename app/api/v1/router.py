@@ -53,6 +53,7 @@ from app.operator.health import admin_router as operator_admin_router
 from app.operator.health import internal_router as internal_health_router
 from app.billing.entitlement_events_router import router as billing_entitlement_events_router
 from app.operator.admin_audit_router import router as admin_audit_router
+from app.operator.incidents_router import router as incidents_router
 from app.operator.exceptional_access import router as exceptional_access_router
 from app.operator.cases_router import router as cases_router
 from app.operator.commands_router import router as commands_router
@@ -119,6 +120,8 @@ api_router.include_router(operator_router, prefix="/admin", tags=["operator"])
 api_router.include_router(operator_admin_router, prefix="/admin", tags=["operator"])
 # BE-122 : journal d'audit administratif, lecture seule (GET /admin/audit-events).
 api_router.include_router(admin_audit_router, prefix="/admin", tags=["admin-audit"])
+# BE-247 : file et détail des incidents d'exploitation (GET /admin/incidents).
+api_router.include_router(incidents_router, prefix="/admin", tags=["admin-incidents"])
 # BE-138 : accès exceptionnel au contenu client, refusé par défaut (POST /admin/organizations/{id}/exceptional-access).
 api_router.include_router(exceptional_access_router, prefix="/admin", tags=["admin-exceptional-access"])
 # BE-121 : affectations de rôle globales et temporaires (POST/GET /admin/role-assignments).

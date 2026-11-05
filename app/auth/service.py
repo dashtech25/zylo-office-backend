@@ -217,9 +217,19 @@ async def rotate_refresh_token(db: AsyncSession, refresh_token: str) -> tuple[st
 
 
 async def revoke_refresh_token(db: AsyncSession, refresh_token: str) -> None:
+    """Déconnexion (BE-188) : révoque le refresh token présenté, et lui seul.
+
+    Droits : la session doit exister, être ouverte et non expirée. Un jeton
+    inconnu, déjà révoqué ou expiré lève 401 `invalid_refresh_token`, comme le
+    refresh : une déconnexion sans session n'est plus un succès silencieux.
+    Les autres sessions de la même famille ne sont pas touchées ; la famille
+    entière ne tombe que par la détection de réutilisation (rotation).
+    """
     token_hash = _hash_token(refresh_token)
     result = await db.execute(select(RefreshToken).where(RefreshToken.tokenHash == token_hash))
     stored = result.scalar_one_or_none()
-    if stored is not None and stored.revokedAt is None:
-        stored.revokedAt = datetime.now(timezone.utc)
-        await db.commit()
+    maintenant = datetime.now(timezone.utc)
+    if stored is None or stored.revokedAt is not None or stored.expiresAt < maintenant:
+        raise AppError(code="invalid_refresh_token", message="Refresh token invalide, expiré ou révoqué.", status_code=401)
+    stored.revokedAt = maintenant
+    await db.commit()

@@ -54,6 +54,7 @@ from app.operator.admin_audit_router import router as admin_audit_router
 from app.operator.cases_router import router as cases_router
 from app.operator.commands_router import router as commands_router
 from app.operator.payment_diagnostic_router import router as payment_diagnostic_router
+from app.operator.ops_metrics import router as ops_metrics_router
 from app.rbac.role_assignments_router import router as role_assignments_router
 
 api_router = APIRouter()
@@ -116,6 +117,8 @@ api_router.include_router(cases_router, prefix="/admin", tags=["admin-cases"])
 # BE-124 : intentions de commande opérateur idempotentes (POST/GET /admin/commands).
 api_router.include_router(commands_router, prefix="/admin", tags=["admin-commands"])
 api_router.include_router(payment_diagnostic_router, prefix="/admin", tags=["admin-payment-diagnostics"])
+# BE-145 : compteurs d'exploitation de la console (GET /admin/ops/metrics), opérateur seul.
+api_router.include_router(ops_metrics_router, prefix="/admin", tags=["admin-ops"])
 api_router.include_router(internal_health_router, tags=["health"])
 # BE-058 : événements de service de facturation (POST /internal/billing/entitlement-events).
 api_router.include_router(billing_entitlement_events_router, prefix="/internal", tags=["billing"])

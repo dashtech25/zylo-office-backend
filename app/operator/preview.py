@@ -43,6 +43,7 @@ import hashlib
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, select
@@ -155,6 +156,13 @@ def empreinte_etat(etat: dict[str, Any]) -> str:
     return hashlib.sha256(canonique.encode("utf-8")).hexdigest()
 
 
+# Effets détaillés par classe de commande (BE-135) : un domaine branché ajoute au champ
+# `effects` de la preview ce que la commande modifiera (modules, utilisateurs). Une classe
+# absente de ce registre garde les seuls effets génériques ci-dessous.
+EffetsDomaine = Callable[[AsyncSession, AdminCommand], Awaitable[dict[str, Any]]]
+EFFETS_PAR_CLASSE: dict[str, EffetsDomaine] = {}
+
+
 async def creer_preview(db: AsyncSession, commande: AdminCommand) -> AdminCommandPreview:
     """Crée la preview de la commande, ou lève 422, 503, 404 ou 409.
 
@@ -180,17 +188,21 @@ async def creer_preview(db: AsyncSession, commande: AdminCommand) -> AdminComman
 
     maintenant = datetime.now(timezone.utc)
     etat = etat_observable(commande, organisation)
+    effets = {
+        "commandType": commande.commandType,
+        "tenantId": str(commande.tenantId),
+        "targetObjectType": commande.targetObjectType,
+        "targetObjectId": str(organisation.id),
+        "targetVersion": organisation.version,
+        "effetsDomaine": "NON DÉFINI : effets détaillés chez le domaine propriétaire (QE-ADM-22)",
+    }
+    domaine = EFFETS_PAR_CLASSE.get(commande.commandType)
+    if domaine is not None:
+        effets.update(await domaine(db, commande))
     preview = AdminCommandPreview(
         commandId=commande.commandId,
         stateSnapshotHash=empreinte_etat(etat),
-        effects={
-            "commandType": commande.commandType,
-            "tenantId": str(commande.tenantId),
-            "targetObjectType": commande.targetObjectType,
-            "targetObjectId": str(organisation.id),
-            "targetVersion": organisation.version,
-            "effetsDomaine": "NON DÉFINI : effets détaillés chez le domaine propriétaire (QE-ADM-22)",
-        },
+        effects=effets,
         limits={"dureeSecondes": duree, "executionIncluse": False},
         expiresAtUtc=maintenant + timedelta(seconds=duree),
         invalidatedReason=None,

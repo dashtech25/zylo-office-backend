@@ -84,6 +84,7 @@ class AdminCommand(Base):
     correlationId: Mapped[str | None] = mapped_column(String(120), nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default=ETAT_INTENTION, server_default=ETAT_INTENTION)
     result: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     createdAtUtc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expiresAtUtc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -141,6 +142,7 @@ def corps_identique(commande: AdminCommand, corps: dict[str, Any]) -> bool:
         and commande.targetObjectId == corps["targetObjectId"]
         and commande.targetVersionExpected == corps["targetVersionExpected"]
         and commande.reasonTicket == corps["reasonTicket"]
+        and commande.payload == corps.get("payload")
     )
 
 
@@ -175,6 +177,7 @@ def nouvelle_commande(
         correlationId=correlation_id,
         status=ETAT_INTENTION,
         result=None,
+        payload=corps.get("payload"),
         createdAtUtc=datetime.now(timezone.utc),
         expiresAtUtc=None,
     )

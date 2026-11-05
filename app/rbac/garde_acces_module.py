@@ -47,11 +47,18 @@ from app.modules_registry.models import Module
 from app.rbac.acces_effectif import MOTIF_NON_MEMBRE, evaluer_acces_effectif
 
 
-def require_module_action(action: str, *, exige_entitlement: bool | None = None) -> Callable[..., Coroutine[Any, Any, None]]:
+def require_module_action(
+    action: str,
+    *,
+    exige_entitlement: bool | None = None,
+    module_actif_requis: bool = True,
+) -> Callable[..., Coroutine[Any, Any, None]]:
     """Fabrique la dépendance FastAPI qui applique le moteur à `action` sur le module du chemin.
 
     `action` : code de permission `domaine.entite.action` de la route.
     `exige_entitlement` : True / False déclaré pour cette action ; None = non déclaré (fail closed).
+    `module_actif_requis` : False pour la seule réactivation d'un module suspendu (QE-BE054-05) ;
+    l'appartenance, la permission et la politique restent contrôlées.
     """
 
     async def dependency(
@@ -72,6 +79,7 @@ def require_module_action(action: str, *, exige_entitlement: bool | None = None)
             module_code=module_code,
             action=action,
             capacites=capacites,
+            module_actif_requis=module_actif_requis,
         )
         if evaluation.motif == MOTIF_NON_MEMBRE:
             raise AppError(code="organization_not_found", message="Organisation introuvable.", status_code=404)

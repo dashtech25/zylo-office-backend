@@ -147,6 +147,7 @@ async def evaluer_acces_effectif(
     action: str,
     capacites: Mapping[str, bool] | None = None,
     quota: Callable[[], Awaitable[bool]] | None = None,
+    module_actif_requis: bool = True,
 ) -> Evaluation:
     """Collecte les faits en lecture seule puis applique `evaluer_acces`.
 
@@ -191,7 +192,9 @@ async def evaluer_acces_effectif(
     faits = FaitsAcces(
         membre_actif=membre,
         permission_accordee=permission,
-        module_actif=module_actif,
+        # Porte « module actif » non évaluée quand l'action vise un module suspendu (réactivation,
+        # QE-BE054-05) : sinon la route qui réactive le module serait refusée par son propre état.
+        module_actif=module_actif or not module_actif_requis,
         reconciliation_pendante=bool(reconciliation),
         capacite_exige_entitlement=(capacites or {}).get(action),
         entitlement_valide=entitlement_valide,

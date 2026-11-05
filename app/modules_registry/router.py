@@ -404,9 +404,14 @@ async def suspendre_module(
     "/{organization_id}/modules/{module_id}/reactivations",
     response_model=DisponibiliteResponse,
     summary="Reprendre un module suspendu pour l'organisation (BE-049)",
-    # Permission seule (QE-BE054-05) : le module est suspendu, donc inactif ; la garde
-    # require_module_action refuserait (MODULE_NON_ACTIF) la route qui le réactive.
-    dependencies=[Depends(require_permission(ORGANIZATION_MODULE_SUSPEND))],
+    # QE-BE054-05 : le module est suspendu, donc inactif ; la porte « module actif » est ignorée
+    # pour cette seule route. Membership, permission et politique restent contrôlées ; l'entitlement
+    # est vérifié par le service (409).
+    dependencies=[
+        Depends(
+            require_module_action(ORGANIZATION_MODULE_SUSPEND, exige_entitlement=False, module_actif_requis=False)
+        )
+    ],
 )
 async def reprendre_module(
     organization_id: uuid.UUID,

@@ -34,6 +34,7 @@ from sqlalchemy import select
 from app.audit.models import AuditEvent
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.core.errors import AppError
 from app.operator import guard, reconcile
 from app.operator.commands import AdminCommand
 from app.operator.guard import EXECUTEURS, ResultatInconnu, executer_commande
@@ -43,6 +44,7 @@ CHEMIN_COMMANDES = "/api/v1/admin/commands"
 MOT_DE_PASSE = "TestPassword123!"
 CLASSE = "tenant.suspension"
 ROLE_GESTION = "securite_incident_commander"
+ROLE_APPROBATION = "approbateur_independant"
 ROLE_L1 = "agent_support_l1"
 ROLE_L2 = "agent_support_l2"
 ROLE_PLATEFORME = "operateur_plateforme"
@@ -132,13 +134,24 @@ async def _commande_en_resultat_inconnu(client: AsyncClient, monkeypatch) -> dic
     tenant = await _organisation(client, gestionnaire)
     await _accorder(gestionnaire["id"], ROLE_GESTION, f"tenant:{tenant}")
     command_id, preview_id = await _commande_confirmee(client, monkeypatch, tenant, gestionnaire)
+    # `tenant.suspension` exige une double validation (sensitive_classes) : approbation distincte.
+    approbateur = await _nouvel_utilisateur(client)
+    await _accorder(approbateur["id"], ROLE_APPROBATION, f"tenant:{tenant}")
+    decision = await client.post(
+        f"{CHEMIN_COMMANDES}/{command_id}/approve",
+        json={"reasonTicket": "INC-143-APPROBATION"},
+        headers=_entetes(approbateur),
+    )
+    assert decision.status_code == 200, decision.text
     monkeypatch.setitem(EXECUTEURS, CLASSE, domaine_muet)
     async with AsyncSessionLocal() as db:
-        with pytest.raises(Exception):
+        with pytest.raises(AppError) as erreur:
             await executer_commande(
                 db, command_id=uuid.UUID(command_id), actor_id=uuid.UUID(gestionnaire["id"]),
                 preview_id=uuid.UUID(preview_id),
             )
+    assert erreur.value.status_code == 409
+    assert await _statut(command_id) == "resultat_inconnu"
     return {"command_id": command_id, "preview_id": preview_id, "gestionnaire": gestionnaire, "tenant": tenant}
 
 
@@ -241,7 +254,8 @@ async def test_ca4_reprise_reemploie_la_cle_d_origine(client: AsyncClient, monke
     monkeypatch.setitem(reconcile.RECONCILIATEURS, CLASSE, _reconciliateur("absent"))
     reponse = await client.post(f"{CHEMIN_COMMANDES}/{cible['command_id']}/reconcile", headers=_entetes(l2))
     assert reponse.status_code == 200, reponse.text
-    assert await _statut(cible["command_id"]) == "intention", "l'effet absent rouvre une exécution"
+    # Commande approuvée : l'effet absent la rouvre à l'état approuvé (pas à `intention`).
+    assert await _statut(cible["command_id"]) == "approuvee", "l'effet absent rouvre une exécution"
 
     cles_recues = []
 

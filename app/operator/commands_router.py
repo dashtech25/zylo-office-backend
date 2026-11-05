@@ -44,6 +44,7 @@ from app.operator.commands import (
     nouvelle_commande,
     role_effectif,
 )
+from app.operator.reconcile import reconcilier_commande, verifier_commande
 from app.operator.preview import (
     AdminCommandPreview,
     commande_de_l_initiateur,
@@ -113,7 +114,7 @@ class CommandeResponse(BaseModel):
     reasonTicket: str
     idempotencyKey: str
     correlationId: str | None
-    status: Literal["intention", "approuvee", "rejetee"]
+    status: Literal["intention", "approuvee", "rejetee", "executee", "echec", "resultat_inconnu"]
     result: dict | None
     createdAtUtc: datetime
     expiresAtUtc: datetime | None
@@ -297,3 +298,48 @@ async def confirmer_commande(
     commande = await commande_de_l_initiateur(db, command_id, current_user.id)
     preview = await confirmer_preview(db, commande, data.previewId)
     return _reponse_preview(preview, commande)
+
+
+class VerificationResponse(BaseModel):
+    """Verdict du propriétaire du domaine après action (BE-143)."""
+
+    commandId: uuid.UUID
+    status: str
+    verification: dict
+
+
+@router.post(
+    "/commands/{command_id}/reconcile",
+    response_model=CommandeResponse,
+    summary="Réconcilier une commande au résultat inconnu (BE-143)",
+)
+async def reconcilier(
+    command_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AdminCommand:
+    """Demande au domaine ce qui s'est passé pour une commande `resultat_inconnu`.
+
+    Lecture seule côté domaine (CA-2). 403 pour un rôle hors L2, opérateur plateforme et
+    responsable de sécurité, ou une portée autre que celle du tenant (CA-3, CA-5).
+    Voir `app.operator.reconcile` pour les effets `present`, `absent` et `inconnu`.
+    """
+    return await reconcilier_commande(db, command_id=command_id, actor_id=current_user.id)
+
+
+@router.post(
+    "/commands/{command_id}/verify",
+    response_model=VerificationResponse,
+    summary="Faire vérifier une commande par le propriétaire du domaine (BE-143)",
+)
+async def verifier(
+    command_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Fait contrôler l'état après action par le propriétaire du domaine (CA-3).
+
+    403 si aucun propriétaire n'est branché pour ce type de commande, ou si l'acteur n'a
+    pas son rôle sur la portée du tenant. Le `status` n'est pas modifié.
+    """
+    return await verifier_commande(db, command_id=command_id, actor_id=current_user.id)

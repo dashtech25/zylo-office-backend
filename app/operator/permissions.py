@@ -25,15 +25,6 @@ def _operator_user_ids() -> set[uuid.UUID]:
     return result
 
 
-def has_platform_authority(user_id: uuid.UUID) -> bool:
-    """Vrai si `user_id` détient l'autorité plateforme (portée `platform`, BE-120).
-
-    Même source et même refus fermé que `require_operator` : une seule liste.
-    Utilisé par `app/operator/scope.py` ; ne lève rien, le refus est décidé par
-    l'appelant."""
-    return user_id in _operator_user_ids()
-
-
 def assert_operator_user(user_id: uuid.UUID) -> None:
     """Lève 403 si `user_id` ne figure pas dans l'allowlist d'exploitation.
 

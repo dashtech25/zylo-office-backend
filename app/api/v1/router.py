@@ -64,6 +64,7 @@ from app.operator.commands_router import router as commands_router
 from app.operator.notifications_router import router as notifications_admin_router
 from app.operator.finance_commands_router import router as finance_commands_router
 from app.operator.entitlement_commands_router import router as entitlement_commands_router
+from app.operator.config_security_router import router as config_security_router
 from app.operator.payment_diagnostic_router import router as payment_diagnostic_router
 from app.operator.ops_metrics import router as ops_metrics_router
 from app.operator.subscription_diagnostic_router import router as subscription_diagnostic_router
@@ -146,6 +147,7 @@ api_router.include_router(commands_router, prefix="/admin", tags=["admin-command
 api_router.include_router(notifications_admin_router, prefix="/admin", tags=["admin-notifications"])
 api_router.include_router(finance_commands_router, prefix="/admin", tags=["admin-finance"])
 api_router.include_router(entitlement_commands_router, prefix="/admin", tags=["operator"])
+api_router.include_router(config_security_router, prefix="/admin", tags=["operator"])
 api_router.include_router(payment_diagnostic_router, prefix="/admin", tags=["admin-payment-diagnostics"])
 # BE-145 : compteurs d'exploitation de la console (GET /admin/ops/metrics), opérateur seul.
 api_router.include_router(ops_metrics_router, prefix="/admin", tags=["admin-ops"])

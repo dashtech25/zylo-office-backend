@@ -98,6 +98,7 @@ async def _checkout_avec_tentative(tenant_id: uuid.UUID, payer_id: uuid.UUID, st
             sourceCatalogueRef=f"be084-{uuid.uuid4().hex}",
             snapshotJson={"offre": "be084"},
         ))
+        await db.flush()
         db.add(Quote(
             id=devis_id,
             payerId=payer_id,
@@ -106,7 +107,9 @@ async def _checkout_avec_tentative(tenant_id: uuid.UUID, payer_id: uuid.UUID, st
             status="accepted",
             pricingSnapshotJson={"amountMinor": 4990, "currency": "XAF"},
         ))
+        await db.flush()
         db.add(Checkout(id=checkout_id, quoteId=devis_id, status="pending", version=1))
+        await db.flush()
         db.add(PaymentAttempt(
             id=tentative_id,
             checkoutId=checkout_id,
@@ -135,7 +138,10 @@ async def _evenements_activation(subscription_id: uuid.UUID) -> int:
         lignes = (await db.execute(
             select(OutboxEvenement).where(OutboxEvenement.eventType == TYPE_EVENEMENT)
         )).scalars().all()
-    return sum(1 for ligne in lignes if ligne.payload.get("subscriptionId") == str(subscription_id))
+    # La colonne `payload` de l'outbox porte l'enveloppe complète ; les données métier sont sous `payload`.
+    return sum(
+        1 for ligne in lignes if (ligne.payload.get("payload") or {}).get("subscriptionId") == str(subscription_id)
+    )
 
 
 async def _confirmer(tenant_id: uuid.UUID, tentative_id: uuid.UUID):

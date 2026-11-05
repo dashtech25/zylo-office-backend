@@ -117,14 +117,15 @@ async def test_be157_ca1_nouvelle_version_active_et_evenement_journalise(registe
         nouvelle = await appliquer_valeur(
             db, identite, org_id, definition_key=cle, scope_kind="organisation", scope_id=org_id, value="v2", reason="essai"
         )
+        nouvelle_id, nouvelle_version = nouvelle.id, nouvelle.version
         await db.commit()
 
     versions = await _versions(cle, org_id)
     assert versions == [(1, False, "v1"), (2, True, "v2")], "la précédente est désactivée, la nouvelle est appliquée"
-    assert nouvelle.version == 2
+    assert nouvelle_version == 2
 
     audits = await _audits_pour_version(cle, org_id)
-    evenements = [a for a in audits if a.entityId == nouvelle.id]
+    evenements = [a for a in audits if a.entityId == nouvelle_id]
     assert len(evenements) == 1, "une application produit exactement une entrée EVT-SET-01"
     changes = evenements[0].changes
     assert changes["evenement"] == "EVT-SET-01"
@@ -168,13 +169,14 @@ async def test_be157_ca3_restauration_cree_une_nouvelle_version(registered_user:
         restauree = await restaurer_version(
             db, identite, org_id, definition_key=cle, scope_kind="organisation", scope_id=org_id, version=1, reason="retour"
         )
+        restauree_id, restauree_version = restauree.id, restauree.version
         await db.commit()
 
     versions = await _versions(cle, org_id)
     assert versions == [(1, False, "v1"), (2, False, "v2"), (3, True, "v1")], "pas de réécriture : la version 1 est intacte"
-    assert restauree.version == 3
+    assert restauree_version == 3
     audits = await _audits_pour_version(cle, org_id)
-    assert any(a.entityId == restauree.id and a.action == "parametre.valeur.appliquer" for a in audits), "restauration journalisée"
+    assert any(a.entityId == restauree_id and a.action == "parametre.valeur.appliquer" for a in audits), "restauration journalisée"
 
 
 async def test_be157_ca4_sans_permission_403_et_aucune_version(registered_user: dict, organization: dict):

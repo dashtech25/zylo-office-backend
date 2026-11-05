@@ -119,7 +119,7 @@ async def executer_mutation_sensible(
     entity_id: uuid.UUID | None,
     resume: str,
     mutation: Callable[[AsyncSession], Awaitable[T]],
-    changes: dict | None = None,
+    changes: dict | Callable[[T], dict | None] | None = None,
     *,
     motif: str | None = None,
 ) -> T:
@@ -141,7 +141,9 @@ async def executer_mutation_sensible(
     - `entity_type`, `entity_id` : cible de l'action ;
     - `resume` : texte court pré-rendu, 500 caractères au plus ;
     - `mutation` : coroutine recevant la session ; elle ne doit pas appeler `commit()` ;
-    - `changes` : détail facultatif, masqué des secrets par `record_audit_event`.
+    - `changes` : détail facultatif, masqué des secrets par `record_audit_event`. Peut être
+      un appelable recevant le résultat de `mutation` (BE-157 : le numéro de version n'existe
+      qu'après la mutation) ; il est appelé dans le savepoint, après la mutation.
     - `motif` : justification de l'action (BE-227 CA-1), stockée dans `reason`. Optionnel
       pour ne pas casser les appelants existants ; une action privilégiée nouvelle le passe.
 
@@ -150,8 +152,9 @@ async def executer_mutation_sensible(
     emetteur = _verifier_emetteur(identite, organization_id)
     async with db.begin_nested():
         resultat = await mutation(db)
+        detail = changes(resultat) if callable(changes) else changes
         await _ecrire_audit(
-            db, emetteur, organization_id, action, entity_type, entity_id, resume, changes, "success", motif=motif
+            db, emetteur, organization_id, action, entity_type, entity_id, resume, detail, "success", motif=motif
         )
     return resultat
 

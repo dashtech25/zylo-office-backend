@@ -550,3 +550,29 @@ class CreditNote(UUIDPrimaryKeyMixin, Base):
     reason: Mapped[str] = mapped_column(Text, nullable=False, comment="Motif obligatoire (geste sensible, BE-073).")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="issued", comment="Statut de l'avoir ; `issued` à l'émission.")
     createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EntitlementSourceEvent(UUIDPrimaryKeyMixin, Base):
+    """Journal d'idempotence des événements de liaison facturation vers entitlements (BE-058).
+
+    Une ligne par `eventId` reçu sur la route de service. `outcome` décrit ce que l'événement
+    a produit (`applied`, `reconciliation_required`, `organisation_inconnue`) ; un rejeu du même
+    `eventId` ne crée jamais de seconde ligne. `organizationId` n'a pas de clé étrangère : une
+    organisation inconnue doit pouvoir être journalisée (CA-5).
+    """
+    __tablename__ = "entitlement_source_events"
+    __table_args__ = (
+        UniqueConstraint("eventId", name="uq_entitlement_source_events_event_id"),
+        CheckConstraint("\"eventType\" IN ('granted', 'ended')", name="ck_entitlement_source_events_type"),
+        {"comment": "Journal d'idempotence des événements de liaison facturation vers entitlements (BE-058)."},
+    )
+
+    eventId: Mapped[str] = mapped_column(String(160), nullable=False)
+    eventType: Mapped[str] = mapped_column(String(20), nullable=False)
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    subscriptionId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    entitlementId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("subscription_entitlement.id"), nullable=True,
+    )
+    outcome: Mapped[str] = mapped_column(String(40), nullable=False)
+    createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

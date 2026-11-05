@@ -20,7 +20,7 @@ import uuid
 
 import pytest
 
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, engine
 from app.core.erreurs.codes import CodeErreur, ErreurCatalogue
 from app.evenements.enveloppe import EnveloppeEvenement
 from app.evenements.models import OutboxEvenement
@@ -29,6 +29,13 @@ from app.identity.models import Organization
 from app.securite.classification import filtrer_payload_pour_consommateur, verifier_classification_payload
 from app.securite.models import ClassificationChamp
 from sqlalchemy import select
+
+
+@pytest.fixture(autouse=True)
+async def _pool_neuf_par_test():
+    """Repart d'un pool lié à la boucle courante, comme le fait le fixture `client` de conftest."""
+    await engine.dispose()
+    yield
 
 
 def _type_unique() -> str:

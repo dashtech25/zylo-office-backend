@@ -82,6 +82,7 @@ async def enregistrer_evenement(
             schemaVersion=enveloppe.schemaVersion,
             tenantId=enveloppe.tenantId,
             payload=enveloppe.model_dump(mode="json"),
+            dataClassification=enveloppe.dataClassification,
             statut="publie",
         )
     )

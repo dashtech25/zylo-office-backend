@@ -44,6 +44,9 @@ class OutboxEvenement(UUIDPrimaryKeyMixin, Base):
     schemaVersion: Mapped[int] = mapped_column(Integer, nullable=False)
     tenantId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # Classification de la donnée, reprise de l'enveloppe (BE-174). Nullable : les lignes
+    # antérieures à la migration 174a0b1c2d3e n'ont pas de classification connue.
+    dataClassification: Mapped[str | None] = mapped_column(String(32), nullable=True)
     statut: Mapped[str] = mapped_column(String(20), nullable=False, server_default="publie")
     publieAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

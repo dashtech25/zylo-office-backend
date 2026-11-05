@@ -16,6 +16,7 @@ from app.core.database import Base
 from app.alerts import models as alerts_models  # noqa: F401
 from app.audit import models as audit_models  # noqa: F401
 from app.evenements import models as evenements_models  # noqa: F401
+from app.securite import models as securite_models  # noqa: F401
 from app.auth import models as auth_models  # noqa: F401
 from app.billing import models as billing_models  # noqa: F401
 from app.files import models as files_models  # noqa: F401

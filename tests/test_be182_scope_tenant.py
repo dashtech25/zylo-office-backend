@@ -26,11 +26,17 @@ from tests.conftest import unique_email
 
 MOT_DE_PASSE = "TestPassword123!"
 
-# Tables portant `organizationId` qui restent nullables par décision d'origine.
-# `audit_event` : `organizationId` est nul pour une portée plateforme, prévue
-# mais non implémentée (app/audit/models.py, docstring) ; la portée plateforme
-# n'a pas de tenant, donc pas de NOT NULL tant que la question reste ouverte.
-TABLES_TENANT_NULLABLE_JUSTIFIEES = {"audit_event"}
+# Tables portant `organizationId` qui restent nullables par conception.
+# QE BE-182 (recommandation appliquée) : ces tables sont des données plateforme
+# ou d'offre globale ; elles portent `organizationId` sans être tenant-scoped.
+# - `audit_event` : nul pour une portée plateforme, prévue mais non implémentée
+#   (app/audit/models.py, docstring) ; pas de NOT NULL tant que la question reste ouverte.
+# - `module_state_transitions` : nul pour un sujet de plateforme (BE-041,
+#   app/modules_registry/models.py, docstring de ModuleStateTransition).
+# - `subscription_entitlement` : nul uniquement pour une offre globale ; la
+#   contrainte ck_subscription_entitlement_org_offre_globale l'impose en base
+#   (app/billing/models.py, docstring et __table_args__).
+TABLES_TENANT_NULLABLE_JUSTIFIEES = {"audit_event", "module_state_transitions", "subscription_entitlement"}
 
 
 def _entetes(utilisateur: dict, organisation_id: str | None = None) -> dict:

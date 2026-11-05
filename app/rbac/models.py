@@ -17,7 +17,7 @@ ces tables. Un rôle n'est qu'un gabarit ; ce qui compte, c'est la résolution.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, ForeignKeyConstraint, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,6 +37,8 @@ class Role(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "role"
     __table_args__ = (
         UniqueConstraint("organizationId", "code", name="uq_role_org_code"),
+        # BE-182 : cible de la clé composite de userRole (le tenant suit la référence).
+        UniqueConstraint("organizationId", "id", name="uq_role_org_id"),
         {"comment": "Rôle métier scopé à une organisation (ex: Admin, Comptable)."},
     )
 
@@ -104,6 +106,12 @@ class UserRole(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint(
             "userId", "organizationId", "roleId", "resourceType", "resourceId", name="uq_userRole_user_org_role_scope"
+        ),
+        # BE-182 (CA-2) : le rôle attribué appartient au même tenant que l'attribution.
+        ForeignKeyConstraint(
+            ["organizationId", "roleId"],
+            ["role.organizationId", "role.id"],
+            name="fk_userRole_org_role_tenant",
         ),
         {"comment": "Attribution d'un rôle à un utilisateur, scopée à une organisation et éventuellement à une ressource précise (station...)."},
     )

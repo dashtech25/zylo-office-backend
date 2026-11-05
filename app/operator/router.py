@@ -3,7 +3,9 @@
 Routes :
 - `GET /api/v1/admin/organizations` : liste des organisations (portée plateforme) ;
 - `GET /api/v1/admin/organizations/{organization_id}` : abonnement et modules ;
-- `GET /api/v1/admin/requests/{request_id}` : recherche par request ID.
+- `GET /api/v1/admin/requests/{request_id}` : recherche par request ID ;
+- `GET /api/v1/admin/sensitive-action-classes` : registre des classes d'action
+  sensible et leur fiche standard (BE-127), en lecture seule.
 
 Garde : toutes les routes dépendent de `require_operator` (allowlist serveur
 `OPERATOR_READ_USER_IDS`, fail-closed). Hors liste : 403, tentative journalisée.
@@ -33,6 +35,7 @@ from app.identity.models import User
 from app.modules_registry import service as modules_service
 from app.operator.audit import record_operator_read
 from app.operator.permissions import require_operator
+from app.operator.sensitive_classes import CLASSES
 from app.operator.schemas import (
     OperatorHealthResponse,
     OperatorModuleItem,
@@ -42,6 +45,7 @@ from app.operator.schemas import (
     OperatorRequestTrace,
     OperatorSubscriptionItem,
     OperatorTraceEvent,
+    SensitiveActionClassItem,
 )
 from app.shared.pagination import PaginationParams
 from app.shared.schemas import Page, PageMeta
@@ -114,6 +118,25 @@ async def organization_overview(
         subscription=subscription_out,
         modules=[OperatorModuleItem(moduleCode=m.moduleCode, name=m.name, status=m.status) for m in installed],
     )
+
+
+@router.get("/sensitive-action-classes", response_model=list[SensitiveActionClassItem])
+async def list_sensitive_action_classes() -> list[SensitiveActionClassItem]:
+    """Registre des classes d'action sensible (BE-127), sans écriture.
+
+    Renvoie les huit classes de la définition avec leur fiche standard. Le registre
+    est une constante de code (`app/operator/sensitive_classes.py`) : aucune
+    lecture de base, aucune route d'écriture (PUT, POST, PATCH, DELETE : 405).
+    Garde : `require_operator` de la route (allowlist d'exploitation, 403 sinon).
+    """
+    return [
+        SensitiveActionClassItem(
+            code=c.code, libelle=c.libelle, requiresDoubleValidation=c.requiresDoubleValidation,
+            requiresReauth=c.requiresReauth, approvalWindow=c.approvalWindow, reversible=c.reversible,
+            risk_note=c.risk_note, fiche=dict(c.fiche),
+        )
+        for c in CLASSES
+    ]
 
 
 @router.get("/health", response_model=OperatorHealthResponse)

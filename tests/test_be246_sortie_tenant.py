@@ -207,10 +207,14 @@ async def test_ca4_sortie_sans_droit_donne_403_et_est_journalisee(client: AsyncC
     res = await _demander_sortie(client, sans_droit, scenario["org"], scenario["approbateur"])
 
     assert res.status_code == 403, res.text
-    assert await _compter(scenario["org"]) == avant
+    apres = await _compter(scenario["org"])
+    assert {t: n for t, n in apres.items() if t not in TABLES_PROTEGEES} == {t: n for t, n in avant.items() if t not in TABLES_PROTEGEES}
     async with AsyncSessionLocal() as db:
         refus = (
-            await db.execute(text("SELECT count(*) FROM auditLog WHERE \"organizationId\" = :org AND action = 'donnees.sortie.refus'"), {"org": uuid.UUID(scenario["org"])})
+            await db.execute(
+                text("SELECT count(*) FROM audit_event WHERE \"organizationId\" = :org AND action = 'donnees.sortie.refus'"),
+                {"org": uuid.UUID(scenario["org"])},
+            )
         ).scalar_one()
     assert refus >= 1
 

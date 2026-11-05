@@ -1,10 +1,11 @@
 import uuid
+from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.audit import service
-from app.audit.schemas import AuditLogResponse
+from app.audit import consultation, service
+from app.audit.schemas import AuditEvenementResponse, AuditLogResponse
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.identity.models import User
@@ -43,6 +44,65 @@ async def _page_de_journal(
         data=[AuditLogResponse.model_validate(row) for row in rows],
         meta=PageMeta(total=total, limit=pagination.limit, offset=pagination.offset),
     )
+
+
+@router.get(
+    "/evenements",
+    response_model=Page[AuditEvenementResponse],
+    summary="Rechercher des événements d'audit (BE-172)",
+)
+async def rechercher_evenements(
+    dateDebut: datetime = Query(..., description="Début de période (obligatoire, borne incluse)."),
+    dateFin: datetime = Query(..., description="Fin de période (obligatoire, borne incluse)."),
+    sujetType: str = Query(..., min_length=1, description="Type de sujet, valeur de `entityType` (obligatoire)."),
+    sujetId: uuid.UUID | None = Query(None, description="Identifiant du sujet, valeur de `entityId` (facultatif)."),
+    acteurId: uuid.UUID | None = Query(None, description="Acteur, valeur de `actorUserId` (facultatif)."),
+    action: str | None = Query(None, description="Action exacte, par exemple `zyloLiquid.price.update` (facultatif)."),
+    pagination: PaginationParams = Depends(),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    """Recherche dans le journal `audit_event` de l'organisation courante (BE-172).
+
+    Organisation : en-tête `X-Organization-Id`, validé par l'appartenance active.
+    Filtres obligatoires : période (`dateDebut`, `dateFin`) et sujet (`sujetType`) ;
+    sans l'un d'eux la réponse est 422 et rien n'est lu (CA-1). Filtres facultatifs :
+    `sujetId`, `acteurId`, `action`, cumulables avec la restriction de portée.
+    Réponse : acteur, cible, action, motif, temps, résultat, corrélation et
+    visibilité (CA-2). Droit `audit.log.view` : sans lui, 403 (CA-3).
+    Les événements à visibilité restreinte sont retirés sans la permission
+    `audit.restricted.view` (voir app/audit/consultation.py).
+    Pagination : `limit`, `offset`."""
+    rows, total = await consultation.rechercher_evenements(
+        db, organization_id, current_user.id, dateDebut, dateFin, sujetType, sujetId, acteurId, action,
+        pagination.limit, pagination.offset,
+    )
+    return Page(
+        data=[AuditEvenementResponse.model_validate(row) for row in rows],
+        meta=PageMeta(total=total, limit=pagination.limit, offset=pagination.offset),
+    )
+
+
+@router.get(
+    "/evenements/{event_id}",
+    response_model=AuditEvenementResponse,
+    summary="Détail d'un événement d'audit (BE-172)",
+)
+async def detail_evenement(
+    event_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AuditEvenementResponse:
+    """Détail d'un événement de l'organisation courante (BE-172 CA-4, CA-5).
+
+    404 `audit_event_not_found` si l'identifiant n'existe pas dans cette
+    organisation, y compris s'il appartient à un autre tenant. 403
+    `permission_denied` si l'événement est à visibilité restreinte et que
+    l'appelant n'a pas `audit.restricted.view`. Lecture seule."""
+    evenement = await consultation.obtenir_evenement(db, organization_id, current_user.id, event_id)
+    return AuditEvenementResponse.model_validate(evenement)
 
 
 @router.get(

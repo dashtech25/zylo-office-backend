@@ -300,3 +300,11 @@ class ModuleInstallation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     lastErrorCode: Mapped[str | None] = mapped_column(
         String(100), nullable=True, comment="Code d'erreur de la dernière étape en échec."
     )
+    upgradeTargetVersionId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("module_version.id"), nullable=True,
+        comment="Version cible de la mise à jour en cours ou échouée (BE-051) ; nulle sinon.",
+    )
+    upgradeState: Mapped[str | None] = mapped_column(
+        String(50), nullable=True,
+        comment="État de la mise à jour (running, failed, completed) ; nul sans mise à jour (BE-051).",
+    )

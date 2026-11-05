@@ -13,3 +13,7 @@ ORGANIZATION_MODULE_READ = "organization.module.read"
 # Installation technique d'un module pour l'organisation courante (BE-047, QE-MOD-16 : code recommandé).
 # Portée organisation `{orgId}`. Accordée au propriétaire à la création (OWNER_DEFAULT_PERMISSIONS).
 ORGANIZATION_MODULE_INSTALL = "organization.module.install"
+
+# Mise à jour d'une installation de version rN vers rN+1 (BE-051, QE-MOD-16 : code recommandé).
+# Portée organisation `{orgId}`. Accordée au propriétaire à la création (OWNER_DEFAULT_PERMISSIONS).
+ORGANIZATION_MODULE_UPGRADE = "organization.module.upgrade"

@@ -66,6 +66,9 @@ _TRANSITIONS_INSTALLATION: frozenset[tuple[str, str]] = frozenset(
         ("preflight", "provisioning"),
         ("provisioning", "installed"),
         ("provisioning", "failed"),
+        # Mise à jour de version (BE-051) : installed -> upgrading -> installed, succès comme échec.
+        ("installed", "upgrading"),
+        ("upgrading", "installed"),
         ("failed", "provisioning"),
         ("installed", "inactive"),
         ("installed", "active"),

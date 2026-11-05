@@ -11,15 +11,21 @@ from app.identity.models import User
 from app.identity.permissions import ORGANIZATION_MANAGE
 from app.identity.service import require_organization_member
 from app.core.idempotency import require_idempotency_key, run_idempotent
-from app.modules_registry import declarations, installation, service
+from app.modules_registry import declarations, installation, mise_a_jour, service
 from app.modules_registry.models import Module, OrganizationModule
-from app.modules_registry.permissions import MODULE_MANAGE, ORGANIZATION_MODULE_INSTALL, ORGANIZATION_MODULE_READ
+from app.modules_registry.permissions import (
+    MODULE_MANAGE,
+    ORGANIZATION_MODULE_INSTALL,
+    ORGANIZATION_MODULE_READ,
+    ORGANIZATION_MODULE_UPGRADE,
+)
 from app.modules_registry.schemas import (
     ActivateModuleRequest,
     InstallModuleRequest,
     InstalledModuleResponse,
     ModuleAccessResponse,
     ModuleInstallationResponse,
+    UpgradeModuleRequest,
     ModulePermissionResponse,
     ModuleResponse,
     OrganizationModuleResponse,
@@ -124,6 +130,57 @@ async def installer_module(
             cle_idempotence=cle,
         )
         return 201, ModuleInstallationResponse.model_validate(ligne).model_dump(mode="json")
+
+    resultat = await run_idempotent(
+        db,
+        cle=cle,
+        organisation_id=organization_id,
+        acteur_id=current_user.id,
+        methode=request.method,
+        chemin=request.url.path,
+        charge=data.model_dump(mode="json"),
+        produire=produire,
+    )
+    return JSONResponse(status_code=resultat.statut, content=resultat.corps)
+
+
+@organizations_modules_router.post(
+    "/{organization_id}/modules/{module_id}/upgrades",
+    summary="Mettre à jour une installation vers une version cible rN+1 (BE-051)",
+    dependencies=[Depends(require_permission(ORGANIZATION_MODULE_UPGRADE))],
+)
+async def mettre_a_jour_module(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    data: UpgradeModuleRequest,
+    request: Request,
+    cle: str = Depends(require_idempotency_key),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Fait passer l'installation de l'organisation à `targetModuleVersionId` (BE-051).
+
+    Exige `organization.module.upgrade` sur l'organisation du chemin (403 sinon, sans changement).
+    L'en-tête `Idempotency-Key` est obligatoire ; un rejeu avec la même clé renvoie la réponse
+    initiale sans seconde mise à jour (`core/idempotency`). Refus préalables (détaillés dans
+    `modules_registry/mise_a_jour.py`) : 404 installation absente, 409 `MODULE_STATE_VERSION_CONFLICT`,
+    422 `MODULE_VERSION_NOT_PUBLISHED`, 409 `MODULE_UPGRADE_NOT_ALLOWED` (plan absent ou cible
+    incompatible), 409 `MODULE_UPGRADE_FORWARD_ONLY`. Un échec de migration ne fait pas échouer la
+    requête : la réponse 200 porte `upgradeState = failed`, `lastErrorCode` et la version source.
+    """
+
+    async def produire() -> tuple[int, dict]:
+        ligne = await mise_a_jour.executer_mise_a_jour(
+            db,
+            organization_id=organization_id,
+            acteur_id=current_user.id,
+            module_id=module_id,
+            target_module_version_id=data.targetModuleVersionId,
+            state_version=data.stateVersion,
+            cle_idempotence=cle,
+            confirmation_forward_only=data.confirmationForwardOnly,
+        )
+        return 200, ModuleInstallationResponse.model_validate(ligne).model_dump(mode="json")
 
     resultat = await run_idempotent(
         db,

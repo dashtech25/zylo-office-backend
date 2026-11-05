@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.alerts.router import router as alerts_router
 from app.api.v1.endpoints import health
@@ -66,6 +66,7 @@ from app.evenements.dlq_router import router as dead_letters_router
 from app.release.flags_router import router as flags_router
 from app.billing.entitlement_events_router import router as billing_entitlement_events_router
 from app.operator.admin_audit_router import router as admin_audit_router
+from app.operator.scope import require_admin_scope
 from app.operator.incidents_router import router as incidents_router
 from app.operator.exceptional_access import router as exceptional_access_router
 from app.operator.access import router as operator_access_router
@@ -99,9 +100,9 @@ api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(account_router, prefix="/account", tags=["account"])
 api_router.include_router(organizations_modules_router, prefix="/organizations", tags=["modules"])
 api_router.include_router(modules_router, prefix="/modules", tags=["modules"])
-api_router.include_router(modules_admin_router, prefix="/admin", tags=["admin-modules"])
+api_router.include_router(modules_admin_router, prefix="/admin", tags=["admin-modules"], dependencies=[Depends(require_admin_scope)])
 api_router.include_router(evenements_admin_router, prefix="/admin", tags=["admin-evenements"])
-api_router.include_router(reconciliation_admin_router, prefix="/admin", tags=["admin-reconciliation"])
+api_router.include_router(reconciliation_admin_router, prefix="/admin", tags=["admin-reconciliation"], dependencies=[Depends(require_admin_scope)])
 # BE-043 : catalogue public (publié + visible), sans authentification.
 api_router.include_router(catalog_router, prefix="/catalog", tags=["catalog"])
 api_router.include_router(module_audit_router, prefix="/organizations", tags=["modules"])
@@ -157,8 +158,8 @@ api_router.include_router(billing_allocation_router, prefix="/organizations", ta
 api_router.include_router(billing_consent_router, prefix="/billing", tags=["billing"])
 # BE-098 : export des données de facturation (POST /billing/data-exports).
 api_router.include_router(billing_exports_router, prefix="/billing", tags=["billing"])
-api_router.include_router(operator_router, prefix="/admin", tags=["operator"])
-api_router.include_router(operator_admin_router, prefix="/admin", tags=["operator"])
+api_router.include_router(operator_router, prefix="/admin", tags=["operator"], dependencies=[Depends(require_admin_scope)])
+api_router.include_router(operator_admin_router, prefix="/admin", tags=["operator"], dependencies=[Depends(require_admin_scope)])
 # BE-122 : journal d'audit administratif, lecture seule (GET /admin/audit-events).
 api_router.include_router(admin_audit_router, prefix="/admin", tags=["admin-audit"])
 # BE-247 : file et détail des incidents d'exploitation (GET /admin/incidents).

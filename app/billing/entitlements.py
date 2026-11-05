@@ -15,9 +15,11 @@ Règles :
 - Lecture : limitée à une organisation. Une ligne d'une autre organisation n'est jamais
   renvoyée. Une offre globale (`organizationId` nul) n'apparaît dans aucune lecture
   d'organisation.
-- `expired` n'est pas une valeur stockée automatiquement : c'est un état calculé à partir
-  de `endsAt` par `calculer_entitlements`. Les autres états (`active`, `inactive`,
-  `blocked`) sont stockés dans `status`.
+- `expired` est calculé à la lecture par `calculer_entitlements` à partir de `endsAt`, et
+  il est aussi persisté par la tâche `expirer_entitlements_echus` (BE-059) : la projection
+  d'accès du module (`modules_registry`) lit la colonne, pas le calcul. Les autres états
+  (`active`, `inactive`, `blocked`) sont stockés dans `status` et ne sont jamais modifiés
+  par la tâche.
 
 Les valeurs énumérées (`NIVEAUX_APPLICATION`, `SOURCES_ATTRIBUTION`, `ETATS_ENTITLEMENT`)
 sont répétées par les contraintes CHECK de la table : toute évolution doit toucher les
@@ -28,7 +30,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.billing.models import Capability, Plan, PlanVersion, Subscription, SubscriptionEntitlement
@@ -154,6 +156,59 @@ async def calculer_entitlements(
             quotaUnit=unite_quota,
         ))
     return calcules
+
+
+async def expirer_entitlements_echus(
+    db: AsyncSession,
+    *,
+    now: datetime | None = None,
+    organization_id: uuid.UUID | None = None,
+) -> int:
+    """Tâche système (BE-059) : passe à `expired` les entitlements `active` dont `endsAt` est dépassé.
+
+    Effets, pour chaque ligne touchée :
+    - `status` passe de `active` à `expired` ;
+    - `stateVersion` avance de 1, pour que les commandes qui attendaient l'ancienne version
+      soient refusées (409) ;
+    - `updatedAt` est renseigné.
+
+    Règles de sélection (ce qui n'est PAS touché) :
+    - `endsAt` nul : pas de fin, donc pas d'expiration et aucune date n'est inventée (CA-3) ;
+    - `status` autre que `active` (`inactive`, `blocked`) : l'état stocké prime, la tâche
+      ne le remplace jamais (CA-4) ; la tâche ne produit jamais `active`.
+
+    Idempotence (CA-1) : la condition `status = 'active'` est dans la requête elle-même. Une
+    seconde exécution ne trouve plus de ligne et renvoie 0 sans toucher `stateVersion`.
+
+    Effet d'accès (CA-2) : la projection `modules_registry` lit `status` ; une ligne `expired`
+    donne `deny / ENTITLEMENT_REQUIRED` au moteur (BE-053). Aucun accès n'est stocké ici.
+
+    `organization_id` restreint la tâche à une organisation (exploitation ciblée, tests).
+    Sans lui, la tâche parcourt tous les entitlements. `now` est injectable pour les tests.
+
+    N'effectue pas de commit : l'appelant contrôle la transaction. Renvoie le nombre de
+    lignes passées à `expired`.
+    """
+    maintenant = now or datetime.now(timezone.utc)
+    requete = (
+        update(SubscriptionEntitlement)
+        .where(
+            SubscriptionEntitlement.status == "active",
+            SubscriptionEntitlement.endsAt.is_not(None),
+            SubscriptionEntitlement.endsAt <= maintenant,
+        )
+        .values(
+            status="expired",
+            stateVersion=SubscriptionEntitlement.stateVersion + 1,
+            updatedAt=func.now(),
+        )
+        .returning(SubscriptionEntitlement.id)
+        .execution_options(synchronize_session=False)
+    )
+    if organization_id is not None:
+        requete = requete.where(SubscriptionEntitlement.organizationId == organization_id)
+    resultat = await db.execute(requete)
+    return len(resultat.all())
 
 
 async def enregistrer_entitlement(

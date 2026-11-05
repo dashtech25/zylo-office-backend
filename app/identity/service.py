@@ -9,6 +9,7 @@ from app.audit.service import record_audit_event
 from app.billing.permissions import (
     BILLING_CONSENT_RECORD,
     BILLING_DATA_EXPORT_REQUEST,
+    BILLING_DISPUTE_READ,
     BILLING_HISTORY_READ,
     BILLING_REFUND_REQUEST,
     BILLING_INVOICE_FINALIZE,
@@ -86,6 +87,7 @@ OWNER_DEFAULT_PERMISSIONS = [
     (BILLING_DATA_EXPORT_REQUEST, "billing", "Demander un export des données de facturation d'un compte payeur (BE-098)."),
     (BILLING_HISTORY_READ, "billing", "Consulter l'historique commercial du tenant courant (BE-099)."),
     (BILLING_REFUND_REQUEST, "billing", "Demander un remboursement d'un paiement réussi (BE-093, finance)."),
+    (BILLING_DISPUTE_READ, "billing", "Consulter les litiges fournisseur de l'organisation courante (BE-094, finance)."),
     (CURRENCY_READ, "shared", "Consulter le référentiel des devises."),
     (CURRENCY_MANAGE, "shared", "Créer/modifier le référentiel des devises."),
     (EXCHANGE_RATE_READ, "shared", "Consulter les taux de change."),

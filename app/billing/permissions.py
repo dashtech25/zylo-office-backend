@@ -48,3 +48,8 @@ BILLING_HISTORY_READ = "billing.history.read"
 # permission ici : elle est contrôlée par la règle d'approbation (app/billing/refunds/service.py).
 # Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
 BILLING_REFUND_REQUEST = "billing.refund.request"
+
+# BE-094 (ACTF-09, finance ; ACTF-07 support non modélisé ici, voir disputes/__init__.py) : lire un litige
+# fournisseur de l'organisation courante (GET /api/v1/billing/disputes/{disputeId}). Accordée au propriétaire
+# via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
+BILLING_DISPUTE_READ = "billing.dispute.read"

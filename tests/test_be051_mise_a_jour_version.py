@@ -163,13 +163,17 @@ async def _etat_installation(module_id: uuid.UUID, organisation_id: str) -> Modu
         ).scalar_one()
 
 
-async def _installer_pour_organisation(module_id: uuid.UUID, source_id: uuid.UUID, organisation_id: str) -> None:
-    """Installe la version source pour une organisation réelle (le plan existe déjà pour le module)."""
+async def _installer_pour_organisation(
+    module_id: uuid.UUID, source_id: uuid.UUID, organisation_id: str, acteur_id: uuid.UUID
+) -> None:
+    """Installe la version source pour une organisation réelle (le plan existe déjà pour le module).
+
+    `acteur_id` doit être un utilisateur réel : le journal d'audit le référence par clé étrangère."""
     async with AsyncSessionLocal() as db:
         await executer_installation(
             db,
             organization_id=uuid.UUID(organisation_id),
-            acteur_id=uuid.uuid4(),
+            acteur_id=acteur_id,
             module_id=module_id,
             module_version_id=source_id,
             state_version=0,
@@ -186,7 +190,7 @@ async def test_ca1_version_cible_non_publiee_renvoie_422(client: AsyncClient):
     proprietaire = await _inscrire(client)
     organisation_id = await _organisation(client, proprietaire)
     module_id, source_id, cible_id = await _module_source_installe_et_plan(cible_publiee=False)
-    await _installer_pour_organisation(module_id, source_id, organisation_id)
+    await _installer_pour_organisation(module_id, source_id, organisation_id, proprietaire["id"])
 
     reponse = await client.post(
         _url(organisation_id, module_id),
@@ -204,7 +208,7 @@ async def test_ca2_mise_a_jour_incompatible_renvoie_409_et_reste_sur_la_source(c
     proprietaire = await _inscrire(client)
     organisation_id = await _organisation(client, proprietaire)
     module_id, source_id, cible_id = await _module_source_installe_et_plan(cible_incompatible=True)
-    await _installer_pour_organisation(module_id, source_id, organisation_id)
+    await _installer_pour_organisation(module_id, source_id, organisation_id, proprietaire["id"])
 
     reponse = await client.post(
         _url(organisation_id, module_id),
@@ -224,7 +228,7 @@ async def test_plan_absent_renvoie_409_mise_a_jour_non_autorisee(client: AsyncCl
     proprietaire = await _inscrire(client)
     organisation_id = await _organisation(client, proprietaire)
     module_id, source_id, cible_id = await _module_source_installe_et_plan(avec_plan=False)
-    await _installer_pour_organisation(module_id, source_id, organisation_id)
+    await _installer_pour_organisation(module_id, source_id, organisation_id, proprietaire["id"])
 
     reponse = await client.post(
         _url(organisation_id, module_id),
@@ -243,7 +247,7 @@ async def test_plan_sans_retour_arriere_exige_une_confirmation_explicite(client:
     proprietaire = await _inscrire(client)
     organisation_id = await _organisation(client, proprietaire)
     module_id, source_id, cible_id = await _module_source_installe_et_plan(rollback_possible=False)
-    await _installer_pour_organisation(module_id, source_id, organisation_id)
+    await _installer_pour_organisation(module_id, source_id, organisation_id, proprietaire["id"])
     entetes = {**_entete(proprietaire["token"], organisation_id)}
 
     sans_confirmation = await client.post(
@@ -272,7 +276,7 @@ async def test_plan_avec_retour_arriere_prouve_ne_demande_pas_de_confirmation(cl
     proprietaire = await _inscrire(client)
     organisation_id = await _organisation(client, proprietaire)
     module_id, source_id, cible_id = await _module_source_installe_et_plan(rollback_possible=True)
-    await _installer_pour_organisation(module_id, source_id, organisation_id)
+    await _installer_pour_organisation(module_id, source_id, organisation_id, proprietaire["id"])
 
     reponse = await client.post(
         _url(organisation_id, module_id),
@@ -295,7 +299,7 @@ async def test_ca3_echec_de_migration_pose_failed_et_garde_la_version_source(cli
     proprietaire = await _inscrire(client)
     organisation_id = await _organisation(client, proprietaire)
     module_id, source_id, cible_id = await _module_source_installe_et_plan(rollback_possible=True)
-    await _installer_pour_organisation(module_id, source_id, organisation_id)
+    await _installer_pour_organisation(module_id, source_id, organisation_id, proprietaire["id"])
     installation = await _etat_installation(module_id, organisation_id)
 
     async with AsyncSessionLocal() as db:
@@ -329,7 +333,7 @@ async def test_ca4_acteur_sans_droit_de_mise_a_jour_recoit_403_sans_changement(c
     proprietaire = await _inscrire(client)
     organisation_id = await _organisation(client, proprietaire)
     module_id, source_id, cible_id = await _module_source_installe_et_plan(rollback_possible=True)
-    await _installer_pour_organisation(module_id, source_id, organisation_id)
+    await _installer_pour_organisation(module_id, source_id, organisation_id, proprietaire["id"])
     membre = await _membre_sans_droit(client, organisation_id)
 
     reponse = await client.post(
@@ -352,7 +356,7 @@ async def test_ca5_mise_a_jour_dans_une_autre_organisation_repond_404(client: As
     proprietaire_b = await _inscrire(client)
     org_b = await _organisation(client, proprietaire_b)
     module_id, source_id, cible_id = await _module_source_installe_et_plan(rollback_possible=True)
-    await _installer_pour_organisation(module_id, source_id, org_b)
+    await _installer_pour_organisation(module_id, source_id, org_b, proprietaire_b["id"])
 
     reponse = await client.post(
         _url(org_b, module_id),
@@ -372,7 +376,7 @@ async def test_version_d_etat_obsolete_renvoie_409(client: AsyncClient):
     proprietaire = await _inscrire(client)
     organisation_id = await _organisation(client, proprietaire)
     module_id, source_id, cible_id = await _module_source_installe_et_plan(rollback_possible=True)
-    await _installer_pour_organisation(module_id, source_id, organisation_id)
+    await _installer_pour_organisation(module_id, source_id, organisation_id, proprietaire["id"])
     version_courante = (await _etat_installation(module_id, organisation_id)).stateVersion
 
     reponse = await client.post(
@@ -392,7 +396,7 @@ async def test_sans_en_tete_idempotency_key_la_mise_a_jour_est_refusee(client: A
     proprietaire = await _inscrire(client)
     organisation_id = await _organisation(client, proprietaire)
     module_id, source_id, cible_id = await _module_source_installe_et_plan(rollback_possible=True)
-    await _installer_pour_organisation(module_id, source_id, organisation_id)
+    await _installer_pour_organisation(module_id, source_id, organisation_id, proprietaire["id"])
 
     reponse = await client.post(
         _url(organisation_id, module_id),

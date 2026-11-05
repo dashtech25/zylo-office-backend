@@ -52,6 +52,7 @@ from app.audit.router import organization_audit_router
 from app.support.router import router as support_router
 from app.audit.router import router as audit_router
 from app.exports.router import router as exports_router
+from app.sortie_tenant.router import router as sortie_tenant_router
 from app.shared.currency_router import currency_router, exchange_rate_router
 from app.shared.export_router import export_router
 from app.shared.geo_router import country_router, geo_router
@@ -116,6 +117,8 @@ api_router.include_router(rbac_module_router, prefix="/rbac", tags=["rbac"])
 api_router.include_router(acces_effectif_router, tags=["rbac"])
 api_router.include_router(audit_router, prefix="/audit", tags=["audit"])
 api_router.include_router(exports_router, prefix="/exports", tags=["exports"])
+# BE-246 : sortie de tenant (POST /organizations/{id}/exit, GET .../exit/attestation).
+api_router.include_router(sortie_tenant_router, prefix="/organizations", tags=["sortie-tenant"])
 api_router.include_router(organization_audit_router, prefix="/organizations", tags=["audit"])
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(billing_router, prefix="/billing", tags=["billing"])

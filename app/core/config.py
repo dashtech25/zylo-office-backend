@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     APP_NAME: str = "Zylo Office Backend"
+    # Durée de vie d'une prévisualisation de commande opérateur (BE-125). NON DÉFINI
+    # (QE-ADM-07) : aucune valeur par défaut ; à None, la preview est refusée (503).
+    ADMIN_PREVIEW_TTL_SECONDS: int | None = None
     # Locale des messages d'erreur (BE-256). NON DÉFINI (QE-EXP-23) : aucune
     # valeur par défaut ; à None, les textes de repli du code sont renvoyés.
     DEFAULT_LOCALE: str | None = None

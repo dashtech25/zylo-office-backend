@@ -44,8 +44,41 @@ from app.operator.commands import (
     nouvelle_commande,
     role_effectif,
 )
+from app.operator.preview import (
+    AdminCommandPreview,
+    commande_de_l_initiateur,
+    confirmer_preview,
+    creer_preview,
+)
 
 router = APIRouter()
+
+
+class ConfirmationCreate(BaseModel):
+    """Corps de confirmation : la preview à confirmer (BE-125)."""
+
+    previewId: uuid.UUID
+
+
+class PreviewResponse(BaseModel):
+    """Représentation d'une prévisualisation de commande (BE-125).
+
+    `tenantId` est le tenant canonique de la commande (CA-5) : il n'est pas stocké sur
+    la preview, il est repris de la commande à la réponse.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    previewId: uuid.UUID
+    commandId: uuid.UUID
+    tenantId: uuid.UUID
+    stateSnapshotHash: str
+    effects: dict
+    limits: dict
+    expiresAtUtc: datetime
+    invalidatedReason: str | None
+    confirmedAtUtc: datetime | None
+    createdAtUtc: datetime
 
 
 class CommandeCreate(BaseModel):
@@ -205,3 +238,62 @@ async def lire_commande(
     if roles & ROLES_GESTION:
         return commande
     raise erreur_refus()
+
+
+def _reponse_preview(preview: AdminCommandPreview, commande: AdminCommand) -> PreviewResponse:
+    """Représentation d'une preview avec le tenant canonique de sa commande (CA-5)."""
+    return PreviewResponse(
+        previewId=preview.previewId,
+        commandId=preview.commandId,
+        tenantId=commande.tenantId,
+        stateSnapshotHash=preview.stateSnapshotHash,
+        effects=preview.effects,
+        limits=preview.limits,
+        expiresAtUtc=preview.expiresAtUtc,
+        invalidatedReason=preview.invalidatedReason,
+        confirmedAtUtc=preview.confirmedAtUtc,
+        createdAtUtc=preview.createdAtUtc,
+    )
+
+
+@router.post(
+    "/commands/{command_id}/preview",
+    response_model=PreviewResponse,
+    status_code=201,
+    summary="Prévisualiser une commande opérateur (BE-125)",
+)
+async def previsualiser_commande(
+    command_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AdminCommandPreview:
+    """Crée une preview de l'intention, réservée à son initiateur (CA-4).
+
+    Ne modifie aucun état métier (CA-1). 422 sans tenant cible (CA-5), 503 si la durée
+    de preview n'est pas configurée (QE-ADM-07), 409 si la version attendue ne correspond
+    plus (CA-3).
+    """
+    commande = await commande_de_l_initiateur(db, command_id, current_user.id)
+    preview = await creer_preview(db, commande)
+    return _reponse_preview(preview, commande)
+
+
+@router.post(
+    "/commands/{command_id}/confirm",
+    response_model=PreviewResponse,
+    summary="Confirmer une prévisualisation de commande opérateur (BE-125)",
+)
+async def confirmer_commande(
+    command_id: uuid.UUID,
+    data: ConfirmationCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AdminCommandPreview:
+    """Confirme la preview donnée, réservée à l'initiateur (CA-4).
+
+    409 si la preview est expirée (CA-2), invalidée, ou si l'état de la cible a changé
+    depuis la preview (CA-3). Ne déclenche aucun effet : l'exécution relève de BE-126.
+    """
+    commande = await commande_de_l_initiateur(db, command_id, current_user.id)
+    preview = await confirmer_preview(db, commande, data.previewId)
+    return _reponse_preview(preview, commande)

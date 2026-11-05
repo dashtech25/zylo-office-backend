@@ -63,6 +63,12 @@ class OutboxEvenement(UUIDPrimaryKeyMixin, Base):
     dataClassification: Mapped[str | None] = mapped_column(String(32), nullable=True)
     statut: Mapped[str] = mapped_column(String(20), nullable=False, server_default="publie")
     tentatives: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # BE-192 : agrégat et producteur à l'origine de l'événement. Nullables : les lignes écrites
+    # avant BE-192 n'ont pas d'agrégat connu. Renseignées par `enregistrer_evenement_producteur`.
+    aggregateType: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    aggregateId: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    aggregateVersion: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    producer: Mapped[str | None] = mapped_column(String(100), nullable=True)
     publieAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

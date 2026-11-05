@@ -115,6 +115,76 @@ def _contient_cle_secrete(valeur: Any) -> bool:
     return False
 
 
+class EnveloppeProducteur(EnveloppeEvenement):
+    """Enveloppe produite par un module métier (BE-192, CA-2).
+
+    Ajoute aux champs de BE-150 ce qu'un consommateur doit savoir de l'agrégat à l'origine de
+    l'événement : son type, son identifiant, sa version après la mutation, et le producteur qui
+    l'a émis. `recordedAt` est fixé par l'écriture (UTC) ; `publishedAt` reste nul tant que
+    l'événement n'a pas été distribué.
+
+    Ces champs ne vont pas dans `payload` : ils sont stockés dans leurs propres colonnes, et le
+    payload garde la forme BE-150 que relisent les consommateurs existants.
+    """
+
+    aggregateType: str = Field(min_length=1, description="Type de l'agrégat à l'origine de l'événement (ex. Subscription).")
+    aggregateId: str = Field(min_length=1, description="Identifiant de l'agrégat ; texte opaque, sans sémantique imposée.")
+    aggregateVersion: int = Field(ge=0, description="Version de l'agrégat après la mutation ; permet de détecter les hors-ordre.")
+    producer: str = Field(min_length=1, description="Module producteur de l'événement (ex. billing).")
+    recordedAt: datetime | None = Field(default=None, description="Instant d'écriture dans l'outbox, UTC ; fixé par l'écriture.")
+    publishedAt: datetime | None = Field(default=None, description="Instant de distribution ; nul tant que non distribué.")
+
+
+def valider_enveloppe_producteur(
+    donnees: Mapping[str, Any],
+    *,
+    tenant_identite: uuid.UUID,
+    tenant_agregat: uuid.UUID,
+) -> EnveloppeProducteur:
+    """Valide une enveloppe de producteur (BE-192) et renvoie sa forme canonique.
+
+    Mêmes contrôles que `valider_enveloppe` (schéma, secret, tenant de l'identité), puis le
+    `tenantId` de la ligne doit égaler le tenant de l'agrégat (CA-5) : un événement ne peut pas
+    être rattaché à une organisation qui ne possède pas l'agrégat, même si l'émetteur y a accès.
+    Ne persiste ni ne distribue rien.
+    """
+    try:
+        enveloppe = EnveloppeProducteur.model_validate(dict(donnees))
+    except ValidationError:
+        raise AppError(code="SCHEMA_INVALID", message="Enveloppe d'événement producteur invalide.", status_code=400)
+
+    _verifier_secret_et_tenant(enveloppe, tenant_identite)
+
+    if enveloppe.tenantId != tenant_agregat:
+        raise AppError(
+            code="TENANT_MISMATCH",
+            message="Le tenant de la ligne ne correspond pas au tenant de l'agrégat.",
+            status_code=403,
+        )
+    return enveloppe
+
+
+def _verifier_secret_et_tenant(enveloppe: EnveloppeEvenement, tenant_identite: uuid.UUID) -> None:
+    """Contrôles communs après le schéma : secret dans le payload, puis tenant (BE-150 CA-4, CA-5).
+
+    Factorisé pour que l'enveloppe de producteur ne puisse pas s'écarter des règles de BE-150.
+    Lève `AppError` au premier échec ; ne renvoie rien en cas de succès.
+    """
+    if _contient_cle_secrete(enveloppe.payload):
+        raise AppError(
+            code="SCHEMA_INVALID",
+            message="Le payload contient une donnée secrète : événement refusé.",
+            status_code=400,
+        )
+
+    if enveloppe.tenantId != tenant_identite:
+        raise AppError(code="TENANT_MISMATCH", message="Le tenant de l'événement ne correspond pas à l'identité.", status_code=403)
+
+    for cle in CLES_TENANT_PAYLOAD:
+        if cle in enveloppe.payload and str(enveloppe.payload[cle]) != str(tenant_identite):
+            raise AppError(code="TENANT_MISMATCH", message="Le payload cite un autre tenant que l'identité.", status_code=403)
+
+
 def valider_enveloppe(donnees: Mapping[str, Any], *, tenant_identite: uuid.UUID) -> EnveloppeEvenement:
     """Valide une enveloppe brute et renvoie sa forme canonique.
 
@@ -133,20 +203,7 @@ def valider_enveloppe(donnees: Mapping[str, Any], *, tenant_identite: uuid.UUID)
         # Pas de détail : les erreurs Pydantic recopient la valeur fautive (voir l'en-tête).
         raise AppError(code="SCHEMA_INVALID", message="Enveloppe d'événement invalide.", status_code=400)
 
-    if _contient_cle_secrete(enveloppe.payload):
-        raise AppError(
-            code="SCHEMA_INVALID",
-            message="Le payload contient une donnée secrète : événement refusé.",
-            status_code=400,
-        )
-
-    if enveloppe.tenantId != tenant_identite:
-        raise AppError(code="TENANT_MISMATCH", message="Le tenant de l'événement ne correspond pas à l'identité.", status_code=403)
-
-    for cle in CLES_TENANT_PAYLOAD:
-        if cle in enveloppe.payload and str(enveloppe.payload[cle]) != str(tenant_identite):
-            raise AppError(code="TENANT_MISMATCH", message="Le payload cite un autre tenant que l'identité.", status_code=403)
-
+    _verifier_secret_et_tenant(enveloppe, tenant_identite)
     return enveloppe
 
 

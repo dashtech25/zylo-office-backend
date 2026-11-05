@@ -24,3 +24,10 @@ ORGANIZATION_MODULE_ACTIVATE = "organization.module.activate"
 # Mise à jour d'une installation de version rN vers rN+1 (BE-051, QE-MOD-16 : code recommandé).
 # Portée organisation `{orgId}`. Accordée au propriétaire à la création (OWNER_DEFAULT_PERMISSIONS).
 ORGANIZATION_MODULE_UPGRADE = "organization.module.upgrade"
+
+# Suspension et reprise d'un module pour l'organisation (BE-049, QE-MOD-07/16 : codes recommandés).
+# `organization.module.suspend` : origine `client`, portée organisation `{orgId}`, accordée au
+# propriétaire (OWNER_DEFAULT_PERMISSIONS). `platform.module.suspend` : origines `commercial` et
+# `security`, portée plateforme, attribuée par allowlist d'environnement (`platform_rights.py`).
+ORGANIZATION_MODULE_SUSPEND = "organization.module.suspend"
+PLATFORM_MODULE_SUSPEND = "platform.module.suspend"

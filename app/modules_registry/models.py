@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, UniqueConstraint, func, text
+from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -307,6 +307,19 @@ class ModuleInstallation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     upgradeState: Mapped[str | None] = mapped_column(
         String(50), nullable=True,
         comment="État de la mise à jour (running, failed, completed) ; nul sans mise à jour (BE-051).",
+    )
+    # Suspension (BE-049) : renseignées à la suspension, vidées à la reprise. L'historique complet
+    # reste dans le journal `module_state_transitions` (motif et acteur de chaque transition).
+    suspensionOrigin: Mapped[str | None] = mapped_column(
+        String(20), nullable=True,
+        comment="Origine de la suspension courante (client, commercial, security) ; nulle hors suspension (BE-049).",
+    )
+    suspensionReason: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="Motif de la suspension courante ; nul hors suspension (BE-049)."
+    )
+    suspendedBy: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id"), nullable=True,
+        comment="Acteur qui a posé la suspension courante ; nul hors suspension (BE-049).",
     )
 
 

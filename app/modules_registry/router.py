@@ -12,13 +12,14 @@ from app.identity.models import User
 from app.identity.permissions import ORGANIZATION_MANAGE
 from app.identity.service import require_organization_member
 from app.core.idempotency import require_idempotency_key, run_idempotent
-from app.modules_registry import declarations, disponibilite, installation, mise_a_jour, service
+from app.modules_registry import declarations, desinstallation, disponibilite, installation, mise_a_jour, service
 from app.modules_registry.models import Module, ModuleInstallation, OrganizationModule
 from app.modules_registry.permissions import (
     MODULE_MANAGE,
     ORGANIZATION_MODULE_ACTIVATE,
     ORGANIZATION_MODULE_INSTALL,
     ORGANIZATION_MODULE_READ,
+    ORGANIZATION_MODULE_UNINSTALL,
     ORGANIZATION_MODULE_UPGRADE,
 )
 from app.modules_registry.schemas import (
@@ -284,6 +285,54 @@ async def activer_module(
     await db.commit()
     await db.refresh(ligne)
     return _reponse_disponibilite(ligne)
+
+
+@organizations_modules_router.delete(
+    "/{organization_id}/modules/{module_id}/installation",
+    response_model=ModuleInstallationResponse,
+    summary="Désinstaller un module pour l'organisation, sans purge des données (BE-050)",
+    dependencies=[Depends(require_permission(ORGANIZATION_MODULE_UNINSTALL))],
+)
+async def supprimer_installation_module(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    data: DisponibiliteRequest,
+    request: Request,
+    cle: str = Depends(require_idempotency_key),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Fait passer l'installation `installed|inactive` par `removing` à `removed` (voir `desinstallation.py`).
+
+    Exige `organization.module.uninstall` (403 sinon, distinct de l'activation). L'en-tête
+    `Idempotency-Key` est obligatoire : un rejeu avec la même clé renvoie la réponse initiale sans second
+    passage en `removing`. Module `active` : 409 `MODULE_MUST_BE_INACTIVE`. Les données du module ne sont
+    jamais purgées.
+    """
+
+    async def produire() -> tuple[int, dict]:
+        ligne = await desinstallation.desinstaller_module(
+            db,
+            organization_id=organization_id,
+            acteur_id=current_user.id,
+            module_id=module_id,
+            state_version=data.stateVersion,
+            confirm=data.confirm,
+            cle_idempotence=cle,
+        )
+        return 200, ModuleInstallationResponse.model_validate(ligne).model_dump(mode="json")
+
+    resultat = await run_idempotent(
+        db,
+        cle=cle,
+        organisation_id=organization_id,
+        acteur_id=current_user.id,
+        methode=request.method,
+        chemin=request.url.path,
+        charge=data.model_dump(mode="json"),
+        produire=produire,
+    )
+    return JSONResponse(status_code=resultat.statut, content=resultat.corps)
 
 
 @organizations_modules_router.post(

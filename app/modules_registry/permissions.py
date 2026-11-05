@@ -24,3 +24,7 @@ ORGANIZATION_MODULE_ACTIVATE = "organization.module.activate"
 # Mise à jour d'une installation de version rN vers rN+1 (BE-051, QE-MOD-16 : code recommandé).
 # Portée organisation `{orgId}`. Accordée au propriétaire à la création (OWNER_DEFAULT_PERMISSIONS).
 ORGANIZATION_MODULE_UPGRADE = "organization.module.upgrade"
+# Désinstallation d'un module pour l'organisation (BE-050, QE-MOD-16 : code recommandé). Portée
+# organisation `{orgId}`. Distincte de l'activation : un acteur qui peut désactiver ne peut pas
+# désinstaller sans ce droit. Accordée au propriétaire (OWNER_DEFAULT_PERMISSIONS).
+ORGANIZATION_MODULE_UNINSTALL = "organization.module.uninstall"

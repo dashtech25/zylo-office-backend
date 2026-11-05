@@ -36,6 +36,7 @@ from app.modules_registry.permissions import (
     ORGANIZATION_MODULE_ACTIVATE,
     ORGANIZATION_MODULE_INSTALL,
     ORGANIZATION_MODULE_READ,
+    ORGANIZATION_MODULE_UNINSTALL,
     ORGANIZATION_MODULE_UPGRADE,
 )
 from app.rbac.models import Role, RolePermission, UserRole
@@ -64,6 +65,7 @@ OWNER_DEFAULT_PERMISSIONS = [
     (ORGANIZATION_MODULE_INSTALL, "modules_registry", "Installer techniquement un module pour l'organisation (BE-047)."),
     (ORGANIZATION_MODULE_ACTIVATE, "modules_registry", "Activer ou désactiver un module installé pour l'organisation (BE-048)."),
     (ORGANIZATION_MODULE_UPGRADE, "modules_registry", "Mettre à jour une installation de module vers une version supérieure (BE-051)."),
+    (ORGANIZATION_MODULE_UNINSTALL, "modules_registry", "Désinstaller un module de l'organisation, sans purge des données (BE-050)."),
     (ROLE_MANAGE, "rbac", "Créer des rôles et modifier leurs permissions, attribuer/retirer un rôle."),
     (GRANT_MANAGE, "rbac", "Accorder ou refuser une permission individuelle, révoquer un grant."),
     (AUDIT_LOG_VIEW, "audit", "Consulter le journal d'audit."),

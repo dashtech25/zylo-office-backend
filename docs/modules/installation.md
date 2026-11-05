@@ -34,3 +34,16 @@ Le même couple (`Idempotency-Key`, corps) renvoie la réponse initiale avec le 
 - Fournisseur d'exécution : protocole `FournisseurProvisionnement` ; `FournisseurSimule` par défaut.
 - Table : `module_installations` (migration `be047c1d2e3f`). Index unique partiel : une seule
   installation non `removed` par (organisation, module).
+
+## Désinstallation sans purge (BE-050)
+
+`DELETE /api/v1/organizations/{orgId}/modules/{moduleId}/installation` (en-tête `Idempotency-Key`,
+corps `stateVersion` et `confirm: true`) fait passer l'installation de `installed` ou `inactive` à
+`removing`, puis à `removed`. Permission : `organization.module.uninstall`, distincte de l'activation.
+
+- Module `active` : 409 `MODULE_MUST_BE_INACTIVE` ; désactiver d'abord (BE-048).
+- Aucune donnée du module n'est purgée (QE-MOD-11). Une fois `removed`, la ligne ne compte plus dans
+  l'index unique partiel : une nouvelle installation redevient possible.
+- Rejeu de la même `Idempotency-Key` : réponse initiale, sans second passage en `removing`.
+
+Détail des gardes et de l'ordre des vérifications : `app/modules_registry/desinstallation.py`.

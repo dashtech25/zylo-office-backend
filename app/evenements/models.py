@@ -17,7 +17,7 @@ Invariants :
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -116,3 +116,33 @@ class DeadLetter(UUIDPrimaryKeyMixin, Base):
     statut: Mapped[str] = mapped_column(String(20), nullable=False, server_default="en_attente")
     createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     rejoueAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class SchemaEvenement(UUIDPrimaryKeyMixin, Base):
+    """Une version du schéma de payload d'un type d'événement (BE-176, CA-1 et CA-2).
+
+    Le catalogue des types est la liste des `eventType` présents dans cette table. Une
+    version est identifiée par `(eventType, schemaVersion)` (contrainte `uq_schema_evenement_version`).
+
+    `compatibleDepuis` est la version à partir de laquelle ce schéma est compatible avec les
+    producteurs : elle vaut `schemaVersion` quand la version introduit une rupture (champ requis
+    retiré), et reste à la version précédente sinon. Le registre (`app.evenements.schemas`) s'en
+    sert pour refuser un retrait de champ requis sans rupture déclarée.
+
+    `actif` désactive une version sans la supprimer : les événements déjà publiés restent
+    interprétables par leur `schemaVersion`.
+    """
+
+    __tablename__ = "schema_evenement"
+    __table_args__ = (
+        UniqueConstraint("eventType", "schemaVersion", name="uq_schema_evenement_version"),
+        CheckConstraint('"schemaVersion" >= 1', name="ck_schema_evenement_version"),
+        CheckConstraint('"compatibleDepuis" >= 1 AND "compatibleDepuis" <= "schemaVersion"', name="ck_schema_evenement_compatible"),
+        {"comment": "Registre des versions de schéma des types d'événements (catalogue, BE-176)."},
+    )
+
+    eventType: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
+    schemaVersion: Mapped[int] = mapped_column(Integer, nullable=False)
+    schemaJson: Mapped[dict] = mapped_column(JSON, nullable=False)
+    compatibleDepuis: Mapped[int] = mapped_column(Integer, nullable=False)
+    actif: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")

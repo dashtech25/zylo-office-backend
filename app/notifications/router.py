@@ -11,8 +11,11 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.core.config import settings
 from app.identity.models import User
+from app.notifications import preferences as preferences_service
 from app.notifications import service
 from app.notifications.schemas import (
+    ModifierPreferenceRequest,
+    PreferenceNotificationResponse,
     CreatePushSubscriptionRequest,
     NotificationInboxItemResponse,
     PushSubscriptionResponse,
@@ -122,3 +125,44 @@ async def mark_inbox_item_read(
     sera aligné."""
     item = await service.mark_inbox_item_read(db, organization_id=organization_id, user_id=current_user.id, item_id=item_id)
     return NotificationInboxItemResponse.model_validate(item)
+
+
+@router.get(
+    "/preferences",
+    response_model=list[PreferenceNotificationResponse],
+    summary="Préférences de notification de l'utilisateur courant",
+    description="Consentements enregistrés de l'utilisateur connecté, par catégorie. Une catégorie sans ligne n'apparaît pas (aucune valeur par défaut). Détail : `app/notifications/preferences.md`.",
+)
+async def list_preferences(
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[PreferenceNotificationResponse]:
+    lignes = await preferences_service.lire_preferences(
+        db, organization_id=organization_id, acteur_id=current_user.id, utilisateur_id=current_user.id
+    )
+    return [PreferenceNotificationResponse.model_validate(ligne) for ligne in lignes]
+
+
+@router.put(
+    "/preferences/{categorie_code}",
+    response_model=PreferenceNotificationResponse,
+    summary="Modifier la préférence d'une catégorie",
+    description="Enregistre le consentement de l'utilisateur connecté pour la catégorie et son horodatage. `consentement: false` vaut désinscription. Détail : `app/notifications/preferences.md`.",
+)
+async def update_preference(
+    categorie_code: str,
+    data: ModifierPreferenceRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PreferenceNotificationResponse:
+    ligne = await preferences_service.modifier_preference(
+        db,
+        organization_id=organization_id,
+        acteur_id=current_user.id,
+        utilisateur_id=current_user.id,
+        categorie_code=categorie_code,
+        consentement=data.consentement,
+    )
+    return PreferenceNotificationResponse.model_validate(ligne)

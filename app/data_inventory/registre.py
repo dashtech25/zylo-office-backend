@@ -26,6 +26,7 @@ ENTREES_TABLES_PROVISOIRES: dict[str, dict[str, str]] = {
     "categorie_notification": {"classe": "interne", "proprietaire": "socle-notifications"},
     "notification_inbox_item": {"classe": "personnelle", "proprietaire": "socle-notifications"},
     "regle_notification": {"classe": "interne", "proprietaire": "socle-notifications"},
+    "preference_notification": {"classe": "personnelle", "proprietaire": "socle-notifications"},
     "notificationPushSubscription": {"classe": "personnelle", "proprietaire": "socle-notifications"},
     "organization": {"classe": "interne", "proprietaire": "socle-organisations"},
     "organizationModule": {"classe": "interne", "proprietaire": "socle-modules"},

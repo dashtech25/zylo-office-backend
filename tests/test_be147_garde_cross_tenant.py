@@ -21,6 +21,7 @@ Aucune fixture métier lourde : les ressources sont créées par les API existan
 
 import re
 import uuid
+from datetime import datetime, timezone
 
 from fastapi.routing import APIRoute
 from httpx import AsyncClient
@@ -29,6 +30,7 @@ from sqlalchemy import text
 from app.core.database import AsyncSessionLocal
 from app.main import app
 from app.operator.scope import require_admin_scope
+from app.rbac.role_assignments import AdminRoleAssignment
 
 PREFIXE_ADMIN = "/api/v1/admin"
 ACTION_REFUS_CROSS_TENANT = "admin.scope.cross_tenant_refused"
@@ -102,6 +104,21 @@ async def _nombre_refus_cross_tenant(organization_id: str) -> int:
         ) or 0
 
 
+async def _accorder_autorite_plateforme(utilisateur_id: str) -> None:
+    """Mise en place (BE-121) : affectation active `operateur_plateforme` en portée `platform`."""
+    async with AsyncSessionLocal() as db:
+        db.add(AdminRoleAssignment(
+            actorId=uuid.UUID(utilisateur_id),
+            roleCode="operateur_plateforme",
+            scope="platform",
+            grantedBy=uuid.UUID(utilisateur_id),
+            grantedAt=datetime.now(timezone.utc),
+            expiresAt=None,
+            revokedAt=None,
+        ))
+        await db.commit()
+
+
 def test_be147_ca3_chaque_route_admin_declare_sa_portee():
     """CA-3 : toute route `/api/v1/admin` déclare `require_admin_scope`.
 
@@ -155,8 +172,12 @@ async def test_be147_ca4_refus_cross_tenant_produit_une_entree_d_audit(client: A
     """CA-4 : le refus cross-tenant de CA-1 laisse une entrée `refused` dans `audit_event`.
 
     Le tenant de l'entrée est le tenant ciblé (B), l'acteur est l'appelant.
+    Mise en place : l'appelant détient l'autorité plateforme (BE-121). Sans elle,
+    la garde refuse avant la journalisation de la cible (CA-2), et le CA-4 ne
+    porte plus sur le refus cross-tenant. Aucune assertion n'est modifiée.
     """
     monkeypatch.setenv("OPERATOR_READ_USER_IDS", await _moi(client, registered_user))
+    await _accorder_autorite_plateforme(await _moi(client, registered_user))
     tenant_b = await _autre_organisation(client)
     avant = await _nombre_refus_cross_tenant(tenant_b)
 

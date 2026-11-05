@@ -629,3 +629,47 @@ class Dispute(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     providerRef: Mapped[str] = mapped_column(String(160), nullable=False, unique=True, comment="Identifiant du litige chez le fournisseur.")
     openedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Date de réception de l'ouverture.")
     resolvedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Date de clôture (won, lost, withdrawn).")
+
+
+class ReconciliationRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Une exécution de réconciliation des paiements (BE-095), bornée à un tenant.
+
+    Une ligne par lancement. `scope` vaut `tenant` (seul périmètre livré) ; `organizationId` borne
+    la sélection des tentatives : une réconciliation ne lit jamais un autre tenant (CA-4).
+    `differenceCount` compte les écarts créés par ce lancement. Le statut reste `completed` :
+    un fournisseur injoignable ne fait pas échouer le run, il laisse simplement les tentatives
+    `unknown` sans constat (aucune correction, aucune capture).
+    """
+
+    __tablename__ = "reconciliation_run"
+    __table_args__ = ({"comment": "Exécution de réconciliation des paiements et résultats incertains (BE-095)."},)
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True,
+        comment="Tenant dont les tentatives ont été réconciliées (CA-4).",
+    )
+    scope: Mapped[str] = mapped_column(String(20), nullable=False, default="tenant", comment="Périmètre demandé : tenant.")
+    periodKey: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="Période indicative fournie par l'appelant (non filtrante, écart documenté).")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="completed", comment="completed.")
+    differenceCount: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0", comment="Nombre d'écarts créés par ce run.")
+    startedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Instant de lancement du run.")
+
+
+class ReconciliationDifference(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Écart détecté par une réconciliation (BE-095, CA-2).
+
+    Un écart signifie : le fournisseur confirme un débit sous la référence d'une tentative que Zylo
+    tient `unknown`. Il est seulement constaté (`status` = `detected`) : aucune correction de la
+    tentative n'est faite automatiquement. L'évènement `ReconciliationDifferenceDetected` est écrit
+    dans l'outbox avec la même transaction.
+    """
+
+    __tablename__ = "reconciliation_difference"
+    __table_args__ = (
+        UniqueConstraint("runId", "paymentAttemptId", name="uq_reconciliation_difference_run_attempt"),
+        {"comment": "Écart constaté par une réconciliation des paiements (BE-095), sans correction automatique."},
+    )
+
+    runId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("reconciliation_run.id"), nullable=False, index=True)
+    paymentAttemptId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("paymentAttempt.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="detected", comment="detected (aucune correction automatique).")

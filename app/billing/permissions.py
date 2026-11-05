@@ -53,3 +53,6 @@ BILLING_REFUND_REQUEST = "billing.refund.request"
 # fournisseur de l'organisation courante (GET /api/v1/billing/disputes/{disputeId}). Accordée au propriétaire
 # via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
 BILLING_DISPUTE_READ = "billing.dispute.read"
+# BE-095 (ACTF-09, finance) : lancer une réconciliation des paiements (POST /billing/reconciliations).
+# Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
+BILLING_RECONCILIATION_RUN = "billing.reconciliation.run"

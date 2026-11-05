@@ -21,6 +21,7 @@ from app.billing.checkouts.router import router as billing_checkouts_router
 from app.billing.payment_attempts.router import router as billing_payment_attempts_router
 from app.billing.refunds.router import router as billing_refunds_router
 from app.billing.disputes.router import router as billing_disputes_router
+from app.billing.reconciliation.router import router as billing_reconciliation_router
 from app.files.router import router as files_router
 from app.identity.router import router as organizations_router
 from app.integrations.router import router as connecteurs_router
@@ -131,6 +132,8 @@ api_router.include_router(billing_payment_attempts_router, prefix="/billing", ta
 api_router.include_router(billing_refunds_router, prefix="/billing", tags=["billing"])
 # BE-094 : litiges fournisseur, lecture seule (GET /billing/disputes/{disputeId}).
 api_router.include_router(billing_disputes_router, prefix="/billing", tags=["billing"])
+# BE-095 : réconciliation des paiements et résultats incertains (POST /billing/reconciliations).
+api_router.include_router(billing_reconciliation_router, prefix="/billing", tags=["billing"])
 api_router.include_router(billing_lecture_router, prefix="/organizations", tags=["billing"])
 # BE-046 : attribution et révocation des sièges d'entitlement (sous /organizations/{id}/entitlements).
 api_router.include_router(billing_allocation_router, prefix="/organizations", tags=["billing"])

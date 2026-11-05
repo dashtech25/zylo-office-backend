@@ -69,6 +69,17 @@ class PaymentProvider(ABC):
         """
         raise NotImplementedError
 
+    async def rechercher(self, reference: str) -> bool:
+        """Interroge le prestataire sur la référence interne `reference` (BE-095, CA-1).
+
+        Retourne True si le prestataire a un débit confirmé sous cette référence, False s'il n'en a
+        aucune trace. Une indisponibilité ou un délai dépassé remonte en exception : l'absence de
+        réponse n'est jamais interprétée comme « aucune transaction ». Utilisée par la réconciliation
+        pour résoudre une tentative `unknown` sans jamais initier de nouvelle capture. Non implémenté
+        par défaut : tout adaptateur qui réconcilie le redéfinit.
+        """
+        raise NotImplementedError
+
     async def create_checkout(self, amount_minor: int, currency: str, reference: str) -> CheckoutIntent:
         """Ouvre un checkout chez le prestataire et renvoie un `CheckoutIntent`.
 
@@ -104,6 +115,12 @@ class FlutterwaveTestProvider(PaymentProvider):
     async def rembourser(self, amount_minor: int, currency: str, reference: str) -> bool:
         # Stub sandbox (BE-093) : aucun remboursement n'est initié, comme pour `charge`.
         raise AppError(code="PROVIDER_UNAVAILABLE", message="Aucun remboursement ne peut être initié.", status_code=503)
+
+    async def rechercher(self, reference: str) -> bool:
+        # Stub sandbox (BE-095) : aucune interrogation réseau n'est faite. L'absence de réponse est
+        # signalée comme indisponibilité, jamais comme « aucune transaction » : une tentative `unknown`
+        # ne doit pas être considérée comme absente du fournisseur tant que la recherche n'a pas eu lieu.
+        raise AppError(code="PROVIDER_UNAVAILABLE", message="La recherche de transaction n'est pas disponible.", status_code=503)
 
     async def create_checkout(self, amount_minor: int, currency: str, reference: str) -> CheckoutIntent:
         # A live key can never silently enable checkout from this stub.

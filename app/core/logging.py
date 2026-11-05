@@ -33,6 +33,8 @@ from app.core.config import settings
 
 request_id_ctx: ContextVar[str | None] = ContextVar("request_id", default=None)
 correlation_id_ctx: ContextVar[str | None] = ContextVar("correlation_id", default=None)
+# operationId d'une mutation (BE-181, CA-3) : stable lors d'un rejeu, absent des lectures.
+operation_id_ctx: ContextVar[str | None] = ContextVar("operation_id", default=None)
 
 # Permission nominative de lecture des journaux (format domaine.entite.action).
 # Elle n'est accordée qu'à l'opérateur habilité ; voir exige_lecture_journaux().
@@ -135,6 +137,11 @@ class JsonFormatter(logging.Formatter):
         # FiltreRedaction. Un identifiant brut ne peut donc pas sortir ici.
         if getattr(record, "tenantId", None) is not None:
             payload["tenantId"] = record.tenantId
+        # operationId (BE-181, CA-3) : présent seulement pendant une mutation,
+        # pour que les lectures gardent exactement le format de BE-224.
+        operation_id = operation_id_ctx.get()
+        if operation_id is not None:
+            payload["operationId"] = operation_id
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=False)

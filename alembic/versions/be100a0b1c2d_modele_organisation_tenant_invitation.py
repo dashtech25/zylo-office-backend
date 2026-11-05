@@ -11,7 +11,11 @@ Migration additive, avec deux renommages :
 - la colonne `status` (défaut `active`) porte le statut d'appartenance.
 
 Tables créées :
-- `tenant` : un seul tenant par organisation (unicité sur `organizationId`) ;
+- `tenant` : un seul tenant par organisation (unicité sur `organizationId`,
+  facultatif depuis BE-185) ; colonnes du cycle de vie BE-185 (`slug` unique,
+  `version`, `closedAt`) et contrainte `ck_tenant_state` posées ici, dans la même
+  migration : BE-185 n'ajoute pas de révision au-dessus, pour que le retour arrière
+  de BE-100 retire bien la table ;
 - `invitation` : destinataire identifié (`recipientUserId`, QE-POR-24), rôle
   facultatif, statut borné à pending / accepted / expired / revoked.
 
@@ -44,11 +48,19 @@ def upgrade() -> None:
     op.create_table(
         "tenant",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("organizationId", postgresql.UUID(as_uuid=True), sa.ForeignKey("organization.id"), nullable=False, unique=True, comment="Organisation du tenant : un seul tenant par organisation"),
+        sa.Column("organizationId", postgresql.UUID(as_uuid=True), sa.ForeignKey("organization.id"), nullable=True, unique=True, comment="Organisation du tenant : un seul tenant par organisation (facultatif, BE-185)"),
         sa.Column("status", sa.String(length=50), nullable=False, server_default="active"),
+        sa.Column("slug", sa.String(length=100), nullable=True, comment="Identifiant lisible et unique du tenant (BE-185)"),
+        sa.Column("version", sa.Integer(), nullable=False, server_default="1", comment="Verrou de version du tenant (BE-185)"),
+        sa.Column("closedAt", sa.DateTime(timezone=True), nullable=True, comment="Renseigné à la fermeture du tenant (BE-185)"),
         sa.Column("createdAt", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updatedAt", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        comment="Tenant d'une organisation (BE-100) : un seul par organisation.",
+        sa.UniqueConstraint("slug", name="uq_tenant_slug"),
+        sa.CheckConstraint(
+            "status IN ('requested', 'provisioning', 'active', 'suspended', 'closing', 'closed')",
+            name="ck_tenant_state",
+        ),
+        comment="Tenant de la plateforme : organisation (BE-100), cycle de vie (BE-185), état et verrou de version.",
     )
 
     op.create_table(

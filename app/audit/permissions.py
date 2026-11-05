@@ -15,3 +15,7 @@ ORGANIZATION_AUDIT_READ = "organization.audit.read"
 # Valeur de visibilité et permission NON DÉFINIES dans la source ; à confirmer.
 VISIBILITE_RESTREINTE = "restreinte"
 AUDIT_RESTRICTED_VIEW = "audit.restricted.view"
+
+# BE-173 (EVT-AUD-02) : demander un export du journal d'audit et lire son statut ou son
+# contenu. Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS (app/identity/service.py).
+AUDIT_EXPORT = "audit.export"

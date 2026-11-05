@@ -1,4 +1,4 @@
-from app.audit.permissions import AUDIT_LOG_VIEW, AUDIT_RESTRICTED_VIEW, ORGANIZATION_AUDIT_READ
+from app.audit.permissions import AUDIT_EXPORT, AUDIT_LOG_VIEW, AUDIT_RESTRICTED_VIEW, ORGANIZATION_AUDIT_READ
 from app.core.database import AsyncSessionLocal
 from app.rbac.service import get_or_create_permission
 
@@ -12,4 +12,5 @@ async def seed_known_permissions() -> None:
         await get_or_create_permission(
             db, AUDIT_RESTRICTED_VIEW, "audit", "Consulter les événements d'audit à visibilité restreinte (BE-172, QE-PAR-16)."
         )
+        await get_or_create_permission(db, AUDIT_EXPORT, "audit", "Demander un export du journal d'audit (BE-173).")
         await db.commit()

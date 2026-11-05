@@ -111,3 +111,35 @@ class AuditEvent(UUIDPrimaryKeyMixin, Base):
 # Il pointe vers la même table `audit_event`. À retirer quand tous les imports
 # auront été renommés (hors périmètre de BE-007).
 AuditLog = AuditEvent
+
+
+class ExportAudit(UUIDPrimaryKeyMixin, Base):
+    """Job d'export du journal d'audit (BE-173), traçable et à durée de rétention limitée.
+
+    Une ligne par demande : demandeur, sujet (valeur de `entityType`), période, motif
+    obligatoire, statut et expiration. Le fichier d'export n'est pas stocké : son contenu
+    est reconstitué à la lecture à partir de `audit_event` (voir app/audit/export_job.py).
+
+    `expireAt` est calculé à la création à partir de `AUDIT_EXPORT_EXPIRATION_SECONDS` ;
+    cette durée n'a pas de valeur par défaut (QE-PAR-07). Le motif est vérifié non vide
+    par la base, comme les colonnes de `audit_event` (BE-152 CA-3)."""
+
+    __tablename__ = "export_audit"
+    __table_args__ = (
+        CheckConstraint("length(btrim(motif)) > 0", name="ck_export_audit_motif_non_vide"),
+        CheckConstraint("length(btrim(sujet)) > 0", name="ck_export_audit_sujet_non_vide"),
+        CheckConstraint("statut IN ('pret')", name="ck_export_audit_statut"),
+        {"comment": "Job d'export du journal d'audit : demandeur, sujet, période, motif, expiration (BE-173)."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True
+    )
+    demandeur: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False)
+    sujet: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Période bornée, inclusive : {"dateDebut": ISO 8601, "dateFin": ISO 8601}.
+    periode: Mapped[dict] = mapped_column(JSON, nullable=False)
+    motif: Mapped[str] = mapped_column(String(500), nullable=False)
+    statut: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pret")
+    creeAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expireAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

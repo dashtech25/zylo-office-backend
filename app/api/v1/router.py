@@ -62,6 +62,7 @@ from app.operator.incidents_router import router as incidents_router
 from app.operator.exceptional_access import router as exceptional_access_router
 from app.operator.access import router as operator_access_router
 from app.operator.cases_router import router as cases_router
+from app.operator.escalation_router import router as escalation_router
 from app.operator.commands_router import router as commands_router
 from app.operator.notifications_router import router as notifications_admin_router
 from app.operator.finance_commands_router import router as finance_commands_router
@@ -148,6 +149,7 @@ api_router.include_router(operator_access_router, prefix="/admin", tags=["admin-
 api_router.include_router(role_assignments_router, prefix="/admin", tags=["admin-role-assignments"])
 # BE-123 : cas d'intervention de support (POST/GET /admin/cases, assign, close).
 api_router.include_router(cases_router, prefix="/admin", tags=["admin-cases"])
+api_router.include_router(escalation_router, prefix="/admin", tags=["admin-escalations"])
 # BE-124 : intentions de commande opérateur idempotentes (POST/GET /admin/commands).
 api_router.include_router(commands_router, prefix="/admin", tags=["admin-commands"])
 # BE-144 : notifications d'une commande opérateur (GET /admin/commands/{id}/notifications).

@@ -92,6 +92,10 @@ class Subscription(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         String(30), nullable=False, default="none", server_default="none",
         comment="Axe incident de l'abonnement (BE-079).",
     )
+    # Fin de la période de grâce (BE-091) : vide tant que la durée n'est pas décidée (QE-FAC-07).
+    graceUntil: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="Fin de la période de grâce de l'incident (BE-091).",
+    )
     startDate: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     endDate: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     renewedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -709,3 +709,30 @@ class ReconciliationDifference(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     runId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("reconciliation_run.id"), nullable=False, index=True)
     paymentAttemptId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("paymentAttempt.id"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="detected", comment="detected (aucune correction automatique).")
+
+
+class RenewalRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Passage du job de renouvellement (BE-089) pour un abonnement et une période.
+
+    Clé de déduplication : (subscriptionId, periodKey, type). `type` est une colonne ajoutée
+    à la liste de la fiche : celle-ci demande la clé sans la nommer (QE-FAC-04 non tranché) ;
+    recommandation appliquée, une colonne texte, valeur `renewal` pour ce job.
+    `status` : `completed` (facture émise) ou `refused` (abonnement terminé, journalisé).
+    """
+
+    __tablename__ = "renewal_run"
+    __table_args__ = (
+        UniqueConstraint("subscriptionId", "periodKey", "type", name="uq_renewal_run_key"),
+        {"comment": "Passage du job de renouvellement d'abonnement (BE-089), une ligne par abonnement, période et type."},
+    )
+
+    subscriptionId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("subscription.id"), nullable=False, index=True,
+    )
+    periodKey: Mapped[str] = mapped_column(String(20), nullable=False, comment="Clé de période de facturation, opaque pour le job.")
+    type: Mapped[str] = mapped_column(String(40), nullable=False, default="renewal", comment="Type de passage ; `renewal` pour BE-089.")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, comment="completed | refused.")
+    attemptedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Instant du premier passage pour cette clé.")
+    invoiceId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("invoice.id"), nullable=True, comment="Facture émise par ce passage ; NULL si refusé.",
+    )

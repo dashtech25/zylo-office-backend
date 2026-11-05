@@ -27,6 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.models import AuditLog
 from app.billing import service as billing_service
+from app.operator.scope import AdminScope, require_admin_scope
+from app.operator.tenant_guard import exiger_portee_sur_tenant
 from app.billing.models import PaymentWebhookEvent, Plan
 from app.core.database import get_db
 from app.core.errors import AppError
@@ -84,12 +86,25 @@ async def organization_overview(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_operator),
+    scope: AdminScope = Depends(require_admin_scope),
 ) -> OperatorOrganizationOverview:
     """État d'abonnement et modules d'une organisation, sans contenu tenant.
 
     404 `organization_not_found` si l'organisation est absente ou supprimée
     (la consultation est tout de même journalisée, issue `not_found`).
+
+    BE-147 : la portée doit couvrir l'organisation visée. La portée plateforme la
+    couvre (vue de console, sans contenu client) ; `tenant:<X>` ne couvre que X,
+    sinon 403 journalisé.
     """
+    await exiger_portee_sur_tenant(
+        db,
+        acteur_id=current_user.id,
+        portee_platforme=scope.is_platform,
+        portee_organisation=scope.organization_id,
+        organization_id=organization_id,
+        plateforme_couvre_tenant=True,
+    )
     org = await db.get(Organization, organization_id)
     if org is None or org.deletedAt is not None:
         await record_operator_read(

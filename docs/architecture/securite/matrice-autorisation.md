@@ -7,18 +7,28 @@ Source : les dépendances FastAPI des routes (`tests/route_inventory.py`).
 
 | Permission | Routes |
 |---|---|
+| `audit.export` | `POST /api/v1/audit/exports`<br>`GET /api/v1/audit/exports/{job_id}`<br>`GET /api/v1/audit/exports/{job_id}/telechargement` |
 | `billing.invoice.read` | `GET /api/v1/organizations/current/invoices`<br>`GET /api/v1/organizations/current/invoices/{invoice_id}` |
 | `billing.subscription.manage` | `POST /api/v1/billing/organizations/{organization_id}/invoices`<br>`POST /api/v1/billing/organizations/{organization_id}/invoices/{invoice_id}/payment-attempts`<br>`POST /api/v1/billing/organizations/{organization_id}/subscriptions` |
 | `billing.subscription.read` | `GET /api/v1/organizations/current/entitlements`<br>`GET /api/v1/organizations/current/subscription` |
-| `identity.organization.manage` | `GET /api/v1/modules/organizations/{organization_id}/zylo-liquid/protected-demo`<br>`PATCH /api/v1/organizations/{organization_id}`<br>`GET /api/v1/organizations/{organization_id}/protected-demo` |
+| `identity.organization.manage` | `GET /api/v1/modules/organizations/{organization_id}/zylo-liquid/protected-demo`<br>`POST /api/v1/organizations/current/closure`<br>`POST /api/v1/organizations/current/reactivation`<br>`POST /api/v1/organizations/current/suspension`<br>`PATCH /api/v1/organizations/{organization_id}`<br>`GET /api/v1/organizations/{organization_id}/protected-demo` |
 | `identity.user.manage` | `POST /api/v1/organizations/{organization_id}/users`<br>`PATCH /api/v1/organizations/{organization_id}/users/{user_id}`<br>`POST /api/v1/organizations/{organization_id}/users/{user_id}/invitation` |
 | `modules.module.manage` | `POST /api/v1/modules/organizations/{organization_id}/activate`<br>`POST /api/v1/modules/organizations/{organization_id}/deactivate`<br>`PUT /api/v1/organizations/current/modules/{module_id}/activation` |
+| `organization.audit.read` | `GET /api/v1/organizations/{organization_id}/module-audit` |
+| `organization.entitlement.allocate` | `POST /api/v1/organizations/{organization_id}/entitlements/{entitlement_id}/allocations` |
+| `organization.entitlement.read` | `GET /api/v1/organizations/{organization_id}/entitlements` |
+| `organization.entitlement.revoke` | `DELETE /api/v1/organizations/{organization_id}/entitlements/{entitlement_id}/allocations/{user_id}` |
 | `organization.members.invite` | `GET /api/v1/organizations/current/invitations`<br>`POST /api/v1/organizations/current/invitations` |
 | `organization.members.read` | `GET /api/v1/organizations/current/members` |
 | `organization.members.remove` | `DELETE /api/v1/organizations/current/members/{user_id}` |
+| `organization.module.activate` | `POST /api/v1/organizations/{organization_id}/modules/{module_id}/activation`<br>`POST /api/v1/organizations/{organization_id}/modules/{module_id}/deactivation` |
+| `organization.module.install` | `POST /api/v1/organizations/{organization_id}/modules/{module_id}/installations`<br>`GET /api/v1/organizations/{organization_id}/modules/{module_id}/installations/{operation_id}` |
+| `organization.module.read` | `GET /api/v1/organizations/{organization_id}/modules/{module_id}`<br>`GET /api/v1/organizations/{organization_id}/modules/{module_id}/permissions` |
+| `organization.module.uninstall` | `DELETE /api/v1/organizations/{organization_id}/modules/{module_id}/installation` |
+| `organization.module.upgrade` | `POST /api/v1/organizations/{organization_id}/modules/{module_id}/upgrades` |
 | `organization.settings.update` | `PUT /api/v1/organizations/current/settings` |
-| `rbac.grant.manage` | `POST /api/v1/rbac/organizations/{organization_id}/grants`<br>`DELETE /api/v1/rbac/organizations/{organization_id}/grants/{grant_id}`<br>`GET /api/v1/rbac/organizations/{organization_id}/users/{user_id}/grants` |
-| `rbac.role.manage` | `PUT /api/v1/organizations/current/members/{user_id}/roles`<br>`GET /api/v1/organizations/current/roles`<br>`GET /api/v1/organizations/current/roles/{role_id}`<br>`POST /api/v1/rbac/organizations/{organization_id}/module-roles`<br>`POST /api/v1/rbac/organizations/{organization_id}/module-roles/assignments`<br>`DELETE /api/v1/rbac/organizations/{organization_id}/module-roles/assignments/{assignment_id}`<br>`GET /api/v1/rbac/organizations/{organization_id}/modules/{module_code}/members`<br>`DELETE /api/v1/rbac/organizations/{organization_id}/modules/{module_code}/users/{user_id}/role`<br>`PUT /api/v1/rbac/organizations/{organization_id}/modules/{module_code}/users/{user_id}/role`<br>`GET /api/v1/rbac/organizations/{organization_id}/modules/{module_code}/users/{user_id}/role-preview`<br>`POST /api/v1/rbac/organizations/{organization_id}/roles`<br>`PUT /api/v1/rbac/organizations/{organization_id}/roles/{role_id}/permissions`<br>`POST /api/v1/rbac/organizations/{organization_id}/user-roles`<br>`DELETE /api/v1/rbac/organizations/{organization_id}/user-roles/{assignment_id}` |
+| `rbac.grant.manage` | `POST /api/v1/organizations/current/members/{user_id}/grants`<br>`DELETE /api/v1/organizations/current/members/{user_id}/grants/{grant_id}`<br>`POST /api/v1/rbac/organizations/{organization_id}/grants`<br>`DELETE /api/v1/rbac/organizations/{organization_id}/grants/{grant_id}`<br>`GET /api/v1/rbac/organizations/{organization_id}/users/{user_id}/grants` |
+| `rbac.role.manage` | `PUT /api/v1/organizations/current/members/{user_id}/roles`<br>`GET /api/v1/organizations/current/roles`<br>`GET /api/v1/organizations/current/roles/{role_id}`<br>`GET /api/v1/organizations/{organization_id}/modules/{module_code}/access-evaluation`<br>`POST /api/v1/rbac/organizations/{organization_id}/module-roles`<br>`POST /api/v1/rbac/organizations/{organization_id}/module-roles/assignments`<br>`DELETE /api/v1/rbac/organizations/{organization_id}/module-roles/assignments/{assignment_id}`<br>`GET /api/v1/rbac/organizations/{organization_id}/modules/{module_code}/members`<br>`DELETE /api/v1/rbac/organizations/{organization_id}/modules/{module_code}/users/{user_id}/role`<br>`PUT /api/v1/rbac/organizations/{organization_id}/modules/{module_code}/users/{user_id}/role`<br>`GET /api/v1/rbac/organizations/{organization_id}/modules/{module_code}/users/{user_id}/role-preview`<br>`POST /api/v1/rbac/organizations/{organization_id}/roles`<br>`PUT /api/v1/rbac/organizations/{organization_id}/roles/{role_id}/permissions`<br>`POST /api/v1/rbac/organizations/{organization_id}/user-roles`<br>`DELETE /api/v1/rbac/organizations/{organization_id}/user-roles/{assignment_id}` |
 | `shared.currency.manage` | `POST /api/v1/currencies`<br>`PATCH /api/v1/currencies/{currency_id}` |
 | `shared.currency.read` | `GET /api/v1/currencies` |
 | `shared.exchangeRate.manage` | `POST /api/v1/exchange-rates` |
@@ -148,6 +158,39 @@ Source : les dépendances FastAPI des routes (`tests/route_inventory.py`).
 
 - `GET /` — Racine d'accueil, aucune donnée. 2026-10-09.
 - `GET /api/v1/account/profile` — Profil de l'utilisateur de la session uniquement (get_current_user, aucun identifiant lu dans la requête). Portée utilisateur. BE-020.
+- `GET /api/v1/admin/audit-events` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/cases` — NON CLASSÉE — revoir la garde avant livraison
+- `GET /api/v1/admin/cases/{case_id}` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/cases/{case_id}/assign` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/cases/{case_id}/close` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/cases/{case_id}/payment-diagnostics` — NON CLASSÉE — revoir la garde avant livraison
+- `GET /api/v1/admin/cases/{case_id}/payment-diagnostics/{diagnostic_id}` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/cases/{case_id}/subscription-diagnostics` — NON CLASSÉE — revoir la garde avant livraison
+- `GET /api/v1/admin/cases/{case_id}/subscription-diagnostics/{diagnostic_id}` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/commands` — NON CLASSÉE — revoir la garde avant livraison
+- `GET /api/v1/admin/commands/{command_id}` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/commands/{command_id}/approve` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/commands/{command_id}/confirm` — NON CLASSÉE — revoir la garde avant livraison
+- `GET /api/v1/admin/commands/{command_id}/notifications` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/commands/{command_id}/preview` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/commands/{command_id}/reconcile` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/commands/{command_id}/reject` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/commands/{command_id}/verify` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/invoices/{invoice_id}/finance-commands` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/modules` — NON CLASSÉE — revoir la garde avant livraison
+- `GET /api/v1/admin/modules/{module_id}` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/modules/{module_id}/upgrade-plans` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/modules/{module_id}/versions` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/modules/{module_id}/versions/{version_id}/compatibility-evaluations` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/modules/{module_id}/versions/{version_id}/publish` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/organizations/{organization_id}/entitlements/commands` — NON CLASSÉE — revoir la garde avant livraison
+- `PATCH /api/v1/admin/organizations/{organization_id}/entitlements/{entitlement_id}` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/organizations/{organization_id}/exceptional-access` — NON CLASSÉE — revoir la garde avant livraison
+- `GET /api/v1/admin/reconciliations` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/reconciliations/{reconciliation_id}/resolve` — NON CLASSÉE — revoir la garde avant livraison
+- `GET /api/v1/admin/role-assignments` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/role-assignments` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/admin/role-assignments/{assignment_id}/revoke` — NON CLASSÉE — revoir la garde avant livraison
 - `POST /api/v1/auth/activate` — Activation d'un compte par jeton à usage unique reçu hors API (T-021) : jeton vérifié et consommé dans le service, limitée par T-012. 2026-10-09.
 - `POST /api/v1/auth/change-password` — Changement de mot de passe de l'utilisateur connecté (portée utilisateur uniquement). 2026-10-09.
 - `POST /api/v1/auth/login` — Connexion : public par nature, limitée par T-012. 2026-10-09.
@@ -159,31 +202,39 @@ Source : les dépendances FastAPI des routes (`tests/route_inventory.py`).
 - `POST /api/v1/auth/register` — Endpoint masqué par défaut; AUTH_PUBLIC_REGISTRATION_ENABLED=true n'est admis que si ENVIRONMENT=development ou test (le validateur Settings refuse production/staging). Libre-service sans décision produit réservé aux tests et au développement local. 2026-11-02.
 - `GET /api/v1/billing/payment-provider` — Métadonnées statiques du provider de test (configured=false, checkoutAvailable=false), sans donnée tenant ni secret. 2026-11-02.
 - `GET /api/v1/billing/plans` — Catalogue de plans, lecture seule (création par API retirée par T-019, option A de T-050). Passera authentifié si IAM-020 est confirmée. 2026-10-09.
+- `GET /api/v1/catalog/modules` — NON CLASSÉE — revoir la garde avant livraison
+- `GET /api/v1/catalog/modules/{slug}` — NON CLASSÉE — revoir la garde avant livraison
 - `POST /api/v1/export/docx` — Conversion d'un tableau fourni par l'appelant, authentifiée (get_current_user), sans accès à la base. 2026-10-09.
 - `POST /api/v1/export/xlsx` — Conversion d'un tableau fourni par l'appelant, authentifiée (get_current_user), sans accès à la base. 2026-10-09.
 - `GET /api/v1/health` — Sonde de santé. 2026-10-09.
 - `GET /api/v1/health/error-demo` — Démonstration du format d'erreur, sans donnée. A retirer en production. 2026-10-09.
 - `GET /api/v1/health/ready` — Sonde de disponibilité : état de la base seulement, sans donnée ni secret (BE-032). 2026-11-03.
 - `POST /api/v1/import/xlsx` — Lecture d'un fichier fourni par l'appelant, authentifiée (get_current_user), sans accès à la base. 2026-10-09.
+- `POST /api/v1/internal/billing/entitlement-events` — NON CLASSÉE — revoir la garde avant livraison
 - `GET /api/v1/internal/ready` — Readiness réservée au réseau interne : 404 hors HEALTH_INTERNAL_NETWORKS (contrôle dans la route, sans session). BE-032.
 - `GET /api/v1/modules` — Catalogue des modules (aucune donnée d'organisation). Passera authentifié si la décision catalogues-publics est confirmée (IAM-020). 2026-10-09.
 - `GET /api/v1/notifications/vapid-public-key` — Clé publique VAPID (non secrète), lue avant tout abonnement, aucune donnée d'organisation. 2026-10-09 (T-004b lot 2).
 - `GET /api/v1/organizations` — Liste des organisations de l'utilisateur connecté (portée utilisateur). 2026-10-09.
 - `POST /api/v1/organizations` — Création d'organisation par tout utilisateur connecté. Quota ORG_CREATION_QUOTA à fixer par le client (T-019, décision en attente). 2026-10-09.
+- `POST /api/v1/organizations/{organization_id}/modules/{module_id}/reactivations` — NON CLASSÉE — revoir la garde avant livraison
+- `POST /api/v1/organizations/{organization_id}/modules/{module_id}/suspensions` — NON CLASSÉE — revoir la garde avant livraison
 - `GET /api/v1/storage/local/{storage_reference}` — Téléchargement par URL signée (signature vérifiée dans le service). 2026-10-09.
 - `PATCH /api/v1/users/{user_id}` — Photo de profil : soi-même, ou owner d'une organisation dont la cible est membre. Contrôle dans le service (update_user_profile). 2026-10-09.
 
 ## Routes protégées par allowlist opérateur
 
 - `GET /api/v1/admin/health` — `require_operator` (session utilisateur + allowlist serveur `OPERATOR_READ_USER_IDS`).
+- `GET /api/v1/admin/ops/metrics` — `require_operator` (session utilisateur + allowlist serveur `OPERATOR_READ_USER_IDS`).
 - `GET /api/v1/admin/organizations` — `require_operator` (session utilisateur + allowlist serveur `OPERATOR_READ_USER_IDS`).
 - `GET /api/v1/admin/organizations/{organization_id}` — `require_operator` (session utilisateur + allowlist serveur `OPERATOR_READ_USER_IDS`).
 - `GET /api/v1/admin/payment-events/{event_id}` — `require_operator` (session utilisateur + allowlist serveur `OPERATOR_READ_USER_IDS`).
 - `GET /api/v1/admin/requests/{request_id}` — `require_operator` (session utilisateur + allowlist serveur `OPERATOR_READ_USER_IDS`).
+- `GET /api/v1/admin/sensitive-action-classes` — `require_operator` (session utilisateur + allowlist serveur `OPERATOR_READ_USER_IDS`).
 - `GET /api/v1/admin/status` — `require_operator` (session utilisateur + allowlist serveur `OPERATOR_READ_USER_IDS`).
 
 ## Routes avec contrôle manuel documenté
 
 - `POST /api/v1/billing/webhooks/flutterwave` — Signature Flutterwave verif-hash comparée en temps constant avant lecture du payload ou accès aux événements; secret absent -> 503, signature invalide -> 401. 2026-11-02.
+- `POST /api/v1/integrations/webhooks/{connecteur_id}` — Signature HMAC du connecteur (en-tête X-Zylo-Signature) vérifiée dans webhooks.py avant toute écriture ; secret absent -> 503 ou 404, signature invalide -> 401. BE-163.
 - `POST /api/v1/zylo-liquid/gps/ingest` — Secret d'ingestion propre à l'organisation dans X-GPS-Ingest-Secret, vérifié en service avant traitement; absence/invalide -> 401. 2026-10-09.
 - `POST /api/v1/zylo-tanker/gps/ingest` — Secret d'ingestion propre à l'organisation dans X-GPS-Ingest-Secret, vérifié en service avant traitement; absence/invalide -> 401. 2026-10-09.

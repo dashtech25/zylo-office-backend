@@ -18,7 +18,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -177,3 +177,36 @@ class LettreMorte(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     motif: Mapped[str | None] = mapped_column(String(500), nullable=True)
     operateur: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=True)
     reprisAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+STATUT_WEBHOOK_RECU = "recu"
+
+
+class WebhookRecu(UUIDPrimaryKeyMixin, Base):
+    """Un événement externe reçu par un webhook entrant, sans sa charge utile complète (BE-163).
+
+    - `connecteurId` et `idExterne` forment la clé d'idempotence : une seule ligne par couple
+      (CA-2), garantie par la contrainte d'unicité `uq_webhook_recu_connecteur_id_externe` ;
+    - `organizationId` reprend l'organisation du connecteur (jamais celle de l'en-tête de
+      requête) ; nul pour un connecteur de portée `global` ;
+    - `payloadMinimal` ne garde que les champs de routage du schéma, pas le corps reçu.
+    """
+
+    __tablename__ = "webhook_recu"
+    __table_args__ = (
+        UniqueConstraint("connecteurId", "idExterne", name="uq_webhook_recu_connecteur_id_externe"),
+        CheckConstraint(f"statut IN ('{STATUT_WEBHOOK_RECU}')", name="ck_webhook_recu_statut"),
+        CheckConstraint("length(btrim(\"idExterne\")) > 0", name="ck_webhook_recu_id_externe_non_vide"),
+        {"comment": "Événements externes reçus par webhook entrant, sans charge utile complète (BE-163)."},
+    )
+
+    connecteurId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("connecteur.id"), nullable=False, index=True
+    )
+    idExterne: Mapped[str] = mapped_column(String(255), nullable=False)
+    organizationId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=True, index=True
+    )
+    payloadMinimal: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    recuAt: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    statut: Mapped[str] = mapped_column(String(16), nullable=False, server_default=STATUT_WEBHOOK_RECU)

@@ -13,6 +13,7 @@ from app.billing.history.router import router as billing_history_router
 from app.billing.router import router as billing_router
 from app.billing.subscriptions.router import router as billing_subscriptions_router
 from app.billing.cancellation.router import router as billing_cancellation_router
+from app.billing.reactivation.router import router as billing_reactivation_router
 from app.billing.close.router import router as billing_close_router
 from app.billing.trials.router import router as billing_trials_router
 from app.billing.plan_changes.router import router as billing_plan_changes_router
@@ -125,6 +126,8 @@ api_router.include_router(billing_invoices_router, prefix="/billing", tags=["bil
 api_router.include_router(billing_subscriptions_router, prefix="/billing", tags=["billing"])
 # BE-090 : résiliation d'abonnement (POST /billing/subscriptions/{subscriptionId}/cancel).
 api_router.include_router(billing_cancellation_router, prefix="/billing", tags=["billing"])
+# BE-092 : réactivation d'abonnement (POST /billing/subscriptions/{subscriptionId}/reactivate).
+api_router.include_router(billing_reactivation_router, prefix="/billing", tags=["billing"])
 api_router.include_router(billing_close_router, prefix="/billing", tags=["billing"])
 # BE-080 : démarrage d'essai (POST /billing/subscriptions/trials).
 api_router.include_router(billing_trials_router, prefix="/billing", tags=["billing"])

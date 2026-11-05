@@ -23,6 +23,7 @@ from app.modules.zylo_tanker.router import router as zylo_tanker_router
 from app.modules_registry.audit_router import router as module_audit_router
 from app.modules_registry.router import organizations_modules_router
 from app.modules_registry.admin_router import router as modules_admin_router
+from app.modules_registry.reconciliation_router import router as reconciliation_admin_router
 from app.modules_registry.catalog_router import router as catalog_router
 from app.modules_registry.router import router as modules_router
 from app.rbac.grants_membres import router as grants_membres_router
@@ -52,6 +53,7 @@ api_router.include_router(account_router, prefix="/account", tags=["account"])
 api_router.include_router(organizations_modules_router, prefix="/organizations", tags=["modules"])
 api_router.include_router(modules_router, prefix="/modules", tags=["modules"])
 api_router.include_router(modules_admin_router, prefix="/admin", tags=["admin-modules"])
+api_router.include_router(reconciliation_admin_router, prefix="/admin", tags=["admin-reconciliation"])
 # BE-043 : catalogue public (publié + visible), sans authentification.
 api_router.include_router(catalog_router, prefix="/catalog", tags=["catalog"])
 api_router.include_router(module_audit_router, prefix="/organizations", tags=["modules"])

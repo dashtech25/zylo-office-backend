@@ -300,3 +300,54 @@ class ModuleInstallation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     lastErrorCode: Mapped[str | None] = mapped_column(
         String(100), nullable=True, comment="Code d'erreur de la dernière étape en échec."
     )
+
+
+ETATS_RECONCILIATION: tuple[str, ...] = ("open", "resolved", "escalated")
+
+
+class ModuleReconciliation(UUIDPrimaryKeyMixin, Base):
+    """Cas de réconciliation d'un état incertain (BE-052, table `module_reconciliations`).
+
+    Ouvert quand deux sources d'autorité se contredisent sur un sujet (ex. une activation de module).
+    Le cas ne modifie jamais l'état du sujet : il le signale seulement (CA-1). Tant qu'il est `open`,
+    l'accessibilité effective du couple est refusée par BE-053 (CA-5). La résolution exige une
+    référence de preuve (`evidenceReference`) et un acteur plateforme.
+
+    `idempotencyKey` (colonne ajoutée à la définition) rend l'ouverture idempotente : un événement
+    rejoué ne crée pas de second cas (CA-2). `resolution` garde la décision exacte
+    (`confirm_granted`, `confirm_removed`, `escalate`), que `state` ne distingue pas.
+    """
+
+    __tablename__ = "module_reconciliations"
+    __table_args__ = (
+        UniqueConstraint("idempotencyKey", name="uq_module_reconciliations_idempotency_key"),
+        Index("ix_module_reconciliations_subject", "subjectType", "subjectId"),
+        {"comment": "Cas de réconciliation des états incertains (BE-052). Le cas ne modifie pas le sujet."},
+    )
+
+    subjectType: Mapped[str] = mapped_column(String(50), nullable=False, comment="Type du sujet (ex. tenant_module).")
+    subjectId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, comment="Identifiant du sujet.")
+    organizationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True, comment="Organisation concernée."
+    )
+    state: Mapped[str] = mapped_column(
+        Enum(*ETATS_RECONCILIATION, name="module_reconciliation_state", native_enum=True),
+        nullable=False,
+        default="open",
+        server_default="open",
+        comment="État du cas : open, resolved ou escalated.",
+    )
+    sourceA: Mapped[str] = mapped_column(String(100), nullable=False, comment="Valeur lue dans la première source.")
+    sourceB: Mapped[str] = mapped_column(String(100), nullable=False, comment="Valeur lue dans la seconde source.")
+    idempotencyKey: Mapped[str] = mapped_column(
+        String(128), nullable=False, comment="Clé de l'événement qui a ouvert le cas (unique)."
+    )
+    openedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    resolution: Mapped[str | None] = mapped_column(String(30), nullable=True, comment="Décision de résolution.")
+    resolvedBy: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id"), nullable=True, comment="Compte qui a résolu le cas."
+    )
+    resolvedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    evidenceReference: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, comment="Référence de la preuve fournie à la résolution."
+    )

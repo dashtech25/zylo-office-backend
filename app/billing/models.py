@@ -740,3 +740,31 @@ class RenewalRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     invoiceId: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("invoice.id"), nullable=True, comment="Facture émise par ce passage ; NULL si refusé.",
     )
+
+
+class CloseOperation(UUIDPrimaryKeyMixin, Base):
+    """Clôture d'un abonnement (BE-097) : orchestration des prérequis avant `subscription_closed`.
+
+    Cycle : `requested -> close_pending_finance | close_pending_entitlement | close_pending_data
+    -> completed`. Une clôture bloquée reste ouverte et peut être reprise (même ligne) ; `completed`
+    est terminal et un rejeu renvoie la ligne existante. `prerequisitesJson` garde le résultat
+    vérifié de chaque prérequis (finance, droits, données) à la dernière évaluation.
+    """
+
+    __tablename__ = "close_operation"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('requested', 'close_pending_finance', 'close_pending_entitlement', "
+            "'close_pending_data', 'completed', 'blocked', 'escalated')",
+            name="ck_close_operation_status",
+        ),
+        {"comment": "Clôture d'un abonnement, prérequis vérifiés un à un (BE-097)."},
+    )
+
+    subscriptionId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("subscription.id"), nullable=False, index=True,
+        comment="Abonnement clôturé.",
+    )
+    status: Mapped[str] = mapped_column(String(40), nullable=False, comment="Statut de la clôture (BE-097).")
+    prerequisitesJson: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, comment="Résultat vérifié de chaque prérequis (BE-097).")
+    requestedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="Heure de la demande de clôture.")

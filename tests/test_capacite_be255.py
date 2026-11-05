@@ -23,10 +23,20 @@ import uuid
 
 import pytest
 
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, engine
 
 MODULE_CAPACITE = pathlib.Path(__file__).resolve().parents[1] / "app" / "operator" / "capacite.py"
 MODULE_CAPACITE_MODELS = pathlib.Path(__file__).resolve().parents[1] / "app" / "operator" / "capacite_models.py"
+
+
+@pytest.fixture(autouse=True)
+async def pool_de_boucle_courante():
+    """Repart d'un pool neuf lié à la boucle d'événements du test (même précédent que BE-241).
+
+    Sans cela, une connexion ouverte par un test précédent peut être fermée sur une boucle morte.
+    """
+    await engine.dispose()
+    yield
 
 
 @pytest.fixture

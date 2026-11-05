@@ -43,6 +43,7 @@ from app.notifications.router import router as notifications_router
 from app.rbac.router import router as rbac_router
 from app.rbac.roles_lecture import router as roles_lecture_router
 from app.audit.router import organization_audit_router
+from app.support.router import router as support_router
 from app.audit.router import router as audit_router
 from app.shared.currency_router import currency_router, exchange_rate_router
 from app.shared.export_router import export_router
@@ -78,6 +79,8 @@ api_router.include_router(health.router, tags=["health"])
 api_router.include_router(parametres_router, prefix="/parametres", tags=["parametres"])
 api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 api_router.include_router(organizations_router, prefix="/organizations", tags=["organizations"])
+# BE-262 : accès support en lecture seule par défaut, sous /organizations/{organization_id}/acces-support.
+api_router.include_router(support_router, prefix="/organizations", tags=["support"])
 api_router.include_router(billing_current_organization_router, prefix="/organizations", tags=["billing"])
 api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(account_router, prefix="/account", tags=["account"])

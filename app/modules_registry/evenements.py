@@ -29,6 +29,7 @@ from app.audit.service import _CLE_SENSIBLE
 from app.core.errors import AppError
 from app.core.logging import request_id_ctx
 from app.modules_registry.models import ModuleStateTransition
+from app.modules_registry.notifications import notifier_destinataires_evenement
 
 EVENEMENT_MODULE_SUSPENDU = "ModuleSuspended"
 EVENEMENT_MODULE_REACTIVE = "ModuleReactivated"
@@ -155,7 +156,7 @@ async def publier_evenement_transition(
     La charge utile ne contient que des états et des versions, jamais d'acteur en clair ni de motif
     libre (le motif peut contenir du texte saisi par l'utilisateur).
     """
-    return await publier_evenement(
+    evenement = await publier_evenement(
         db,
         nom=nom_evenement_transition(ligne.fromState, ligne.toState),
         organisation_id=ligne.organizationId,
@@ -171,3 +172,6 @@ async def publier_evenement_transition(
         module_id=module_id,
         correlation_id=request_id_ctx.get() or str(ligne.operationId),
     )
+    # BE-057 : même transaction que la transition ; l'idempotence est portée par create_inbox_item.
+    await notifier_destinataires_evenement(db, evenement)
+    return evenement

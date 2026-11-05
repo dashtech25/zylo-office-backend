@@ -242,6 +242,17 @@ class InstallModuleRequest(BaseModel):
     stateVersion: int = Field(ge=0)
 
 
+class UpgradeModuleRequest(BaseModel):
+    """Corps de `POST /organizations/{orgId}/modules/{moduleId}/upgrades` (BE-051).
+
+    `stateVersion` : version d'état lue sur l'installation. `confirmationForwardOnly` : confirmation
+    explicite exigée quand le plan BE-044 n'a pas de retour arrière prouvé (faux par défaut)."""
+
+    targetModuleVersionId: uuid.UUID
+    stateVersion: int = Field(ge=0)
+    confirmationForwardOnly: bool = False
+
+
 class ModuleInstallationResponse(BaseModel):
     """Installation technique renvoyée par les routes BE-047 (état courant et identifiant d'opération)."""
 
@@ -253,6 +264,8 @@ class ModuleInstallationResponse(BaseModel):
     stateVersion: int
     operationId: uuid.UUID
     lastErrorCode: str | None
+    upgradeTargetVersionId: uuid.UUID | None = None
+    upgradeState: str | None = None
 
     model_config = {"from_attributes": True}
 

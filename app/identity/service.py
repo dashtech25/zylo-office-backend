@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.permissions import AUDIT_EXPORT, AUDIT_LOG_VIEW, ORGANIZATION_AUDIT_READ
+from app.exports.permissions import DONNEES_EXPORT_CREER
 from app.audit.service import record_audit_event
 from app.billing.permissions import (
     BILLING_CONSENT_RECORD,
@@ -59,6 +60,7 @@ from app.shared.storage import organisation_de_la_reference
 # MODULE_MANAGE/SUBSCRIPTION_MANAGE, plutôt que d'inventer un nouveau
 # mécanisme de bootstrap (issue #49).
 OWNER_DEFAULT_PERMISSIONS = [
+    (DONNEES_EXPORT_CREER, "exports", "Demander un export de données d'un sujet ou du tenant (BE-243)."),
     (ORGANIZATION_MANAGE, "identity", "Gérer l'organisation (membres, rôles, paramètres)."),
     (USER_MANAGE, "identity", "Créer des utilisateurs, réémettre une invitation, suspendre et réactiver un membre."),
     (MEMBERS_INVITE, "identity", "Inviter une personne à rejoindre l'organisation et consulter les invitations en attente."),

@@ -63,6 +63,7 @@ from app.operator.payment_diagnostic_router import router as payment_diagnostic_
 from app.operator.ops_metrics import router as ops_metrics_router
 from app.operator.subscription_diagnostic_router import router as subscription_diagnostic_router
 from app.rbac.role_assignments_router import router as role_assignments_router
+from app.operations.router import router as operations_router
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
@@ -78,6 +79,8 @@ api_router.include_router(reconciliation_admin_router, prefix="/admin", tags=["a
 # BE-043 : catalogue public (publié + visible), sans authentification.
 api_router.include_router(catalog_router, prefix="/catalog", tags=["catalog"])
 api_router.include_router(module_audit_router, prefix="/organizations", tags=["modules"])
+# BE-236 : opérations asynchrones consultables, `GET /operations/{operation_id}`.
+api_router.include_router(operations_router, prefix="/operations", tags=["operations"])
 api_router.include_router(rbac_router, prefix="/rbac", tags=["rbac"])
 # BE-162 : routes des connecteurs d'intégration (registre BE-160).
 api_router.include_router(connecteurs_router, tags=["integrations"])

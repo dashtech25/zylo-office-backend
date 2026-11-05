@@ -154,6 +154,56 @@ async def rechercher_evenements(
     )
 
 
+ACTION_LECTURE_JOURNAL = "audit.journal.consulte"
+
+
+@router.get(
+    "/records",
+    response_model=Page[AuditEvenementResponse],
+    summary="Lire le journal d'audit de l'organisation courante (BE-184)",
+)
+async def lister_records(
+    dateDebut: datetime = Query(..., description="Début de période (obligatoire, borne incluse)."),
+    dateFin: datetime = Query(..., description="Fin de période (obligatoire, borne incluse)."),
+    sujetType: str = Query(..., min_length=1, description="Type de sujet, valeur de `entityType` (obligatoire)."),
+    sujetId: uuid.UUID | None = Query(None, description="Identifiant du sujet, valeur de `entityId` (facultatif)."),
+    acteurId: uuid.UUID | None = Query(None, description="Acteur, valeur de `actorUserId` (facultatif)."),
+    action: str | None = Query(None, description="Action exacte (facultatif)."),
+    pagination: PaginationParams = Depends(),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    """Lecture du journal `audit_event` de l'organisation courante (BE-184).
+
+    Mêmes filtres et mêmes règles de droits que `GET /audit/evenements` (BE-172) :
+    `audit.log.view` (CA-2, 403), isolation tenant (CA-3, 404 pour un tenant qui n'est
+    pas celui de l'en-tête validé). Chaque lecture réussie écrit elle-même une entrée
+    `audit.journal.consulte` dans la même organisation, puis commit (CA-5) : la lecture
+    échoue si son entrée ne peut être écrite (fail-closed, sans lecture sans trace).
+    L'entrée de lecture n'apparaît pas dans la page renvoyée, qui est calculée avant."""
+    rows, total = await consultation.rechercher_evenements(
+        db, organization_id, current_user.id, dateDebut, dateFin, sujetType, sujetId, acteurId, action,
+        pagination.limit, pagination.offset,
+    )
+    page = Page(
+        data=[AuditEvenementResponse.model_validate(row) for row in rows],
+        meta=PageMeta(total=total, limit=pagination.limit, offset=pagination.offset),
+    )
+    await service.record_audit_event(
+        db,
+        organization_id,
+        current_user.id,
+        ACTION_LECTURE_JOURNAL,
+        "audit_event",
+        None,
+        "Consultation du journal d'audit",
+        changes={"sujetType": sujetType, "dateDebut": dateDebut.isoformat(), "dateFin": dateFin.isoformat()},
+    )
+    await db.commit()
+    return page
+
+
 @router.get(
     "/evenements/{event_id}",
     response_model=AuditEvenementResponse,

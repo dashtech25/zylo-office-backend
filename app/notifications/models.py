@@ -133,3 +133,34 @@ class RegleNotification(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         String(80), ForeignKey("categorie_notification.code", ondelete="RESTRICT"), nullable=False
     )
     audience: Mapped[str] = mapped_column(String(120), nullable=False)
+
+
+class PreferenceNotification(UUIDPrimaryKeyMixin, Base):
+    """Consentement d'un utilisateur à une catégorie de notification (BE-168).
+
+    - `utilisateurId` : utilisateur global concerné ; suppression en cascade avec le compte ;
+    - `categorieCode` : catégorie visée, clé étrangère vers `categorie_notification.code` ;
+    - `consentement` : vrai = envoi autorisé, faux = désinscription (CA-2) ;
+    - `horodatageConsentement` : moment de la dernière décision de l'utilisateur (CA-1) ;
+    - `sourceConsentement` : origine de la décision, écrite par le service.
+
+    Une seule ligne par couple (utilisateur, catégorie) : la modification met à jour la
+    ligne existante. Aucune plage de silence ni heure calme ne figure ici (CA-4). La
+    colonne `canal` n'existe pas : sa sémantique est QE-PAR-04, et aucun canal n'est présumé.
+    """
+
+    __tablename__ = "preference_notification"
+    __table_args__ = (
+        UniqueConstraint("utilisateurId", "categorieCode", name="uq_preference_notification_utilisateur_categorie"),
+        {"comment": "Consentement par utilisateur et catégorie de notification (BE-168)."},
+    )
+
+    utilisateurId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    categorieCode: Mapped[str] = mapped_column(
+        String(80), ForeignKey("categorie_notification.code", ondelete="RESTRICT"), nullable=False
+    )
+    consentement: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    horodatageConsentement: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sourceConsentement: Mapped[str] = mapped_column(String(40), nullable=False)

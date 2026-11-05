@@ -38,3 +38,22 @@ class NotificationInboxItemResponse(BaseModel):
     readAt: datetime | None
 
     model_config = {"from_attributes": True}
+
+
+class PreferenceNotificationResponse(BaseModel):
+    """Préférence d'un utilisateur pour une catégorie (BE-168). Aucun champ de plage de
+    silence ni d'heure calme : elles ne sont pas implémentées (CA-4)."""
+
+    categorieCode: str
+    consentement: bool
+    horodatageConsentement: datetime
+    sourceConsentement: str
+
+    model_config = {"from_attributes": True}
+
+
+class ModifierPreferenceRequest(BaseModel):
+    """Corps de `PUT /notifications/preferences/{categorie_code}`. `consentement: false`
+    vaut désinscription de la catégorie."""
+
+    consentement: bool

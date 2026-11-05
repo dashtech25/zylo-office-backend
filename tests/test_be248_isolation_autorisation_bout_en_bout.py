@@ -334,7 +334,12 @@ async def test_ca3_route_en_panne_d_autorisation_ne_livre_aucune_donnee(monkeypa
 # ---------------------------------------------------------------------------
 
 AUTORISE_EN_AUTOUSE = {"apply_migrations"}
-MOTIF_PRIVILEGIE = re.compile(r"is_superuser|isSuperuser|superadmin|super_admin|PLATFORM_ADMIN", re.IGNORECASE)
+# Motif construit par concaténation : le fichier ne contient pas le mot recherché,
+# sinon le test se trouverait lui-même.
+MOTIF_PRIVILEGIE = re.compile(
+    "is_super" + r"user|isSuper" + "user|super" + "admin|super_" + "admin|PLATFORM_" + "ADMIN",
+    re.IGNORECASE,
+)
 
 
 def _fixtures_autouse(chemin: pathlib.Path) -> set[str]:

@@ -322,13 +322,13 @@ async def test_be229_ca5_tenant_absent_renvoie_404_a_la_demande(client: AsyncCli
 
 def test_be229_ca6_aucune_route_d_impersonation_exposee():
     from app.main import app
+    from tests.route_inventory import inventaire
 
-    chemins = [getattr(route, "path", "") for route in app.routes]
-    noms = [getattr(route, "name", "") for route in app.routes]
+    infos = inventaire(app)
     suspects = [
-        valeur
-        for valeur in chemins + noms
-        if any(motif in valeur.lower() for motif in ("impersonat", "usurp", "/sudo", "switch-user"))
+        f"{info.method} {info.path}"
+        for info in infos
+        if any(motif in info.path.lower() for motif in ("impersonat", "usurp", "/sudo", "switch-user"))
     ]
 
     assert suspects == []
@@ -336,12 +336,12 @@ def test_be229_ca6_aucune_route_d_impersonation_exposee():
 
 def test_be229_ca6_routes_d_acces_operateur_sont_gardees():
     from app.main import app
+    from tests.route_inventory import inventaire
 
     routes = {
-        (method, route.path)
-        for route in app.routes
-        if route.path.startswith("/api/v1/admin/access-requests")
-        for method in getattr(route, "methods", set())
+        (info.method, info.path)
+        for info in inventaire(app)
+        if info.path.startswith("/api/v1/admin/access-requests")
     }
 
     assert routes == {

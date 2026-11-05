@@ -34,12 +34,24 @@ from app.billing.events.inbox import (
     recevoir_evenement_entrant,
 )
 from app.billing.events.models import InboxEvent
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, engine
 from app.core.errors import AppError
 from app.evenements.models import OutboxEvenement
 from app.identity.models import Organization
 
 PAN_TEST = "4111111111111111"  # numéro de test standard, valide au sens de Luhn
+
+
+@pytest.fixture(autouse=True)
+async def _pool_neuf_par_test():
+    """Vide le pool du moteur global avant chaque test.
+
+    `engine` est un singleton : ses connexions poolées restent liées à la boucle
+    d'événements qui les a ouvertes. Les tests sans fixture `client` (qui fait déjà
+    ce dispose) lèveraient « attached to a different loop ». Même garde que `client`.
+    """
+    await engine.dispose()
+    yield
 
 
 def _enveloppe(tenant: uuid.UUID, **surcharges) -> dict:

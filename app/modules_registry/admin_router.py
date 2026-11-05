@@ -49,6 +49,10 @@ async def creer_module(
     db: AsyncSession = Depends(get_db),
     utilisateur: User = Depends(get_current_user),
 ) -> ModuleAdminResponse:
+    """Crée la fiche d'un module en brouillon (`draft`) depuis la console plateforme.
+
+    Droit : permission plateforme d'écriture du module (`exiger_droit_plateforme`). Réponses : 201 à la création, 401 sans session, 403 sans droit plateforme, 422 donnée invalide.
+    """
     exiger_droit_plateforme(utilisateur.id, PLATFORM_MODULE_WRITE)
     module = await service.creer_module(db, code=corps.code, name=corps.name, description=corps.description)
     await db.commit()
@@ -61,6 +65,8 @@ async def lire_module(
     db: AsyncSession = Depends(get_db),
     utilisateur: User = Depends(get_current_user),
 ) -> ModuleAdminResponse:
+    """Lit la fiche d'un module pour la console plateforme. Réponses : 200, 401 sans session, 403 sans droit plateforme, 404 module inconnu.
+    """
     if not (
         a_droit_plateforme(utilisateur.id, PLATFORM_MODULE_WRITE)
         or a_droit_plateforme(utilisateur.id, PLATFORM_MODULE_PUBLISH)
@@ -81,6 +87,8 @@ async def creer_version(
     db: AsyncSession = Depends(get_db),
     utilisateur: User = Depends(get_current_user),
 ) -> ModuleVersionAdminResponse:
+    """Ajoute une version en brouillon à un module existant de la console plateforme. Réponses : 201, 401, 403, 404 module inconnu, 422 donnée invalide.
+    """
     exiger_droit_plateforme(utilisateur.id, PLATFORM_MODULE_WRITE)
     ligne = await service.creer_version(
         db,
@@ -108,6 +116,8 @@ async def publier_version(
     db: AsyncSession = Depends(get_db),
     utilisateur: User = Depends(get_current_user),
 ) -> ModuleVersionAdminResponse:
+    """Publie une version de module. La transition passe par la machine d'états des versions : une transition non permise répond 409.
+    """
     exiger_droit_plateforme(utilisateur.id, PLATFORM_MODULE_PUBLISH)
     version = await service.lire_version(db, module_id, version_id)
     version = await service.publier_version(

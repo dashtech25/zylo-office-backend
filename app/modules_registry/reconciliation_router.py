@@ -59,6 +59,8 @@ async def lister_reconciliations(
     db: AsyncSession = Depends(get_db),
     utilisateur: User = Depends(get_current_user),
 ) -> list[ReconciliationResponse]:
+    """Liste les cas de réconciliation filtrés par état (paramètre `state`, défaut `open`). Un état hors liste répond 422.
+    """
     exiger_droit_plateforme(utilisateur.id, PLATFORM_RECONCILIATION_RESOLVE)
     cas = await service.lister_cas(db, state)
     return [ReconciliationResponse.model_validate(item) for item in cas]
@@ -75,6 +77,8 @@ async def resoudre_reconciliation(
     db: AsyncSession = Depends(get_db),
     utilisateur: User = Depends(get_current_user),
 ) -> ReconciliationResponse:
+    """Résout un cas de réconciliation avec une preuve. La preuve est obligatoire ; un cas déjà résolu répond 409.
+    """
     exiger_droit_plateforme(utilisateur.id, PLATFORM_RECONCILIATION_RESOLVE)
     cas = await service.resoudre_cas(
         db,

@@ -25,6 +25,8 @@ _hooks_activation: dict[str, HookActivation] = {}
 
 
 def enregistre_hook_activation(module_code: str, hook: HookActivation) -> None:
+    """Enregistre le hook appelé à l'activation d'un module, par code de module. Un nouvel enregistrement remplace le précédent pour ce code.
+    """
     _hooks_activation[module_code] = hook
 
 
@@ -97,6 +99,8 @@ async def backfill_active_module_permissions_for_owners(db: AsyncSession) -> int
 
 
 async def get_or_create_module(db: AsyncSession, code: str, name: str, description: str, version: str = "0.1.0") -> Module:
+    """Retourne le module de ce code, ou le crée avec le nom, la description et la version donnés s'il n'existe pas encore.
+    """
     result = await db.execute(select(Module).where(Module.code == code))
     module = result.scalar_one_or_none()
     if module:

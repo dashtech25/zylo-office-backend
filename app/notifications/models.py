@@ -244,3 +244,34 @@ class Livraison(UUIDPrimaryKeyMixin, Base):
     codeErreur: Mapped[str | None] = mapped_column(String(80), nullable=True)
     prochaineTentativeAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     creeAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class NotificationDelivery(UUIDPrimaryKeyMixin, Base):
+    """Tentative d'envoi d'une notification sur un canal, avec son résultat (BE-238).
+
+    Une ligne par tentative : `(notificationId, canal, tentative)` est unique, donc
+    une nouvelle tentative sur le même canal ajoute une ligne au lieu d'écraser la
+    précédente. Le résultat est `envoyee` ou `echec` ; un échec n'est jamais présenté
+    comme un envoi (CA-3). La ligne est écrite par `app.notifications.livraison`.
+
+    - `canal` : canal utilisé (ex. `web_push`), texte libre tant que QE-PAR-04 n'est
+      pas tranché ;
+    - `horodatage` : moment où le résultat a été constaté.
+    """
+
+    __tablename__ = "notification_delivery"
+    __table_args__ = (
+        UniqueConstraint("notificationId", "canal", "tentative", name="uq_notification_delivery_tentative"),
+        CheckConstraint("resultat IN ('envoyee', 'echec')", name="ck_notification_delivery_resultat"),
+        CheckConstraint("tentative >= 1", name="ck_notification_delivery_tentative_positive"),
+        {"comment": "Tentatives d'envoi par canal et résultat (BE-238)."},
+    )
+
+    notificationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("notification.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    canal: Mapped[str] = mapped_column(String(40), nullable=False)
+    resultat: Mapped[str] = mapped_column(String(20), nullable=False)
+    tentative: Mapped[int] = mapped_column(Integer, nullable=False)
+    horodatage: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+

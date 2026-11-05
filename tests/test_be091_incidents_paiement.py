@@ -106,7 +106,8 @@ async def _evenements_echec(tenant_id: uuid.UUID, tentative_id: uuid.UUID) -> li
                 OutboxEvenement.eventType == "Billing.PaymentAttemptFailed",
             )
         )).all()
-    return [ligne for ligne in lignes if ligne.payload.get("paymentAttemptId") == str(tentative_id)]
+    # La colonne `payload` de l'outbox porte l'enveloppe complète ; le contenu métier est sous `payload.payload`.
+    return [ligne for ligne in lignes if ligne.payload["payload"].get("paymentAttemptId") == str(tentative_id)]
 
 
 async def _ajouter_membre_sans_droit(organization_id: str, email: str) -> uuid.UUID:
@@ -134,7 +135,7 @@ async def test_ca1_echec_failed_passe_incident_a_past_due_sans_toucher_au_cycle_
     assert abonnement.financialStatus == "none"
     evenements = await _evenements_echec(tenant_id, tentative_id)
     assert len(evenements) == 1
-    assert evenements[0].payload["subscriptionId"] == str(abonnement_id)
+    assert evenements[0].payload["payload"]["subscriptionId"] == str(abonnement_id)
 
 
 async def test_ca1_rejeu_du_meme_echec_ne_cree_ni_second_evenement_ni_erreur(registered_user, organization):
@@ -257,18 +258,30 @@ async def test_ca4_incident_d_un_tenant_n_affecte_pas_un_autre_tenant(registered
     assert await _evenements_echec(tenant_a, tentative_a) == []
 
 
-async def test_ca4_suspension_d_un_autre_tenant_repond_comme_inexistant(registered_user, organization):
+async def test_ca4_suspension_d_un_autre_tenant_repond_comme_inexistant(client, registered_user, organization):
+    """Propriétaire réel du tenant B (permission présente) : la suspension de A reste « introuvable »."""
     tenant_a = uuid.UUID(organization["id"])
-    tenant_b = await _creer_organisation_isolee()
     abonnement_a = await _creer_abonnement(tenant_a)
     tentative_a = await _creer_tentative_echouee(abonnement_a)
     async with AsyncSessionLocal() as db:
         await appliquer_echec_paiement(db, tenant_id=tenant_a, subscription_id=abonnement_a, tentative_id=tentative_a)
-    proprietaire_id = await _id_utilisateur(registered_user["email"])
+
+    # Second tenant, créé par un autre utilisateur qui en est le propriétaire.
+    email_b = f"be091-tenant-b-{uuid.uuid4().hex[:8]}@example.com"
+    await client.post("/api/v1/auth/register", json={"email": email_b, "password": "TestPassword123!", "fullName": "Tenant B"})
+    login = await client.post("/api/v1/auth/login", json={"email": email_b, "password": "TestPassword123!"})
+    res = await client.post(
+        "/api/v1/organizations",
+        json={"name": "Tenant B", "slug": f"be091-b-{uuid.uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {login.json()['accessToken']}"},
+    )
+    tenant_b = uuid.UUID(res.json()["id"])
+    proprietaire_b_id = await _id_utilisateur(email_b)
 
     async with AsyncSessionLocal() as db:
         with pytest.raises(AppError) as erreur:
-            await suspendre_manuellement(db, actor_user_id=proprietaire_id, tenant_id=tenant_b, subscription_id=abonnement_a)
+            await suspendre_manuellement(db, actor_user_id=proprietaire_b_id, tenant_id=tenant_b, subscription_id=abonnement_a)
 
     assert erreur.value.code == "subscription_not_found"
+    assert erreur.value.status_code == 404
     assert (await _lire_abonnement(abonnement_a)).incidentStatus == "past_due"

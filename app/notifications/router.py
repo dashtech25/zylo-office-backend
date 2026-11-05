@@ -11,10 +11,15 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.core.config import settings
 from app.identity.models import User
+from typing import Literal
+
+from app.notifications import consultation
 from app.notifications import preferences as preferences_service
 from app.notifications import service
 from app.notifications.schemas import (
+    LivraisonResponse,
     ModifierPreferenceRequest,
+    NotificationResponse,
     PreferenceNotificationResponse,
     CreatePushSubscriptionRequest,
     NotificationInboxItemResponse,
@@ -70,6 +75,60 @@ async def delete_push_subscription(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await service.delete_push_subscription(db, organization_id, current_user.id, subscription_id)
+
+
+@router.get(
+    "",
+    response_model=Page[NotificationResponse],
+    summary="Notifications de l'utilisateur courant",
+    description=(
+        "Notifications dont le compte courant est le destinataire, dans l'organisation active, "
+        "plus récentes d'abord. Filtre optionnel `statut` (`en_attente`, `supprimee`, `envoyee`, "
+        "`echec`). Détail : `app/notifications/routes.md`."
+    ),
+)
+async def list_notifications(
+    statut: Literal["en_attente", "supprimee", "envoyee", "echec"] | None = Query(None),
+    pagination: PaginationParams = Depends(),
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Page:
+    """Liste paginée (BE-171, CA-1). Le tenant est filtré dans `consultation.py` (CA-5)."""
+    return await consultation.lister_notifications(
+        db,
+        organization_id=organization_id,
+        user_id=current_user.id,
+        statut=statut,
+        limit=pagination.limit,
+        offset=pagination.offset,
+    )
+
+
+@router.get(
+    "/{notification_id}/livraisons",
+    response_model=list[LivraisonResponse],
+    summary="Résultats de livraison d'une notification",
+    description=(
+        "Tentatives de remise d'une notification par canal, sans adresse de destinataire. "
+        "Exige `notifications.read` pour lire les livraisons ; sans cette permission, seule la "
+        "notification du compte courant est visible (403), les autres renvoient 404. "
+        "Détail : `app/notifications/routes.md`."
+    ),
+)
+async def list_livraisons(
+    notification_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[LivraisonResponse]:
+    """Résultats de livraison (BE-171, CA-2, CA-3, CA-4). Décision dans `consultation.py`."""
+    return await consultation.lister_livraisons(
+        db,
+        organization_id=organization_id,
+        acteur_id=current_user.id,
+        notification_id=notification_id,
+    )
 
 
 @router.get("/inbox", response_model=Page[NotificationInboxItemResponse], summary="Notifications de l'utilisateur courant")

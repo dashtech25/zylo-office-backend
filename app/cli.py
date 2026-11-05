@@ -46,6 +46,7 @@ from app.rbac.seed import seed_known_permissions as seed_rbac_permissions
 from app.identity.seed import seed_known_permissions as seed_identity_permissions
 from app.audit.seed import seed_known_permissions as seed_audit_permissions
 from app.support.seed import seed_known_permissions as seed_support_permissions
+from app.notifications.seed import seed_known_permissions as seed_notifications_permissions
 from app.operations.seed import seed_known_permissions as seed_operations_permissions
 from app.integrations.seed import seed_known_permissions as seed_integrations_permissions
 from app.modules.zylo_liquid.seed import seed_known_permissions as seed_zylo_liquid_permissions
@@ -62,6 +63,7 @@ async def execute_seeds() -> None:
     await seed_identity_permissions()
     await seed_audit_permissions()
     await seed_support_permissions()
+    await seed_notifications_permissions()
     await seed_operations_permissions()
     await seed_integrations_permissions()
     await seed_zylo_liquid_permissions()

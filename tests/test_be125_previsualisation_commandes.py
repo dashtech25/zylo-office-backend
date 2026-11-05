@@ -191,7 +191,7 @@ async def test_ca3_confirmation_apres_changement_de_version_renvoie_409(client: 
     modification = await client.patch(
         f"/api/v1/organizations/{tenant}",
         json={"name": "Tenant BE-125 renommé"},
-        headers=_entetes(gestionnaire),
+        headers={**_entetes(gestionnaire), "X-Organization-Id": tenant},
     )
     assert modification.status_code == 200, modification.text
     reponse = await _confirmer(client, gestionnaire, command_id, preview["previewId"])

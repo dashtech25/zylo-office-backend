@@ -31,6 +31,7 @@ from app.audit.models import AuditEvent
 from app.billing.models import PaymentAttempt, Refund
 from app.billing.payment_provider import PaymentProvider
 from app.core.database import AsyncSessionLocal
+from app.identity.models import User
 from app.main import app
 from tests.test_be027_factures_lecture import ajouter_membre_sans_role, creer_organisation, utilisateur_connecte
 from tests.test_be086_facture_brouillon_finalisation import _creer_facture_brouillon, _entetes
@@ -109,6 +110,12 @@ async def _approbateur_membre(client: AsyncClient, organization_id: str) -> str:
     approbateur = await utilisateur_connecte(client)
     await ajouter_membre_sans_role(organization_id, approbateur["id"])
     return approbateur["id"]
+
+
+async def _id_utilisateur(email: str) -> str:
+    """Identifiant du compte de cet e-mail (le fixture registered_user ne le renvoie pas)."""
+    async with AsyncSessionLocal() as db:
+        return str(await db.scalar(select(User.id).where(User.email == email)))
 
 
 async def _nombre_de_remboursements(paiement_id: str) -> int:
@@ -204,9 +211,10 @@ async def test_ca3_approbateur_identique_au_demandeur_est_refuse(client: AsyncCl
     """CA-3 : l'approbateur ne peut pas être le demandeur (APPROVAL_REQUIRED, QE-FAC-02) ; aucun appel fournisseur."""
     token, org = registered_user["accessToken"], organization["id"]
     paiement = await _creer_paiement(client, token, org)
+    demandeur = await _id_utilisateur(registered_user["email"])
 
     reponse = await client.post(
-        f"/api/v1/billing/payments/{paiement}/refunds", json=_corps(approbateur=registered_user["id"]),
+        f"/api/v1/billing/payments/{paiement}/refunds", json=_corps(approbateur=demandeur),
         headers={**_entetes(token, org), "Idempotency-Key": _cle_requete()},
     )
 

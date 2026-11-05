@@ -33,6 +33,7 @@ from app.modules_registry.admin_router import router as modules_admin_router
 from app.modules_registry.reconciliation_router import router as reconciliation_admin_router
 from app.modules_registry.catalog_router import router as catalog_router
 from app.modules_registry.router import router as modules_router
+from app.integrations.router import router as lettres_mortes_router
 from app.rbac.grants_membres import router as grants_membres_router
 from app.rbac.acces_effectif_router import router as acces_effectif_router
 from app.rbac.module_router import router as rbac_module_router
@@ -154,3 +155,4 @@ api_router.include_router(country_router, prefix="/countries", tags=["geo"])
 api_router.include_router(export_router, prefix="/export", tags=["export"])
 api_router.include_router(import_router, prefix="/import", tags=["import"])
 api_router.include_router(storage_router, prefix="/storage", tags=["storage"])
+api_router.include_router(lettres_mortes_router, prefix="/integrations", tags=["integrations"])

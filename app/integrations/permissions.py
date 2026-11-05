@@ -5,3 +5,5 @@ déclaration, `require_permission` refuse, y compris au propriétaire.
 """
 
 INTEGRATIONS_READ = "integrations.read"
+
+INTEGRATIONS_MANAGE = "integrations.manage"

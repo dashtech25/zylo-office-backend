@@ -53,6 +53,7 @@ from app.operator.router import router as operator_router
 from app.operator.health import admin_router as operator_admin_router
 from app.operator.health import internal_router as internal_health_router
 from app.evenements.dlq_router import router as dead_letters_router
+from app.release.flags_router import router as flags_router
 from app.billing.entitlement_events_router import router as billing_entitlement_events_router
 from app.operator.admin_audit_router import router as admin_audit_router
 from app.operator.incidents_router import router as incidents_router
@@ -155,6 +156,8 @@ api_router.include_router(internal_health_router, tags=["health"])
 api_router.include_router(billing_entitlement_events_router, prefix="/internal", tags=["billing"])
 # BE-235 : lettres mortes de consommation (GET /internal/dead-letters, POST .../{id}/replay), portée admin.
 api_router.include_router(dead_letters_router, prefix="/internal", tags=["evenements-dlq"])
+# BE-251 : feature flags serveur (GET/PUT /api/v1/internal/flags), réservés à l'exploitation.
+api_router.include_router(flags_router, prefix="/internal", tags=["release"])
 api_router.include_router(zylo_liquid_router, prefix="/zylo-liquid", tags=["zylo-liquid"])
 api_router.include_router(files_router, prefix="/zylo-liquid", tags=["files"])
 api_router.include_router(location_router, prefix="/zylo-liquid", tags=["location"])

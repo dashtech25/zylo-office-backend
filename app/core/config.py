@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     APP_NAME: str = "Zylo Office Backend"
+    # Feature flags et canari (BE-251). NON DÉFINI : aucune valeur par défaut. À None,
+    # aucun canari ne démarre (422 canari_non_configure) et le canari doit s'arrêter.
+    FLAGS_DUREE_CANARI_HEURES: int | None = None
+    FLAGS_SEUIL_ARRET_CANARI: float | None = None
     # Durée de vie d'une prévisualisation de commande opérateur (BE-125). NON DÉFINI
     # (QE-ADM-07) : aucune valeur par défaut ; à None, la preview est refusée (503).
     ADMIN_PREVIEW_TTL_SECONDS: int | None = None

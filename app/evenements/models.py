@@ -152,3 +152,39 @@ class SchemaEvenement(UUIDPrimaryKeyMixin, Base):
     schemaJson: Mapped[dict] = mapped_column(JSON, nullable=False)
     compatibleDepuis: Mapped[int] = mapped_column(Integer, nullable=False)
     actif: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+
+
+class EventInbox(UUIDPrimaryKeyMixin, Base):
+    """Inbox d'un consommateur : un événement reçu, avec son état de traitement (BE-193).
+
+    Une ligne par couple (`subscriber`, `eventId`) : c'est cette contrainte qui rend la
+    réception idempotente (CA-1). `status` vaut :
+    - `processed` : l'effet a été appliqué, plus aucune tentative ;
+    - `retry` : en attente (hors ordre, ou échec du handler encore sous le maximum de tentatives) ;
+    - `quarantine` : tenant inconnu, schéma incompatible, ou tentatives épuisées ; ne sera plus retenté.
+
+    `tenantId` n'a pas de clé étrangère : un événement d'un tenant inconnu doit pouvoir être
+    mis en quarantaine. `eventId` n'en a pas non plus : l'inbox accepte des événements reçus
+    hors de l'outbox locale. `aggregateType`, `aggregateId` et `aggregateVersion` servent à
+    l'ordre (CA-3) ; ils sont nuls pour un événement sans agrégat.
+    """
+
+    __tablename__ = "event_inbox"
+    __table_args__ = (
+        UniqueConstraint("subscriber", "eventId", name="uq_event_inbox_subscriber_event"),
+        CheckConstraint("status IN ('processed', 'retry', 'quarantine')", name="ck_event_inbox_status"),
+        CheckConstraint("attempts >= 0", name="ck_event_inbox_attempts"),
+        {"comment": "Inbox consommateur : réception idempotente, hors ordre et quarantaine des événements (BE-193)."},
+    )
+
+    subscriber: Mapped[str] = mapped_column(String(150), nullable=False)
+    eventId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    tenantId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    eventType: Mapped[str] = mapped_column(String(150), nullable=False)
+    schemaVersion: Mapped[int] = mapped_column(Integer, nullable=False)
+    aggregateType: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    aggregateId: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    aggregateVersion: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    receivedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

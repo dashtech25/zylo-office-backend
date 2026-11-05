@@ -9,7 +9,7 @@ uniforme `user_not_found`, sans énumération).
 Règles :
 - la liste reprend `rbac.service.list_organization_members_with_roles` (un
   seul calcul des membres et de leurs rôles dans l'organisation) ;
-- le retrait supprime l'appartenance (`organizationUser`) et les attributions
+- le retrait supprime l'appartenance (`organization_user`) et les attributions
   de rôle de l'utilisateur dans CETTE organisation (`userRole`). Sans
   appartenance, `assert_active_membership` refuse toute requête suivante : la
   révocation prend effet dès la requête suivante, sans attendre l'expiration

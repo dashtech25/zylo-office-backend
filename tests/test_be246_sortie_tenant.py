@@ -167,7 +167,7 @@ async def test_ca2_la_sortie_efface_le_tenant_et_garde_les_preuves(client: Async
     """CA-2 : sans hold, les lignes du tenant hors preuves sont supprimées ; l'organisation reste."""
     scenario = await _scenario(client)
     avant = await _compter(scenario["org"])
-    assert avant["organizationUser"] >= 3
+    assert avant["organization_user"] >= 3
 
     res = await _demander_sortie(client, scenario["demandeur"], scenario["org"], scenario["approbateur"])
 
@@ -192,7 +192,7 @@ async def test_ca3_attestation_liste_efface_differe_et_conserve(client: AsyncCli
     assert res.status_code == 200, res.text
     attestation = res.json()
     assert {"efface", "differe", "conserve"} <= set(attestation)
-    assert any(ligne["table"] == "organizationUser" and ligne["lignes"] >= 1 for ligne in attestation["efface"])
+    assert any(ligne["table"] == "organization_user" and ligne["lignes"] >= 1 for ligne in attestation["efface"])
     assert any(ligne["categorie"] == "index" and ligne["motif"] for ligne in attestation["differe"])
     assert any(ligne["cible"] == "tenant_exit_requests" and ligne["motif"] for ligne in attestation["conserve"])
 

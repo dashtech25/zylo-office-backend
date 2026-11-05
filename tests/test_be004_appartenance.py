@@ -1,4 +1,4 @@
-"""BE-004 : appartenance utilisateur-organisation (table `organizationUser`).
+"""BE-004 : appartenance utilisateur-organisation (table `organization_user`).
 
 Tests écrits d'après la définition `### BE-004` de
 implementation-backend/tasks-socle-tenant-identite.md, avant le code.

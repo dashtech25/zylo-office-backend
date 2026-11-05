@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,7 +36,7 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
 class User(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     """Utilisateur global (BE-003) : une seule ligne par personne, quel que soit
     le nombre d'organisations auxquelles elle appartient (rattachement dans
-    `organizationUser`, BE-004).
+    `organization_user`, BE-004).
 
     `email` est unique, et un index unique sur `lower(email)` (uq_user_email_lower)
     refuse deux comptes qui ne diffèrent que par la casse. `hashedPassword` ne
@@ -90,11 +90,15 @@ class OrganizationUser(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     Cette table est la seule preuve d'appartenance : `assert_active_membership`
     (app/rbac/service.py) la consulte à chaque requête, donc supprimer la ligne
-    retire l'accès à la requête suivante. Le statut d'appartenance n'est pas
-    modélisé (question QE-SOC-04 ouverte) ; l'absence de ligne vaut refus.
+    retire l'accès à la requête suivante. Table renommée `organization_user`
+    par BE-100 (décision QE-POR-30, snake_case pour les tables).
+
+    `status` (BE-100) porte le statut d'appartenance, `active` par défaut. Il
+    n'est pas encore lu par `assert_active_membership` : la présence de la ligne
+    reste la seule preuve d'accès, comme avant (QE-SOC-04).
     """
 
-    __tablename__ = "organizationUser"
+    __tablename__ = "organization_user"
     __table_args__ = (
         UniqueConstraint("organizationId", "userId", name="uq_organizationUser_org_user"),
         {"comment": "Association utilisateur <-> organisation (appartenance, many-to-many)."},
@@ -104,6 +108,54 @@ class OrganizationUser(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True
     )
     userId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="active", server_default="active")
+
+
+class Tenant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Tenant d'une organisation (BE-100) : un seul tenant par organisation.
+
+    La contrainte unique sur `organizationId` garantit qu'une organisation n'a
+    qu'un tenant, la base refusant tout second enregistrement. `status` vaut
+    `active` par défaut. Aucune colonne parente : le modèle est plat (QE-POR-05).
+    """
+
+    __tablename__ = "tenant"
+    __table_args__ = ({"comment": "Tenant d'une organisation (BE-100) : un seul par organisation."},)
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, unique=True
+    )
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="active", server_default="active")
+
+
+class Invitation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Invitation du portail d'organisation (BE-100) : destinataire, rôle, statut.
+
+    Le destinataire est l'identité invitée (`recipientUserId`, QE-POR-24) ; seule
+    cette identité peut accepter. `roleId` est le rôle proposé, facultatif.
+    `status` ne prend que `pending`, `accepted`, `expired` ou `revoked` : la
+    contrainte de table refuse toute autre valeur. Le créateur est
+    `createdByUserId`. Cette table est distincte de `organizationInvitation`
+    (BE-012, adresse e-mail sans compte) : voir la doc du module portail.
+    """
+
+    __tablename__ = "invitation"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'accepted', 'expired', 'revoked')",
+            name="ck_invitation_status",
+        ),
+        {"comment": "Invitation du portail d'organisation : destinataire identifié, rôle proposé, statut borné."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True
+    )
+    recipientUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False)
+    roleId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("role.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", server_default="pending")
+    expiresAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    createdByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False)
 
 
 class UserInvitation(UUIDPrimaryKeyMixin, TimestampMixin, Base):

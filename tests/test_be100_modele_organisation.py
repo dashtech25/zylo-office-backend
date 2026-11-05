@@ -27,6 +27,19 @@ from app.identity.models import Invitation, Organization, OrganizationUser, Tena
 BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+@pytest.fixture(autouse=True)
+async def _pool_neuf_par_test():
+    """Vide le pool du moteur partagé avant chaque test.
+
+    `engine` est un singleton : ses connexions poolées restent liées à la boucle
+    qui les a ouvertes. Les tests de ce fichier n'utilisent pas le fixture `client`
+    (qui fait ce dispose() dans conftest.py), d'où ce nettoyage local.
+    """
+    from app.core.database import engine
+
+    await engine.dispose()
+
+
 def _config() -> Config:
     return Config(os.path.join(BACKEND_ROOT, "alembic.ini"))
 

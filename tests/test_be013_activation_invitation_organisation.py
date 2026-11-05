@@ -87,7 +87,7 @@ async def _sql(requete: str, **params) -> list[dict]:
 
 
 async def _appartenances(user_id: str) -> list[str]:
-    lignes = await _sql('SELECT "organizationId" FROM "organizationUser" WHERE "userId" = :u', u=uuid.UUID(user_id))
+    lignes = await _sql('SELECT "organizationId" FROM "organization_user" WHERE "userId" = :u', u=uuid.UUID(user_id))
     return [str(ligne["organizationId"]) for ligne in lignes]
 
 
@@ -107,7 +107,7 @@ async def _utilisateur_par_email(email: str) -> dict | None:
 
 
 async def _nombre_appartenances_totales() -> int:
-    return (await _sql('SELECT COUNT(*) AS n FROM "organizationUser"'))[0]["n"]
+    return (await _sql('SELECT COUNT(*) AS n FROM "organization_user"'))[0]["n"]
 
 
 async def test_jeton_valide_cree_le_compte_et_l_appartenance(client: AsyncClient, monkeypatch):

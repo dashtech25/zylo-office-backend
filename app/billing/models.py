@@ -768,3 +768,37 @@ class CloseOperation(UUIDPrimaryKeyMixin, Base):
     status: Mapped[str] = mapped_column(String(40), nullable=False, comment="Statut de la clôture (BE-097).")
     prerequisitesJson: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, comment="Résultat vérifié de chaque prérequis (BE-097).")
     requestedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="Heure de la demande de clôture.")
+
+
+class BillingCase(UUIDPrimaryKeyMixin, Base):
+    """Cas de facturation ou d'assistance (BE-096), rattaché à un tenant.
+
+    Cycle : `open -> assigned -> investigating -> action_pending -> resolved | closed | escalated`.
+    Un cas n'entre jamais dans la clôture d'un abonnement (BE-097) : il ne la bloque pas et ne la
+    déclenche pas. `organizationId` borne la visibilité au tenant (CA-4) ; `resolutionReason` et
+    `resolvedAt` ne sont renseignés qu'à la résolution, avec une entrée d'audit (CA-2).
+    """
+
+    __tablename__ = "billing_case"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('open', 'assigned', 'investigating', 'action_pending', 'resolved', 'closed', 'escalated')",
+            name="ck_billing_case_status",
+        ),
+        {"comment": "Cas de facturation ou d'assistance rattaché à un tenant (BE-096)."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True,
+        comment="Tenant propriétaire du cas (isolation, CA-4).",
+    )
+    scope: Mapped[str] = mapped_column(String(20), nullable=False, comment="Périmètre du cas (tenant ou payeur).")
+    subjectRef: Mapped[str] = mapped_column(String(255), nullable=False, comment="Référence de l'objet concerné par le cas.")
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="open", comment="Statut du cas (BE-096).")
+    assigneeId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id"), nullable=True, comment="Personne à qui le cas est assigné, s'il l'est.",
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False, comment="Motif d'ouverture du cas.")
+    openedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="Heure d'ouverture du cas.")
+    resolutionReason: Mapped[str | None] = mapped_column(Text, nullable=True, comment="Motif de résolution, NULL tant que le cas n'est pas résolu.")
+    resolvedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Heure de résolution, NULL tant que le cas n'est pas résolu.")

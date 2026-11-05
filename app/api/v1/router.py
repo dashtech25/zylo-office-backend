@@ -15,6 +15,7 @@ from app.billing.subscriptions.router import router as billing_subscriptions_rou
 from app.billing.cancellation.router import router as billing_cancellation_router
 from app.billing.reactivation.router import router as billing_reactivation_router
 from app.billing.close.router import router as billing_close_router
+from app.billing.cases.router import router as billing_cases_router
 from app.billing.trials.router import router as billing_trials_router
 from app.billing.plan_changes.router import router as billing_plan_changes_router
 
@@ -132,6 +133,8 @@ api_router.include_router(billing_cancellation_router, prefix="/billing", tags=[
 # BE-092 : réactivation d'abonnement (POST /billing/subscriptions/{subscriptionId}/reactivate).
 api_router.include_router(billing_reactivation_router, prefix="/billing", tags=["billing"])
 api_router.include_router(billing_close_router, prefix="/billing", tags=["billing"])
+# BE-096 : cas de facturation et d'assistance (POST /billing/cases, POST /billing/cases/{case_id}/resolve).
+api_router.include_router(billing_cases_router, prefix="/billing", tags=["billing"])
 # BE-080 : démarrage d'essai (POST /billing/subscriptions/trials).
 api_router.include_router(billing_trials_router, prefix="/billing", tags=["billing"])
 # BE-088 : aperçu et application d'un changement de plan (POST /billing/subscriptions/{subscriptionId}/plan-change[/preview]).

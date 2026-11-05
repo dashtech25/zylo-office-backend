@@ -37,7 +37,9 @@ import uuid
 import pytest
 from httpx import AsyncClient
 
+from app.core.database import AsyncSessionLocal
 from app.main import app
+from app.modules_registry.service import get_or_create_module
 from tests.route_inventory import inventaire
 from tests.test_module_assignment import _add_member, _h, _new_user
 
@@ -55,11 +57,26 @@ FAMILLES_DU_PERIMETRE = (
 # membre sans rôle y reçoit 200, donc pas de 403 attendu. Motif par route.
 LECTURE_OUVERTE_AUX_MEMBRES: dict[str, str] = {
     "GET /api/v1/organizations/current/modules": "Liste des modules de l'organisation courante : portée membre actif (BE-053).",
+    "GET /api/v1/modules/organizations/{organization_id}": "Liste des modules installés de l'organisation : dépendance require_organization_member seule (lecture membre, route héritée du socle T-024). QE-BE060-01 : à confirmer par le propriétaire.",
     "GET /api/v1/organizations/current/modules/{module_id}/access": "Accès effectif de l'utilisateur courant à un module : portée membre actif (BE-053).",
+}
+
+# Corps minimaux des routes plateforme (BE-042, BE-044) : leur garde n'est pas une
+# dépendance de route mais le service, appelé après validation du corps. Sans corps
+# valide, la réponse serait 422 et non le refus de permission à tester.
+CORPS_PLATEFORME: dict[str, dict] = {
+    "POST /api/v1/admin/modules": {"code": "zylo_test_be060", "name": "Module test BE-060"},
+    "POST /api/v1/admin/modules/{module_id}/upgrade-plans": {"fromVersion": "1.0.0", "toVersion": "1.1.0"},
+    "POST /api/v1/admin/modules/{module_id}/versions": {"version": "1.0.0"},
+    "POST /api/v1/admin/modules/{module_id}/versions/{version_id}/publish": {"stateVersion": 1},
 }
 
 # Chemins portant {organization_id} : sujets du CA-2.
 TAG_ORGANISATION = "{organization_id}"
+
+
+def _identifiant(route) -> str:
+    return f"{route.method} {route.path}"
 
 
 def _dans_le_perimetre(chemin: str) -> bool:
@@ -76,11 +93,12 @@ ROUTES_AVEC_ORGANISATION = [r for r in ROUTES if TAG_ORGANISATION in r.path]
 ROUTES_DE_MUTATION = [r for r in ROUTES if r.method in ("POST", "PUT", "PATCH", "DELETE")]
 
 
-def _chemin_concret(chemin: str, organisation_id: str) -> str:
-    """Remplace chaque paramètre de chemin : organisation donnée, codes de module
-    lisibles, identifiants inconnus (uuid) pour le reste. Le contrôle d'accès
-    s'exécute avant la recherche de l'objet ; un identifiant inconnu n'affaiblit
-    donc pas le refus attendu."""
+def _chemin_concret(chemin: str, organisation_id: str, module_id: str) -> str:
+    """Remplace chaque paramètre de chemin : organisation donnée, module réel
+    (zylo_liquid du catalogue), codes lisibles, identifiants inconnus (uuid) pour
+    le reste. Un `module_id` inconnu répond 404 avant la vérification de permission
+    sur les routes de module (garde require_module_action) : le module doit donc
+    exister pour que le refus 403 soit celui testé."""
     sortie = chemin
     while "{" in sortie:
         debut = sortie.index("{")
@@ -88,16 +106,14 @@ def _chemin_concret(chemin: str, organisation_id: str) -> str:
         nom = sortie[debut + 1:fin]
         if nom == "organization_id":
             valeur = organisation_id
+        elif nom == "module_id":
+            valeur = module_id
         elif nom == "module_code":
             valeur = "zylo_liquid"
         else:
             valeur = str(uuid.uuid4())
         sortie = sortie[:debut] + valeur + sortie[fin + 1:]
     return sortie
-
-
-def _identifiant(route) -> str:
-    return f"{route.method} {route.path}"
 
 
 @pytest.fixture
@@ -123,9 +139,15 @@ async def mondes_be060(client: AsyncClient, registered_user: dict, organization:
     sans_droit = await _new_user(client, "Sans droit BE-060")
     await _add_member(organization["id"], sans_droit["id"])
 
+    # Module réel du registre (seedé par la fixture `client`) : identifiant lu en base.
+    async with AsyncSessionLocal() as db:
+        module = await get_or_create_module(db, "zylo_liquid", "Zylo Liquid", "Module de test BE-060.")
+        module_id = str(module.id)
+
     return {
         "org_a": organization["id"],
         "org_b": org_b,
+        "module_id": module_id,
         "proprietaire_a": proprietaire_a,
         "sans_droit": sans_droit,
     }
@@ -139,12 +161,12 @@ async def mondes_be060(client: AsyncClient, registered_user: dict, organization:
 async def test_ca1_membre_sans_role_refuse_403(client: AsyncClient, mondes_be060: dict, route):
     """Un membre actif sans rôle n'exécute aucune route du périmètre à permission."""
     acteur = mondes_be060["sans_droit"]
-    chemin = _chemin_concret(route.path, mondes_be060["org_a"])
+    chemin = _chemin_concret(route.path, mondes_be060["org_a"], mondes_be060["module_id"])
     res = await client.request(
         route.method,
         chemin,
         headers=_h(acteur["token"], mondes_be060["org_a"]),
-        json={},
+        json=CORPS_PLATEFORME.get(_identifiant(route), {}),
     )
     assert res.status_code == 403, f"{route.method} {chemin} -> {res.status_code} {res.text}"
 
@@ -158,7 +180,7 @@ async def test_ca2_acteur_de_a_sur_b_obtient_404(client: AsyncClient, mondes_be0
     """Le propriétaire de A ne voit ni n'écrit rien sur B : 404 (organisation non trouvée
     pour cet acteur), y compris avec un en-tête X-Organization-Id de A (incohérence)."""
     acteur = mondes_be060["proprietaire_a"]
-    chemin = _chemin_concret(route.path, mondes_be060["org_b"])
+    chemin = _chemin_concret(route.path, mondes_be060["org_b"], mondes_be060["module_id"])
     res = await client.request(
         route.method,
         chemin,
@@ -175,7 +197,7 @@ async def test_ca2_acteur_de_a_sur_b_obtient_404(client: AsyncClient, mondes_be0
 @pytest.mark.parametrize("route", [pytest.param(r, id=_identifiant(r)) for r in ROUTES_DE_MUTATION])
 async def test_ca3_mutation_sans_authentification_401(client: AsyncClient, mondes_be060: dict, route):
     """Une mutation sans jeton d'authentification répond 401, avant toute lecture de la cible."""
-    chemin = _chemin_concret(route.path, mondes_be060["org_a"])
+    chemin = _chemin_concret(route.path, mondes_be060["org_a"], mondes_be060["module_id"])
     res = await client.request(route.method, chemin, json={})
     assert res.status_code == 401, f"{route.method} {chemin} -> {res.status_code} {res.text}"
 

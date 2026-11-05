@@ -19,6 +19,7 @@ from app.modules_registry.permissions import (
     ORGANIZATION_MODULE_ACTIVATE,
     ORGANIZATION_MODULE_INSTALL,
     ORGANIZATION_MODULE_READ,
+    ORGANIZATION_MODULE_SUSPEND,
     ORGANIZATION_MODULE_UNINSTALL,
     ORGANIZATION_MODULE_UPGRADE,
 )
@@ -370,6 +371,7 @@ async def desactiver_module(
     "/{organization_id}/modules/{module_id}/suspensions",
     response_model=DisponibiliteResponse,
     summary="Suspendre un module pour l'organisation (BE-049)",
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_SUSPEND))],
 )
 async def suspendre_module(
     organization_id: uuid.UUID,
@@ -402,6 +404,7 @@ async def suspendre_module(
     "/{organization_id}/modules/{module_id}/reactivations",
     response_model=DisponibiliteResponse,
     summary="Reprendre un module suspendu pour l'organisation (BE-049)",
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_SUSPEND))],
 )
 async def reprendre_module(
     organization_id: uuid.UUID,

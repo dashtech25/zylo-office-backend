@@ -40,3 +40,7 @@ BILLING_INVOICE_FINALIZE = "billing.invoice.finalize"
 # d'un compte payeur. Porte les rôles ACTF-04 (acheteur) et ACTF-05 (contact de facturation) ;
 # accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS (app/identity/service.py). Sans elle : 403 FORBIDDEN.
 BILLING_DATA_EXPORT_REQUEST = "billing.data_export.request"
+# BE-099 (QE-FAC-03, recommandation appliquée) : consulter l'historique commercial du tenant
+# courant (GET /api/v1/billing/history), lu dans `audit_event`. Accordée au propriétaire via
+# OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
+BILLING_HISTORY_READ = "billing.history.read"

@@ -36,3 +36,7 @@ BILLING_CONSENT_RECORD = "billing.consent.record"
 # (QE-SOC-06 : recommandation appliquée, nom aligné sur le geste d'audit `billing.invoice.finalize`).
 # Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
 BILLING_INVOICE_FINALIZE = "billing.invoice.finalize"
+# BE-098 (QE-FAC-03, recommandation appliquée) : demander un export des données de facturation
+# d'un compte payeur. Porte les rôles ACTF-04 (acheteur) et ACTF-05 (contact de facturation) ;
+# accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS (app/identity/service.py). Sans elle : 403 FORBIDDEN.
+BILLING_DATA_EXPORT_REQUEST = "billing.data_export.request"

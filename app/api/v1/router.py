@@ -54,6 +54,7 @@ from app.operator.admin_audit_router import router as admin_audit_router
 from app.operator.exceptional_access import router as exceptional_access_router
 from app.operator.cases_router import router as cases_router
 from app.operator.commands_router import router as commands_router
+from app.operator.notifications_router import router as notifications_admin_router
 from app.operator.payment_diagnostic_router import router as payment_diagnostic_router
 from app.operator.ops_metrics import router as ops_metrics_router
 from app.operator.subscription_diagnostic_router import router as subscription_diagnostic_router
@@ -120,6 +121,8 @@ api_router.include_router(role_assignments_router, prefix="/admin", tags=["admin
 api_router.include_router(cases_router, prefix="/admin", tags=["admin-cases"])
 # BE-124 : intentions de commande opérateur idempotentes (POST/GET /admin/commands).
 api_router.include_router(commands_router, prefix="/admin", tags=["admin-commands"])
+# BE-144 : notifications d'une commande opérateur (GET /admin/commands/{id}/notifications).
+api_router.include_router(notifications_admin_router, prefix="/admin", tags=["admin-notifications"])
 api_router.include_router(payment_diagnostic_router, prefix="/admin", tags=["admin-payment-diagnostics"])
 # BE-145 : compteurs d'exploitation de la console (GET /admin/ops/metrics), opérateur seul.
 api_router.include_router(ops_metrics_router, prefix="/admin", tags=["admin-ops"])

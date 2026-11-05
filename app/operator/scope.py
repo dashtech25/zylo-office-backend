@@ -46,6 +46,7 @@ from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.security import get_current_user
 from app.identity.models import User
+from app.operator.tenant_guard import journaliser_refus_cross_tenant
 from app.rbac.guards import assert_active_membership
 from app.rbac.role_assignments import has_platform_authority
 
@@ -159,5 +160,12 @@ async def require_admin_scope(
         except AppError:
             # Le 404 uniforme de BE-009 est remplacé par un 403 : le refus est un
             # défaut de droit d'administration, pas une organisation inexistante.
+            # BE-147 CA-4 : ce refus est un refus cross-tenant, il est journalisé.
+            await journaliser_refus_cross_tenant(
+                db,
+                acteur_id=current_user.id,
+                organization_id=scope.organization_id,
+                portee=f"tenant:{scope.organization_id}",
+            )
             raise _refus() from None
     return scope

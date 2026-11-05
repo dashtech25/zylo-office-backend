@@ -45,19 +45,22 @@ def _routes_admin():
     Parcours récursif des routeurs imbriqués (FastAPI `_IncludedRouter`), comme
     `tests/route_inventory.py`.
     """
-    def _parcours(routes, prefixe=""):
+    def _parcours(routes, prefixe="", deps_montage=()):
+        # Les dépendances de montage (`include_router(..., dependencies=...)`) font
+        # partie de la chaîne réelle de chaque route, comme dans tests/route_inventory.py.
         for route in routes:
             if isinstance(route, APIRoute):
-                yield route, prefixe + route.path
+                yield route, prefixe + route.path, deps_montage
             elif type(route).__name__ == "_IncludedRouter":
                 ctx = route.include_context
-                yield from _parcours(ctx.included_router.routes, prefixe + ctx.prefix)
+                montage = tuple(getattr(d, "dependency", None) for d in (ctx.dependencies or []))
+                yield from _parcours(ctx.included_router.routes, prefixe + ctx.prefix, deps_montage + montage)
 
     trouvees = []
-    for route, chemin in _parcours(app.router.routes):
+    for route, chemin, deps_montage in _parcours(app.router.routes):
         if not chemin.startswith(PREFIXE_ADMIN):
             continue
-        appels = []
+        appels = list(deps_montage)
 
         def _collecte(dependant):
             for sous in dependant.dependencies:

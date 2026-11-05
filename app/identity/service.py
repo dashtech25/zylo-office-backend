@@ -8,6 +8,8 @@ from app.audit.permissions import AUDIT_EXPORT, AUDIT_LOG_VIEW, ORGANIZATION_AUD
 from app.exports.permissions import DONNEES_EXPORT_CREER
 from app.audit.service import record_audit_event
 from app.billing.permissions import (
+    BILLING_CASE_OPEN,
+    BILLING_CASE_RESOLVE,
     BILLING_CONSENT_RECORD,
     BILLING_DATA_EXPORT_REQUEST,
     BILLING_DISPUTE_READ,
@@ -92,6 +94,8 @@ OWNER_DEFAULT_PERMISSIONS = [
     (BILLING_REFUND_REQUEST, "billing", "Demander un remboursement d'un paiement réussi (BE-093, finance)."),
     (BILLING_DISPUTE_READ, "billing", "Consulter les litiges fournisseur de l'organisation courante (BE-094, finance)."),
     (BILLING_RECONCILIATION_RUN, "billing", "Lancer une réconciliation des paiements et résultats incertains (BE-095, finance)."),
+    (BILLING_CASE_OPEN, "billing", "Ouvrir un cas de facturation ou d'assistance (BE-096)."),
+    (BILLING_CASE_RESOLVE, "billing", "Résoudre un cas de facturation ou d'assistance, geste sensible (BE-096)."),
     (CURRENCY_READ, "shared", "Consulter le référentiel des devises."),
     (CURRENCY_MANAGE, "shared", "Créer/modifier le référentiel des devises."),
     (EXCHANGE_RATE_READ, "shared", "Consulter les taux de change."),

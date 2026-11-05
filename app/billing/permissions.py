@@ -56,3 +56,10 @@ BILLING_DISPUTE_READ = "billing.dispute.read"
 # BE-095 (ACTF-09, finance) : lancer une réconciliation des paiements (POST /billing/reconciliations).
 # Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
 BILLING_RECONCILIATION_RUN = "billing.reconciliation.run"
+# BE-096 (recommandation QE-FAC-09, appliquée) : ouvrir un cas de facturation ou d'assistance
+# (POST /api/v1/billing/cases). Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS.
+BILLING_CASE_OPEN = "billing.case.open"
+# BE-096 : résoudre un cas (POST /api/v1/billing/cases/{case_id}/resolve), geste sensible.
+# Distincte d'ouverture : retirer l'une ne retire pas l'autre (moindre privilège). Accordée
+# au propriétaire via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
+BILLING_CASE_RESOLVE = "billing.case.resolve"

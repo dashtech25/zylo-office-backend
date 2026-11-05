@@ -334,8 +334,13 @@ async def test_ca3_action_pending_exige_une_approbation_independante(client, reg
 async def test_ca3_pas_d_impersonation_routage_et_acteur_issu_du_jeton(client, registered_user, organization):
     from app.main import app
 
-    chemins = {(methode, route.path) for route in app.routes if getattr(route, "path", "").startswith(ROUTE_CAS)
-               for methode in getattr(route, "methods", set())}
+    # Les routeurs sont imbriqués (FastAPI `_IncludedRouter`) : le schéma OpenAPI donne la liste à plat.
+    chemins = {
+        (methode.upper(), chemin)
+        for chemin, operations in app.openapi()["paths"].items()
+        if chemin.startswith(ROUTE_CAS)
+        for methode in operations
+    }
     assert chemins == {
         ("POST", ROUTE_CAS),
         ("POST", "/api/v1/billing/cases/{case_id}/resolve"),
@@ -356,7 +361,7 @@ async def test_ca3_pas_d_impersonation_routage_et_acteur_issu_du_jeton(client, r
     assert cas.assigneeId is None
     entrees = await _entrees_audit(ACTION_AUDIT_OUVERTURE, cas_id)
     assert len(entrees) == 1
-    assert entrees[0].actorId == acteur_id
+    assert entrees[0].actorUserId == acteur_id
 
 
 # CA-4 : un cas d'un tenant n'est pas visible depuis un autre scope.

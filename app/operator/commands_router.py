@@ -4,7 +4,11 @@ Routes :
 - `POST /api/v1/admin/commands` : crée une intention de commande, ou renvoie celle
   qui existe déjà pour la même clé d'idempotence et le même corps (200) ;
 - `GET /api/v1/admin/commands/{command_id}` : lit une commande (créateur, ou
-  responsable de gestion de la portée de la cible).
+  responsable de gestion de la portée de la cible) ;
+- `POST /api/v1/admin/commands/{command_id}/approve` et `.../reject` : décision unique
+  d'un approbateur indépendant (BE-128), corps `{"reasonTicket": ...}` obligatoire.
+  Règles et codes dans `app.operator.approval` (403 pour un mauvais rôle, pour
+  l'initiateur et pour un tenant étranger ; 409 si une décision existe déjà).
 
 Codes : 201 à la création ; 200 au rejeu identique ; 409 `idempotency_conflict` si la
 clé a servi à un autre corps ; 422 pour un corps invalide (motif absent, classe
@@ -29,6 +33,7 @@ from app.core.logging import request_id_ctx
 from app.core.security import get_current_user
 from app.identity.models import User
 from app.operator.cases import ROLES_GESTION, erreur_refus, portee_du_cas, roles_actifs_sur_portee
+from app.operator.approval import ETAT_APPROUVEE, ETAT_REJETEE, decider_commande
 from app.operator.commands import (
     AdminCommand,
     commande_existante,
@@ -75,10 +80,16 @@ class CommandeResponse(BaseModel):
     reasonTicket: str
     idempotencyKey: str
     correlationId: str | None
-    status: Literal["intention"]
+    status: Literal["intention", "approuvee", "rejetee"]
     result: dict | None
     createdAtUtc: datetime
     expiresAtUtc: datetime | None
+
+
+class DecisionCreate(BaseModel):
+    """Corps d'une décision d'approbation. Le motif (ticket) est obligatoire (BE-128)."""
+
+    reasonTicket: str = Field(min_length=1, max_length=120)
 
 
 @router.post(
@@ -128,6 +139,45 @@ async def creer_commande(
         return gagnante
     await db.refresh(commande)
     return commande
+
+
+@router.post(
+    "/commands/{command_id}/approve",
+    response_model=CommandeResponse,
+    summary="Approuver une commande opérateur par un approbateur indépendant (BE-128)",
+)
+async def approuver_commande(
+    command_id: uuid.UUID,
+    data: DecisionCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AdminCommand:
+    """Enregistre l'approbation : la commande passe à `approuvee` (CA-4).
+
+    Voir `app.operator.approval.decider_commande` pour l'ordre des contrôles.
+    """
+    return await decider_commande(
+        db, command_id=command_id, approbateur_id=current_user.id,
+        decision=ETAT_APPROUVEE, motif=data.reasonTicket,
+    )
+
+
+@router.post(
+    "/commands/{command_id}/reject",
+    response_model=CommandeResponse,
+    summary="Rejeter une commande opérateur par un approbateur indépendant (BE-128)",
+)
+async def rejeter_commande(
+    command_id: uuid.UUID,
+    data: DecisionCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AdminCommand:
+    """Enregistre le rejet : la commande passe à l'état terminal `rejetee` (CA-3)."""
+    return await decider_commande(
+        db, command_id=command_id, approbateur_id=current_user.id,
+        decision=ETAT_REJETEE, motif=data.reasonTicket,
+    )
 
 
 @router.get(

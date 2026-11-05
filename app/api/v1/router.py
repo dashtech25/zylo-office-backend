@@ -31,6 +31,7 @@ from app.modules_registry.reconciliation_router import router as reconciliation_
 from app.modules_registry.catalog_router import router as catalog_router
 from app.modules_registry.router import router as modules_router
 from app.rbac.grants_membres import router as grants_membres_router
+from app.rbac.acces_effectif_router import router as acces_effectif_router
 from app.rbac.module_router import router as rbac_module_router
 from app.notifications.router import router as notifications_router
 from app.rbac.router import router as rbac_router
@@ -67,6 +68,7 @@ api_router.include_router(rbac_router, prefix="/rbac", tags=["rbac"])
 api_router.include_router(roles_lecture_router, prefix="/organizations", tags=["rbac"])
 api_router.include_router(grants_membres_router, prefix="/organizations", tags=["rbac"])
 api_router.include_router(rbac_module_router, prefix="/rbac", tags=["rbac"])
+api_router.include_router(acces_effectif_router, tags=["rbac"])
 api_router.include_router(audit_router, prefix="/audit", tags=["audit"])
 api_router.include_router(organization_audit_router, prefix="/organizations", tags=["audit"])
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])

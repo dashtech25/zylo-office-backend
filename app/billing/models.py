@@ -452,3 +452,25 @@ class Quote(Base):
     expiresAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Fin de validité ; NULL tant que QE-FAC-21 n'est pas tranchée.")
     createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     pricingSnapshotJson: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="Prix, devise et taxe figés à la résolution (BE-078) ; NULL avant `priced`.")
+
+
+class DataExportRequest(Base):
+    """Demande d'export des données de facturation d'un compte payeur (BE-098).
+
+    Une ligne par demande. `scope` dit quel périmètre est exporté (`payeur`) et `accountId`
+    désigne le compte payeur ; `organizationId` est le tenant bénéficiaire dans lequel la
+    demande a été faite (isolation, CA-4). `requestedBy` est la personne qui a demandé.
+    `fileRef` reste NULL tant qu'aucun stockage de fichier n'est branché (QE-FAC-25) : le
+    contenu est renvoyé directement par la route. Le contenu n'est jamais stocké en base.
+    """
+    __tablename__ = "data_export_request"
+    __table_args__ = {"comment": "Demande d'export des données de facturation d'un compte payeur (BE-098)."}
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True, comment="Tenant bénéficiaire dans lequel la demande est faite.")
+    accountId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("billing_payer.id"), nullable=False, index=True, comment="Compte payeur dont les données sont exportées.")
+    scope: Mapped[str] = mapped_column(String(30), nullable=False, comment="Périmètre exporté (payeur).")
+    requestedBy: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False, index=True, comment="Personne qui a demandé l'export.")
+    status: Mapped[str] = mapped_column(String(30), nullable=False, comment="État de la demande (ready).")
+    requestedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="Heure serveur de la demande.")
+    fileRef: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Référence du fichier produit ; NULL tant qu'aucun stockage n'est branché (QE-FAC-25).")

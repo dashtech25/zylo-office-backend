@@ -184,3 +184,21 @@ class ConsentResponse(BaseModel):
     correctionOfId: uuid.UUID | None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DataExportCreate(BaseModel):
+    """Corps de `POST /billing/data-exports` (BE-098) : compte payeur et périmètre demandé."""
+
+    accountId: uuid.UUID
+    scope: Literal["payeur"] = "payeur"
+
+
+class DataExportResponse(BaseModel):
+    """Demande d'export (BE-098) et son contenu. `fileRef` reste nul tant qu'aucun stockage n'est branché (QE-FAC-25)."""
+
+    id: uuid.UUID
+    scope: str
+    status: str
+    requestedAt: datetime
+    fileRef: str | None
+    content: dict

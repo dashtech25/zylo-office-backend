@@ -97,7 +97,7 @@ def _erreur_introuvable() -> AppError:
     return AppError(code="connecteur_introuvable", message="Connecteur introuvable.", status_code=404)
 
 
-def _verifier_portee(
+def verifier_portee(
     identite: IdentiteEmettrice | None,
     portee: str,
     organization_id: uuid.UUID | None,
@@ -155,7 +155,7 @@ async def _mutation_globale(
     return resultat
 
 
-async def _ecrire(
+async def ecrire_mutation_connecteur(
     db: AsyncSession,
     identite: IdentiteEmettrice | None,
     connecteur: Connecteur,
@@ -173,7 +173,7 @@ async def _ecrire(
     )
 
 
-async def _charger(db: AsyncSession, connecteur_id: uuid.UUID) -> Connecteur:
+async def charger_connecteur(db: AsyncSession, connecteur_id: uuid.UUID) -> Connecteur:
     connecteur = await db.get(Connecteur, connecteur_id)
     if connecteur is None:
         raise _erreur_introuvable()
@@ -209,7 +209,7 @@ async def creer_connecteur(
         raise ValueError("un connecteur tenant exige une organisation")
     if portee == PORTEE_GLOBAL:
         organization_id = None
-    _verifier_portee(identite, portee, organization_id, est_admin_plateforme)
+    verifier_portee(identite, portee, organization_id, est_admin_plateforme)
 
     connecteur_id = uuid.uuid4()
     connecteur = Connecteur(
@@ -227,7 +227,7 @@ async def creer_connecteur(
         return connecteur
 
     changes = {"etat_apres": ETAT_CREATION, "portee": portee, "versionConfiguration": version_configuration}
-    return await _ecrire(
+    return await ecrire_mutation_connecteur(
         db, identite, connecteur, ACTION_PAR_ETAT[ETAT_CREATION], f"Création du connecteur {nom}", mutation, changes
     )
 
@@ -244,14 +244,14 @@ async def changer_etat(
 
     Ordre de contrôle, sans écriture avant la fin :
     1. connecteur introuvable : 404 ;
-    2. droits de portée (`_verifier_portee`) : 403 ou `TENANT_MISMATCH` ;
+    2. droits de portée (`verifier_portee`) : 403 ou `TENANT_MISMATCH` ;
     3. transition absente de `TRANSITIONS_CONNECTEUR` : `TransitionConnecteurInterdite` (409, CA-2).
 
     Une cible identique à l'état courant n'est pas une transition : elle est refusée.
     Retour : le connecteur mis à jour. L'appelant doit `commit()`.
     """
-    connecteur = await _charger(db, connecteur_id)
-    _verifier_portee(identite, connecteur.portee, connecteur.organizationId, est_admin_plateforme)
+    connecteur = await charger_connecteur(db, connecteur_id)
+    verifier_portee(identite, connecteur.portee, connecteur.organizationId, est_admin_plateforme)
 
     etat_depart = connecteur.etat
     if cible not in TRANSITIONS_CONNECTEUR.get(etat_depart, frozenset()):
@@ -263,7 +263,7 @@ async def changer_etat(
         return connecteur
 
     changes = {"etat_avant": etat_depart, "etat_apres": cible, "portee": connecteur.portee}
-    return await _ecrire(
+    return await ecrire_mutation_connecteur(
         db,
         identite,
         connecteur,
@@ -295,8 +295,8 @@ async def reprendre_configuration(
     """
     if version < 1:
         raise ValueError("version de configuration invalide")
-    connecteur = await _charger(db, connecteur_id)
-    _verifier_portee(identite, connecteur.portee, connecteur.organizationId, est_admin_plateforme)
+    connecteur = await charger_connecteur(db, connecteur_id)
+    verifier_portee(identite, connecteur.portee, connecteur.organizationId, est_admin_plateforme)
     if connecteur.etat == ETAT_REVOQUE:
         raise TransitionConnecteurInterdite(connecteur.etat, "reprise_configuration")
     if not validee:
@@ -310,7 +310,7 @@ async def reprendre_configuration(
         return connecteur
 
     changes = {"versionConfiguration_avant": version_avant, "versionConfiguration_apres": version, "portee": connecteur.portee}
-    return await _ecrire(
+    return await ecrire_mutation_connecteur(
         db, identite, connecteur, ACTION_REPRISE, f"Reprise de configuration du connecteur {connecteur.nom}", mutation, changes
     )
 
@@ -320,7 +320,7 @@ async def lister_connecteurs(db: AsyncSession, organization_id: uuid.UUID) -> Se
 
     Un connecteur d'un autre tenant n'est jamais renvoyé. Les connecteurs globaux le sont
     pour tous les tenants, car ils sont en lecture publique du catalogue ; leur modification
-    reste réservée à la plateforme (`_verifier_portee`).
+    reste réservée à la plateforme (`verifier_portee`).
     """
     resultat = await db.execute(
         select(Connecteur)

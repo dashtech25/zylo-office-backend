@@ -13,9 +13,10 @@ transitions autorisées sont dans `app/integrations/registre.py`.
 - les colonnes `createdAt` et `updatedAt` viennent de `TimestampMixin`.
 """
 
+import datetime as dt
 import uuid
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -61,3 +62,36 @@ class Connecteur(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     nom: Mapped[str] = mapped_column(String(255), nullable=False)
     etat: Mapped[str] = mapped_column(String(16), nullable=False)
     versionConfiguration: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+
+
+class SecretIntegration(UUIDPrimaryKeyMixin, Base):
+    """Référence d'un secret d'intégration, sans la valeur (BE-161).
+
+    Table `secret_integration` : chaque ligne désigne, par `referenceSecret`, une entrée du
+    coffre (`app.core.secrets.SecretStore` pour l'instant). La valeur n'est JAMAIS une
+    colonne de cette table ni d'une autre table : seule la référence est persistée.
+
+    - `version` : numéro de version par connecteur, à partir de 1 ; la version la plus
+      haute est la valeur courante ;
+    - `expireAt` : échéance, nullable (QE-PAR-09, recommandation appliquée : un secret sans
+      échéance connue reste admis, un secret expiré est refusé à l'envoi) ;
+    - unicité de `(connecteurId, version)`.
+    """
+
+    __tablename__ = "secret_integration"
+    __table_args__ = (
+        CheckConstraint('"version" >= 1', name="ck_secret_integration_version_positive"),
+        CheckConstraint("length(btrim(\"referenceSecret\")) > 0", name="ck_secret_integration_reference_non_vide"),
+        UniqueConstraint("connecteurId", "version", name="uq_secret_integration_connecteur_version"),
+        {"comment": "Références des secrets d'intégration, jamais de valeur (BE-161)."},
+    )
+
+    connecteurId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("connecteur.id"), nullable=False, index=True
+    )
+    referenceSecret: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    expireAt: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    createdAt: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

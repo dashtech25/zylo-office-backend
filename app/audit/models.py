@@ -40,6 +40,12 @@ class AuditEvent(UUIDPrimaryKeyMixin, Base):
     __table_args__ = (
         CheckConstraint("result IN ('success', 'refused', 'error')", name="ck_audit_event_result"),
         CheckConstraint("\"actorType\" IN ('humain', 'service', 'systeme')", name="ck_audit_event_actorType"),
+        # BE-152 CA-3 : une action, une cible (entityType) ou une corrélation (request_id)
+        # vide ou faite d'espaces est refusée par la base. NOT NULL ne suffit pas pour
+        # une chaîne vide ; l'acteur (actorUserId) reste NOT NULL.
+        CheckConstraint("length(btrim(action)) > 0", name="ck_audit_event_action_non_vide"),
+        CheckConstraint('length(btrim("entityType")) > 0', name="ck_audit_event_entityType_non_vide"),
+        CheckConstraint('length(btrim("request_id")) > 0', name="ck_audit_event_request_id_non_vide"),
         Index("ix_audit_event_organizationId_createdAt", "organizationId", "createdAt"),
         {"comment": "Journal d'audit métier unique : qui a fait quoi, sur quel élément, quand, avec quel résultat."},
     )

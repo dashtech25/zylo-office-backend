@@ -12,7 +12,7 @@ pour les tables décidées depuis, camelCase pour les plus anciennes."""
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -204,4 +204,43 @@ class Notification(UUIDPrimaryKeyMixin, Base):
     )
     statut: Mapped[str] = mapped_column(String(20), nullable=False)
     motifSuppression: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    creeAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class Livraison(UUIDPrimaryKeyMixin, Base):
+    """Tentative de remise d'une notification à un canal (BE-170).
+
+    Une ligne par tentative, numérotée par `tentativeNo` à partir de 1 ; l'unicité de
+    `(notificationId, tentativeNo)` garde la numérotation sans trou ni doublon.
+
+    - `canal` : nom opaque du canal ayant reçu la tentative. Aucun fournisseur n'est
+      présumé (QE-PAR-04) : la colonne n'a pas de liste de valeurs en base ;
+    - `resultat` : `accepte`, `livre`, `retarde`, `rebond`, `plainte` ou `echec`
+      (CHECK en base, énumération `ResultatLivraison`) ;
+    - `codeErreur` : code d'erreur de la tentative, renseigné pour `CHANNEL_UNAVAILABLE` ;
+    - `prochaineTentativeAt` : échéance de la nouvelle tentative, renseignée pour `retarde`.
+
+    Aucune adresse ni donnée personnelle du destinataire n'est stockée ici (CA-4) : le
+    destinataire se lit via la notification.
+    """
+
+    __tablename__ = "livraison"
+    __table_args__ = (
+        UniqueConstraint("notificationId", "tentativeNo", name="uq_livraison_notification_tentative"),
+        CheckConstraint(
+            "resultat IN ('accepte', 'livre', 'retarde', 'rebond', 'plainte', 'echec')",
+            name="ck_livraison_resultat",
+        ),
+        CheckConstraint('"tentativeNo" >= 1', name="ck_livraison_tentative_positive"),
+        {"comment": "Tentatives de livraison d'une notification par canal (BE-170), sans donnée destinataire."},
+    )
+
+    notificationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("notification.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    canal: Mapped[str] = mapped_column(String(40), nullable=False)
+    tentativeNo: Mapped[int] = mapped_column(Integer, nullable=False)
+    resultat: Mapped[str] = mapped_column(String(20), nullable=False)
+    codeErreur: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    prochaineTentativeAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     creeAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

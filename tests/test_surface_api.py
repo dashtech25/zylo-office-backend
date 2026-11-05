@@ -18,6 +18,7 @@ import sys
 import uuid
 from pathlib import Path
 
+import jwt
 import pytest
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
@@ -117,7 +118,11 @@ def test_openapi_200_en_developpement_dans_un_processus_reel():
 
 def test_openapi_404_en_production_dans_un_processus_reel():
     # Configuration de production complète : secrets propres, aucun repli.
+    # L'inscription publique est fermée en production (BE-006) : le réglage est
+    # posé explicitement, car tests/conftest.py l'ouvre dans l'environnement du
+    # pytest parent et le sous-processus en hérite.
     extra = {
+        "AUTH_PUBLIC_REGISTRATION_ENABLED": "false",
         "JWT_SECRET": "prod-" + "a1b2c3d4e5f6" * 4,
         "STORAGE_SIGNED_URL_SECRET": "prod-storage-" + "f6e5d4c3b2a1" * 3,
         "APP_FIELD_ENCRYPTION_KEY": "prod-field-" + "0f1e2d3c4b5a" * 3,
@@ -212,8 +217,10 @@ def test_jeton_ancien_refuse_si_type_inattendu():
 
 @pytest.mark.asyncio
 async def test_jeton_au_format_historique_accepte_par_l_api(client: AsyncClient):
-    # Création réelle d'un utilisateur, puis jeton au format HS256 historique
-    # pour cet utilisateur : l'API doit l'accepter comme avant la migration.
+    # Création réelle d'un utilisateur et d'une session réelle (connexion). Depuis
+    # BE-005 (CA-5), l'API n'accepte un jeton d'accès que s'il porte la famille
+    # d'une session ouverte (revendication `fam`). Le jeton au format historique
+    # reprend donc les revendications de la session réelle, signées à la main en HS256.
     email = f"compat-{uuid.uuid4().hex[:10]}@zylo-office-test.example.com"
     creation = await client.post(
         "/api/v1/auth/register",
@@ -221,8 +228,20 @@ async def test_jeton_au_format_historique_accepte_par_l_api(client: AsyncClient)
     )
     assert creation.status_code == 201
     user_id = creation.json()["id"]
+    connexion = await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": "TestPassword123!"}
+    )
+    assert connexion.status_code == 200
+    revendications = jwt.decode(connexion.json()["accessToken"], options={"verify_signature": False})
     jeton = _jeton_hs256(
-        {"sub": user_id, "type": "access", "iat": 1790000000, "exp": 4102444800, "jti": "compat-1"},
+        {
+            "sub": user_id,
+            "type": "access",
+            "iat": 1790000000,
+            "exp": 4102444800,
+            "jti": "compat-1",
+            "fam": revendications["fam"],
+        },
         settings.JWT_SECRET,
     )
     reponse = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {jeton}"})

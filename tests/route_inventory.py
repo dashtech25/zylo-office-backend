@@ -77,6 +77,7 @@ ROUTES_PUBLIQUES: dict[str, str] = {
 ROUTES_GARDEES_MANUELLEMENT: dict[str, str] = {
     "POST /api/v1/billing/webhooks/flutterwave": "Signature Flutterwave verif-hash comparée en temps constant avant lecture du payload ou accès aux événements; secret absent -> 503, signature invalide -> 401. 2026-11-02.",
     "POST /api/v1/zylo-liquid/gps/ingest": "Secret d'ingestion propre à l'organisation dans X-GPS-Ingest-Secret, vérifié en service avant traitement; absence/invalide -> 401. 2026-10-09.",
+    "POST /api/v1/integrations/webhooks/{connecteur_id}": "Signature HMAC du connecteur (en-tête X-Zylo-Signature) vérifiée dans webhooks.py avant toute écriture ; secret absent -> 503 ou 404, signature invalide -> 401. BE-163.",
     "POST /api/v1/zylo-tanker/gps/ingest": "Secret d'ingestion propre à l'organisation dans X-GPS-Ingest-Secret, vérifié en service avant traitement; absence/invalide -> 401. 2026-10-09.",
 }
 

@@ -244,7 +244,8 @@ async def test_ca4_rejeu_ambigu_resultat_inconnu_sans_nouvel_appel(client: Async
     async with AsyncSessionLocal() as db:
         with pytest.raises(ResultatInconnu):
             await executer_replay(db, commande)
-        await db.rollback()
+        # La garde committe après ResultatInconnu (voir `_arreter_resultat_inconnu`) : la trace persiste.
+        await db.commit()
     async with AsyncSessionLocal() as db:
         # Le rejeu suivant ne doit pas rappeler le consommateur : la trace de consommation est conservée.
         second = await executer_replay(db, commande)

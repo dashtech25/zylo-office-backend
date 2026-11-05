@@ -51,6 +51,28 @@ async def _pool_neuf_par_test():
     await engine.dispose()
 
 
+class _CodesConnusDeTest:
+    """Liste des codes de module reconnus, étendue aux seuls modules synthétiques de ce test.
+
+    `CODES_MODULES_CONNUS` est une liste fermée de modules réels ; un module de test sans
+    cette extension serait classé `inconnu` et refusé avant toute évaluation. On n'ouvre
+    que le préfixe `be053` : les modules réels gardent leur comportement.
+    """
+
+    def __init__(self, reels: frozenset[str]):
+        self._reels = reels
+
+    def __contains__(self, code: object) -> bool:
+        return code in self._reels or (isinstance(code, str) and code.startswith("be053"))
+
+
+@pytest.fixture(autouse=True)
+def _modules_de_test_reconnus(monkeypatch):
+    from app.modules_registry import etats
+
+    monkeypatch.setattr(etats, "CODES_MODULES_CONNUS", _CodesConnusDeTest(etats.CODES_MODULES_CONNUS))
+
+
 # ---------------------------------------------------------------------------
 # Fonction pure : aucune base, aucun appel réseau.
 # ---------------------------------------------------------------------------
@@ -166,8 +188,9 @@ async def _membre_sans_role(email: str, organization: dict) -> None:
         await db.commit()
 
 
-def _entetes(utilisateur: dict) -> dict:
-    return {"Authorization": f"Bearer {utilisateur['accessToken']}"}
+def _entetes(utilisateur: dict, organisation: dict) -> dict:
+    """En-têtes d'une route de module : l'organisation du chemin doit être celle de l'en-tête (garde du routeur)."""
+    return {"Authorization": f"Bearer {utilisateur['accessToken']}", "X-Organization-Id": organisation["id"]}
 
 
 def _url(organization: dict, code: str) -> str:
@@ -254,7 +277,7 @@ async def test_ca4_evaluation_par_route_n_ecrit_aucune_ligne(client: AsyncClient
     code, permission = await _module_active(organization)
     avant = await _compter_toutes_les_lignes()
 
-    reponse = await client.get(_url(organization, code), params={"action": permission}, headers=_entetes(registered_user))
+    reponse = await client.get(_url(organization, code), params={"action": permission}, headers=_entetes(registered_user, organization))
 
     assert reponse.status_code == 200
     assert await _compter_toutes_les_lignes() == avant
@@ -271,12 +294,13 @@ async def test_ca5_organisation_etrangere_renvoie_404_sans_motif_revelant_le_ten
         "/api/v1/organizations", json={"name": "Org B", "slug": f"org-b-{uuid.uuid4().hex[:8]}"}, headers=entetes_autre
     )
     org_b_id = org_b.json()["id"]
+    # Utilisateur de A, chemin et en-tête désignant B : il n'en est pas membre -> 404 (pas 403).
     code, permission = await _module_active(organization)
 
     reponse = await client.get(
         f"/api/v1/organizations/{org_b_id}/modules/{code}/access-evaluation",
         params={"action": permission},
-        headers=_entetes(registered_user),
+        headers={"Authorization": f"Bearer {registered_user['accessToken']}", "X-Organization-Id": org_b_id},
     )
 
     assert reponse.status_code == 404
@@ -298,7 +322,7 @@ async def test_route_reservee_aux_administrateurs_refuse_un_membre_sans_droit(
     reponse = await client.get(
         _url(organization, code),
         params={"action": permission},
-        headers={"Authorization": f"Bearer {login.json()['accessToken']}"},
+        headers=_entetes({"accessToken": login.json()["accessToken"]}, organization),
     )
 
     assert reponse.status_code == 403
@@ -307,7 +331,7 @@ async def test_route_reservee_aux_administrateurs_refuse_un_membre_sans_droit(
 async def test_route_renvoie_allow_ou_deny_avec_motif_stable(client: AsyncClient, registered_user: dict, organization: dict):
     code, permission = await _module_active(organization)
 
-    reponse = await client.get(_url(organization, code), params={"action": permission}, headers=_entetes(registered_user))
+    reponse = await client.get(_url(organization, code), params={"action": permission}, headers=_entetes(registered_user, organization))
 
     assert reponse.status_code == 200
     corps = reponse.json()

@@ -43,3 +43,30 @@ class ReleaseRecord(UUIDPrimaryKeyMixin, Base):
     demandeur_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     approbateur_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     promue_le: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class Compensation(UUIDPrimaryKeyMixin, Base):
+    """Action de compensation d'une opération passée, idempotente (BE-252, table `compensations`).
+
+    Une compensation ne réécrit pas l'historique : elle annule l'effet d'une mutation asynchrone
+    déjà produite. La clé d'idempotence est unique : redemander la même compensation renvoie la
+    ligne existante, jamais une seconde ligne.
+    """
+
+    __tablename__ = "compensations"
+    __table_args__ = (
+        UniqueConstraint("cle_idempotence", name="uq_compensations_cle_idempotence"),
+        {"comment": "Compensations de mutations passées : opération d'origine, action, état et idempotence."},
+    )
+
+    # Référence de l'opération annulée (identifiant de la mutation asynchrone d'origine).
+    operation_origine: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    # Nom de l'action de compensation, résolu par l'appelant dans un registre fermé.
+    action_compensation: Mapped[str] = mapped_column(String(64), nullable=False)
+    # `en_attente` ou `realisee` ; une compensation réalisée n'est plus rejouée.
+    etat: Mapped[str] = mapped_column(String(16), nullable=False)
+    cle_idempotence: Mapped[str] = mapped_column(String(128), nullable=False)
+    demandeur_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    approbateur_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    demandee_le: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    realisee_le: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

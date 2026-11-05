@@ -6,3 +6,7 @@ donc aucun utilisateur ne peut promouvoir tant que le câblage IAM n'est pas liv
 """
 
 PERMISSION_PROMOTION = "release.promotion.executer"
+
+# Déclenchement d'une compensation (BE-252) : réservé au propriétaire métier et à
+# l'exploitation, avec approbation distincte du demandeur. Non semé : aucune route en BE-252.
+PERMISSION_COMPENSATION = "release.compensation.executer"

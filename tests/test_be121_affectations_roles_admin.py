@@ -272,7 +272,7 @@ async def test_be121_ca4_attribution_cree_un_evenement_d_audit(client: AsyncClie
     assert str(evenement.actorUserId) == operateur["id"]
     assert evenement.entityType == "AdminRoleAssignment"
     assert evenement.result == "success"
-    assert evenement.correlationId
+    assert evenement.request_id  # corrélation stockée dans request_id (BE-007, voir BE-122)
 
 
 # ---------------------------------------------------------------------------

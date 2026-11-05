@@ -143,3 +143,37 @@ class TentativeIntegration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     dureeMs: Mapped[int] = mapped_column(Integer, nullable=False)
     tentativeNo: Mapped[int] = mapped_column(Integer, nullable=False)
     prochaineTentativeAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class LettreMorte(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Une tentative d'intégration définitivement échouée, en attente de reprise (BE-165).
+
+    - `tentativeId` : la tentative `echec` d'où provient la lettre ; une seule lettre par
+      tentative (unicité), donc un échec ne peut pas être déplacé deux fois ;
+    - `originalId` : identifiant de l'événement d'origine (`eventId` de la tentative), celui
+      que la reprise rejoue ;
+    - `motif`, `operateur`, `reprisAt` : renseignés seulement par la reprise manuelle.
+      Tant que `reprisAt` est nul, la lettre peut être reprise ; une fois posé, la reprise
+      est définitivement close (CA-4).
+
+    Écarts assumés avec la définition, tranchés sans attendre : le rattachement au tenant
+    s'appelle `organizationId` (convention BE-160/BE-164), la table `lettreMorte` suit le
+    camelCase. La durée de rétention est NON DÉFINIE (QE-PAR-17) : aucune purge n'existe.
+    """
+
+    __tablename__ = "lettreMorte"
+    __table_args__ = (
+        UniqueConstraint("tentativeId", name="uq_lettreMorte_tentativeId"),
+        CheckConstraint("motif IS NULL OR length(btrim(motif)) > 0", name="ck_lettreMorte_motif_non_vide"),
+        Index("ix_lettreMorte_organizationId_createdAt", "organizationId", "createdAt"),
+        {"comment": "Lettres mortes d'intégration et reprises manuelles tracées (BE-165)."},
+    )
+
+    tentativeId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tentativeIntegration.id"), nullable=False
+    )
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False)
+    originalId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    motif: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    operateur: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=True)
+    reprisAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

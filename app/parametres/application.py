@@ -52,7 +52,7 @@ from app.audit.ecriture import IdentiteEmettrice, executer_mutation_sensible
 from app.audit.service import REDACTION
 from app.core.erreurs.codes import CodeErreur, ErreurCatalogue
 from app.parametres.models import SettingDefinition, SettingValue
-from app.parametres.permissions import PARAMETRE_APPLIQUER
+from app.parametres.permissions import PARAMETRE_APPLIQUER, PARAMETRE_APPROUVER
 from app.rbac.service import user_has_permission
 
 # Événement de domaine journalisé à chaque nouvelle version (catalogue des événements).
@@ -84,6 +84,7 @@ async def _ecrire_nouvelle_version(
     reason: str,
     valeur_de: ValeurDe,
     identifiant: uuid.UUID,
+    permission: str = PARAMETRE_APPLIQUER,
 ) -> _Ecriture:
     """Crée la version suivante et désactive l'appliquée précédente, dans le savepoint de l'appelant.
 
@@ -91,7 +92,7 @@ async def _ecrire_nouvelle_version(
     (`valeur_de`), numéro de version suivant, désactivation de l'appliquée, insertion.
     Toute exception annule la mutation : aucune ligne ne reste.
     """
-    if not await user_has_permission(db, identite.user_id, organisation_id, PARAMETRE_APPLIQUER):
+    if not await user_has_permission(db, identite.user_id, organisation_id, permission):
         raise ErreurCatalogue(CodeErreur.PERMISSION_DENIED)
 
     definition = await db.get(SettingDefinition, definition_key, with_for_update=True)
@@ -164,6 +165,7 @@ async def _appliquer(
     reason: str,
     operation: str,
     valeur_de: ValeurDe,
+    permission: str = PARAMETRE_APPLIQUER,
 ) -> SettingValue:
     """Enveloppe commune : raison, puis mutation et audit `EVT-SET-01` dans un même savepoint.
 
@@ -176,7 +178,8 @@ async def _appliquer(
 
     async def mutation(session: AsyncSession) -> _Ecriture:
         return await _ecrire_nouvelle_version(
-            session, identite, organisation_id, definition_key, scope_kind, scope_id, reason, valeur_de, identifiant
+            session, identite, organisation_id, definition_key, scope_kind, scope_id, reason, valeur_de, identifiant,
+            permission,
         )
 
     ecriture = await executer_mutation_sensible(
@@ -285,4 +288,34 @@ async def retablir_defaut(
         db, identite, organisation_id,
         definition_key=definition_key, scope_kind=scope_kind, scope_id=scope_id,
         reason=reason, operation="defaut", valeur_de=valeur_de,
+    )
+
+
+async def appliquer_valeur_approuvee(
+    db: AsyncSession,
+    identite: IdentiteEmettrice | None,
+    organisation_id: uuid.UUID,
+    *,
+    definition_key: str,
+    scope_kind: str,
+    scope_id: uuid.UUID,
+    value: object,
+    reason: str,
+) -> SettingValue:
+    """Écrit `value` comme nouvelle version appliquée, à la suite d'une approbation (BE-159, CA-2).
+
+    Même écriture et même audit `EVT-SET-01` que `appliquer_valeur`, mais la permission exigée
+    est `settings.approve` (`PARAMETRE_APPROUVER`) et non `parametres.setting.apply` : l'approbateur
+    n'a pas à détenir le droit de proposer une valeur. Réservé à `app.parametres.approbation`,
+    qui vérifie avant l'appel que l'approbateur n'est pas le demandeur et que la demande est en attente.
+    Erreurs : `PERMISSION_DENIED` (403), `SCHEMA_INVALID` (422), `AUDIT_WRITE_FAILED` (500).
+    """
+
+    async def valeur_de(_session: AsyncSession, _definition: SettingDefinition) -> object:
+        return value
+
+    return await _appliquer(
+        db, identite, organisation_id,
+        definition_key=definition_key, scope_kind=scope_kind, scope_id=scope_id,
+        reason=reason, operation="approbation", valeur_de=valeur_de, permission=PARAMETRE_APPROUVER,
     )

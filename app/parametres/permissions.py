@@ -13,3 +13,8 @@ PARAMETRE_APPLIQUER = "parametres.setting.apply"
 # Lire les paramètres résolus d'un scope (BE-158, GET). Nommée `settings.read` par la définition
 # (source EVT-SET-01) ; hors convention `domaine.entite.action`, écart signalé en QE-PAR-03.
 PARAMETRE_LIRE = "settings.read"
+
+# Décider une demande d'approbation de changement de paramètre sensible (BE-159, décision).
+# Nommée `settings.approve` par la définition ; hors convention `domaine.entite.action`, comme
+# `settings.read`, écart signalé en QE-PAR-03. Aucun rôle ne la détient par défaut.
+PARAMETRE_APPROUVER = "settings.approve"

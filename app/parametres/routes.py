@@ -34,6 +34,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,6 +46,8 @@ from app.core.erreurs.codes import CodeErreur, ErreurCatalogue
 from app.core.errors import AppError
 from app.core.tenant_context import TenantContext, get_tenant_context
 from app.parametres.application import appliquer_valeur, restaurer_version
+from app.parametres.approbation import demander_changement
+from app.parametres.approbation_routes import DemandeApprobation
 from app.parametres.models import SettingDefinition, SettingValue
 from app.parametres.permissions import PARAMETRE_LIRE
 from app.parametres.resolution import NIVEAU_DEFAUT, PLATEFORME_SCOPE_ID, resoudre_parametre
@@ -193,10 +196,28 @@ async def modifier_parametre(
     `EVT-SET-01` dans le même savepoint, une seule version appliquée à la fois. Le commit est
     fait ici. Erreurs : 404 hors tenant, 409 VERSION_CONFLICT si `X-Expected-Version` est
     périmé, 403 sans permission, 422 si la clé est inconnue ou si `reason` est vide.
+    Paramètre `sensitive` (BE-159) : pas d'écriture ; une demande en attente est créée et renvoyée
+    avec le statut 202 (`id`, `statut` = `en_attente`), la valeur active ne change pas.
     """
     _verifier_scope(contexte, scope_kind, scope_id)
     await _verifier_version_attendue(db, cle, contexte.organization_id, version_attendue)
     identite = IdentiteEmettrice(user_id=contexte.user_id, organization_id=contexte.organization_id)
+    definition = await db.get(SettingDefinition, cle)
+    if definition is not None and definition.sensitive:
+        # BE-159 CA-1 : un paramètre sensible n'est jamais appliqué directement. Le changement
+        # devient une demande en attente ; la valeur active reste inchangée jusqu'à l'approbation.
+        demande = await demander_changement(
+            db,
+            identite,
+            contexte.organization_id,
+            definition_key=cle,
+            scope_kind=PORTEE_ORGANISATION,
+            scope_id=contexte.organization_id,
+            value=corps.value,
+            reason=corps.reason,
+        )
+        await db.commit()
+        return JSONResponse(status_code=202, content=DemandeApprobation.depuis(demande).model_dump(mode="json"))
     ligne = await appliquer_valeur(
         db,
         identite,

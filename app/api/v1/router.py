@@ -67,12 +67,14 @@ from app.operator.ops_metrics import router as ops_metrics_router
 from app.operator.subscription_diagnostic_router import router as subscription_diagnostic_router
 from app.rbac.role_assignments_router import router as role_assignments_router
 from app.parametres.routes import router as parametres_router
+from app.parametres.approbation_routes import router as approbations_router
 from app.operations.router import router as operations_router
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
 # BE-158 : paramètres résolus et modifications, sous /api/v1/parametres.
 api_router.include_router(parametres_router, prefix="/parametres", tags=["parametres"])
+api_router.include_router(approbations_router, prefix="/approbations", tags=["approbations"])
 api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 api_router.include_router(organizations_router, prefix="/organizations", tags=["organizations"])
 api_router.include_router(billing_current_organization_router, prefix="/organizations", tags=["billing"])

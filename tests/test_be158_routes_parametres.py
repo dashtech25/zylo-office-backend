@@ -148,7 +148,7 @@ async def test_be158_ca3_version_attendue_perimee_renvoie_409_sans_ecriture(clie
     )
 
     assert reponse.status_code == 409, reponse.text
-    assert reponse.json()["code"] == "VERSION_CONFLICT" or "VERSION_CONFLICT" in reponse.text
+    assert reponse.json()["error"]["code"] == "VERSION_CONFLICT"
     assert await _versions(cle, org_id) == [(1, True, "v1")], "un conflit de version ne modifie rien"
 
 
@@ -200,7 +200,8 @@ async def test_be158_ca5_scope_hors_tenant_renvoie_404_sans_fuite(client: AsyncC
 
     assert scope_vise.status_code == 404, scope_vise.text
     assert scope_inexistant.status_code == 404
-    assert scope_vise.json() == scope_inexistant.json(), "la réponse ne révèle pas l'existence du scope"
+    # Seule l'erreur est comparée : `request_id` est propre à chaque requête.
+    assert scope_vise.json()["error"] == scope_inexistant.json()["error"], "la réponse ne révèle pas l'existence du scope"
 
 
 async def test_be158_restauration_renvoie_nouvelle_version(client: AsyncClient, registered_user: dict, organization: dict):

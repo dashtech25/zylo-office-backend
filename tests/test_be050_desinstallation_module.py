@@ -204,7 +204,8 @@ def _url(organisation_id: uuid.UUID, module_id: uuid.UUID) -> str:
 def _entete(token: str, organisation_id: uuid.UUID, cle: str | None = None) -> dict:
     entete = {"Authorization": f"Bearer {token}", "X-Organization-Id": str(organisation_id)}
     if cle is not None:
-        entete[EN_TETE_IDEMPOTENCE] = cle
+        # Clé de 16 caractères au minimum (core/idempotency) : le libellé de test est préfixé.
+        entete[EN_TETE_IDEMPOTENCE] = f"be050-idem-{cle}"
     return entete
 
 

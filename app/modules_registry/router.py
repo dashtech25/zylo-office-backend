@@ -38,6 +38,7 @@ from app.modules_registry.schemas import (
     OrganizationModuleResponse,
     SetModuleActivationRequest,
 )
+from app.rbac.garde_acces_module import require_module_action
 from app.rbac.guards import get_current_organization_id
 from app.rbac.service import require_permission
 from app.shared.pagination import PaginationParams, paginate
@@ -84,7 +85,7 @@ async def get_current_organization_module_access(
     "/{organization_id}/modules/{module_id}/permissions",
     response_model=list[ModulePermissionResponse],
     summary="Permissions déclarées par la version installée d'un module (BE-055)",
-    dependencies=[Depends(require_permission(ORGANIZATION_MODULE_READ))],
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_READ)), Depends(require_permission(ORGANIZATION_MODULE_READ))],
 )
 async def list_module_permissions(
     module_id: uuid.UUID,
@@ -104,7 +105,7 @@ async def list_module_permissions(
 @organizations_modules_router.post(
     "/{organization_id}/modules/{module_id}/installations",
     summary="Installer techniquement un module pour une organisation (BE-047)",
-    dependencies=[Depends(require_permission(ORGANIZATION_MODULE_INSTALL))],
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_INSTALL)), Depends(require_permission(ORGANIZATION_MODULE_INSTALL))],
 )
 async def installer_module(
     organization_id: uuid.UUID,
@@ -154,7 +155,7 @@ async def installer_module(
 @organizations_modules_router.post(
     "/{organization_id}/modules/{module_id}/upgrades",
     summary="Mettre à jour une installation vers une version cible rN+1 (BE-051)",
-    dependencies=[Depends(require_permission(ORGANIZATION_MODULE_UPGRADE))],
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_UPGRADE)), Depends(require_permission(ORGANIZATION_MODULE_UPGRADE))],
 )
 async def mettre_a_jour_module(
     organization_id: uuid.UUID,
@@ -206,7 +207,7 @@ async def mettre_a_jour_module(
     "/{organization_id}/modules/{module_id}/installations/{operation_id}",
     response_model=ModuleInstallationResponse,
     summary="Relire une opération d'installation (BE-047)",
-    dependencies=[Depends(require_permission(ORGANIZATION_MODULE_INSTALL))],
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_INSTALL)), Depends(require_permission(ORGANIZATION_MODULE_INSTALL))],
 )
 async def lire_operation_installation(
     organization_id: uuid.UUID,
@@ -241,7 +242,7 @@ def _reponse_disponibilite(ligne: ModuleInstallation) -> DisponibiliteResponse:
     "/{organization_id}/modules/{module_id}",
     response_model=DisponibiliteResponse,
     summary="Lire l'état de disponibilité d'un module pour l'organisation (BE-048)",
-    dependencies=[Depends(require_permission(ORGANIZATION_MODULE_READ))],
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_READ)), Depends(require_permission(ORGANIZATION_MODULE_READ))],
 )
 async def lire_disponibilite_module(
     organization_id: uuid.UUID,
@@ -262,7 +263,7 @@ async def lire_disponibilite_module(
     "/{organization_id}/modules/{module_id}/activation",
     response_model=DisponibiliteResponse,
     summary="Activer un module installé pour l'organisation (BE-048)",
-    dependencies=[Depends(require_permission(ORGANIZATION_MODULE_ACTIVATE))],
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_ACTIVATE)), Depends(require_permission(ORGANIZATION_MODULE_ACTIVATE))],
 )
 async def activer_module(
     organization_id: uuid.UUID,
@@ -293,7 +294,7 @@ async def activer_module(
     "/{organization_id}/modules/{module_id}/installation",
     response_model=ModuleInstallationResponse,
     summary="Désinstaller un module pour l'organisation, sans purge des données (BE-050)",
-    dependencies=[Depends(require_permission(ORGANIZATION_MODULE_UNINSTALL))],
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_UNINSTALL)), Depends(require_permission(ORGANIZATION_MODULE_UNINSTALL))],
 )
 async def supprimer_installation_module(
     organization_id: uuid.UUID,
@@ -341,7 +342,7 @@ async def supprimer_installation_module(
     "/{organization_id}/modules/{module_id}/deactivation",
     response_model=DisponibiliteResponse,
     summary="Désactiver un module pour l'organisation (BE-048)",
-    dependencies=[Depends(require_permission(ORGANIZATION_MODULE_ACTIVATE))],
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_ACTIVATE)), Depends(require_permission(ORGANIZATION_MODULE_ACTIVATE))],
 )
 async def desactiver_module(
     organization_id: uuid.UUID,

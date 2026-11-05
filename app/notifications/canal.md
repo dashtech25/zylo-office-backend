@@ -29,6 +29,7 @@ fournisseur : le canal est un nom opaque, et aucun canal n'est présumé (QE-PAR
 | Cas | Code | Statut HTTP |
 | --- | --- | --- |
 | Canal absent ou indisponible (tentative tracée `retarde`) | CHANNEL_UNAVAILABLE | 503 |
+| Panne de l'adaptateur (exception autre que `AppError`, tentative tracée `retarde`, sans détail interne) | CHANNEL_UNAVAILABLE | 503 |
 | Notification non éligible, ou destinataire déjà arrêté sur la catégorie | PERMISSION_DENIED | 403 |
 | Canal inconnu ou résultat hors énumération | SCHEMA_INVALID | 422 |
 

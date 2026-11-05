@@ -1,0 +1,10 @@
+{
+  "scenario": "BE258-CA4",
+  "version": 1,
+  "fichier_test": "test_be258_ca4_resultats_versionnes.py",
+  "resultat": "vert",
+  "date": "2026-11-05",
+  "tests": [
+    "test_be258_ca4_resultat_de_scenario_versionne"
+  ]
+}

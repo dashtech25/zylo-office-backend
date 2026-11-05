@@ -222,8 +222,6 @@ async def test_ca5_canal_sans_consentement_nest_pas_utilise():
     async with AsyncSessionLocal() as db:
         owner = await _utilisateur(db, "consent")
         org = await _organisation(db, owner)
-        await _membre(db, org, owner)
-        await db.commit()
         notification = await _notification(db, owner.id)
         await modifier_preference(
             db,

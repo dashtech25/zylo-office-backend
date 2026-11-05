@@ -142,17 +142,19 @@ async def refresh(
 async def logout(
     request: Request, response: Response, data: RefreshRequest | None = None, db: AsyncSession = Depends(get_db)
 ) -> None:
-    """Révoque le refresh token de la session et efface les cookies.
+    """Déconnexion (BE-188) : révoque la session présentée et efface les cookies.
 
-    Sans jeton (cookie absent, corps absent), la réponse reste 204 : une déconnexion
-    déjà faite n'est pas une erreur. Une requête portée par cookie sans CSRF valide
-    est refusée AVANT toute écriture, cookies compris.
+    Droits : logout exige une session valide. Sans jeton (cookie et corps absents),
+    jeton inconnu, expiré ou déjà révoqué : 401 `invalid_refresh_token`, sans rien
+    écrire. Une requête portée par cookie sans origine ni CSRF valides est refusée
+    (403) AVANT toute écriture, cookies compris.
     """
     jeton, par_cookie = _jeton_de_rafraichissement(request, data)
+    if jeton is None:
+        raise AppError(code="invalid_refresh_token", message="Refresh token invalide, expiré ou révoqué.", status_code=401)
     if par_cookie:
         verifie_csrf_et_origine(request)
-    if jeton is not None:
-        await service.revoke_refresh_token(db, jeton)
+    await service.revoke_refresh_token(db, jeton)
     efface_sessions(response)
     response.headers["Cache-Control"] = "no-store"
 

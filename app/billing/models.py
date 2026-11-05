@@ -451,6 +451,42 @@ class PlanChange(UUIDPrimaryKeyMixin, Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False, comment="Statut de la demande : scheduled (BE-088).")
     previewJson: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="Aperçu présenté au moment de la demande (BE-088).")
 
+class EntitlementSync(UUIDPrimaryKeyMixin, Base):
+    """Demande de synchronisation des droits d'un abonnement vers PH-09 (BE-085).
+
+    PH-09 reste la seule autorité de droits : cette table ne porte que le suivi de la
+    demande et de son issue. Cycle : `requested -> applied | failed | retry_pending`,
+    `retry_pending -> applied | failed`. `applied` et `failed` sont terminaux : une
+    synchronisation en échec ne repasse jamais à `applied`, une nouvelle demande crée une
+    nouvelle ligne (BE-085, CA-1). `attempts` compte les issues enregistrées.
+    """
+    __tablename__ = "entitlement_sync"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('requested', 'applied', 'failed', 'retry_pending')",
+            name="ck_entitlement_sync_status",
+        ),
+        {"comment": "Suivi d'une demande de synchronisation des droits d'un abonnement (BE-085)."},
+    )
+
+    subscriptionId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("subscription.id"), nullable=False, index=True,
+        comment="Abonnement dont les droits doivent être synchronisés.",
+    )
+    status: Mapped[str] = mapped_column(
+        String(30), nullable=False, comment="Statut : requested, applied, failed ou retry_pending (BE-085).",
+    )
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0", comment="Nombre d'issues enregistrées (BE-085).",
+    )
+    lastErrorCode: Mapped[str | None] = mapped_column(
+        String(60), nullable=True, comment="Dernier code d'erreur de synchronisation, nul si applied (BE-085).",
+    )
+    requestedAt: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, comment="Date de la demande de synchronisation (BE-085).",
+    )
+
+
 class Quote(Base):
     """Devis (Quote) d'un achat, du tenant bénéficiaire à un compte payeur (BE-077).
 

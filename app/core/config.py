@@ -207,6 +207,11 @@ class Settings(BaseSettings):
     # que si l'adresse du pair direct figure dans cette liste. Vide = aucun proxy.
     AUTH_RATE_LIMIT_TRUSTED_PROXIES: list[str] = []
 
+    # Limites d'usage (BE-253) : compteur persistant par (tenant, identité) et par
+    # fenêtre fixe. Valeurs provisoires : seuil produit non décidé (QE-EXP-07).
+    RATE_LIMIT_MAX_REQUETES: int = 600
+    RATE_LIMIT_FENETRE_SECONDES: int = 60
+
     # Quotas (BE-191) : deux familles configurées séparément. Quota produit : nombre
     # de requêtes par fenêtre, par tenant (décision produit, QE-API-17). Limite
     # technique : protection de l'infrastructure, indépendante du produit.

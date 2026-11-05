@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import ratelimit
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, engine
 from app.core.errors import AppError, register_exception_handlers
 from app.core.ratelimit import cle_limite, consomme, exiger_limite
 from app.shared.quotas import PolitiqueQuota
@@ -36,6 +36,10 @@ RACINE_APP = Path(__file__).resolve().parents[1] / "app"
 
 @pytest.fixture
 async def db():
+    # Même précaution que la fixture `client` de conftest.py : `engine` est un
+    # singleton ; sans dispose(), les connexions poolées d'une boucle précédente
+    # sont réutilisées dans cette boucle et asyncpg lève "attached to a different loop".
+    await engine.dispose()
     async with AsyncSessionLocal() as session:
         yield session
 

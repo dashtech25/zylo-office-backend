@@ -21,6 +21,7 @@ from app.auth import models as auth_models  # noqa: F401
 from app.billing import models as billing_models  # noqa: F401
 from app.files import models as files_models  # noqa: F401
 from app.core import idempotency as idempotency_models  # noqa: F401
+from app.core import ratelimit as ratelimit_models  # noqa: F401
 from app.identity import models as identity_models  # noqa: F401
 from app.integrations import models as integrations_models  # noqa: F401
 from app.location import models as location_models  # noqa: F401

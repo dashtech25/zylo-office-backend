@@ -47,6 +47,7 @@ GESTES_SENSIBLES = frozenset({
     "billing.plan.change",
     "billing.subscription.terminate",
     "billing.invoice.finalize",
+    "billing.credit_note.issue",
 })
 
 # Périmètres d'une entrée : payeur, tenant bénéficiaire, bénéficiaire (BE-071).

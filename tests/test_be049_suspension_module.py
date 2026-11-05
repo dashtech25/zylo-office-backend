@@ -338,7 +338,7 @@ async def test_ca4_reprise_refusee_si_entitlement_non_granted_etat_reste_suspend
                 )
             )
         ).scalar_one()
-        ligne.status = "suspended"
+        ligne.status = "expired"  # statut autorisé par ck_subscription_entitlement_status
         await db.commit()
     etat = await _etat(client, proprietaire, organisation_id, module_id)
 
@@ -406,7 +406,7 @@ async def test_reprise_refusee_si_release_incompatible_etat_reste_suspended(clie
     organisation_id, module_id, _ = await _module_suspendu(client, proprietaire)
     async with AsyncSessionLocal() as db:
         module = (await db.execute(select(Module).where(Module.id == module_id))).scalar_one()
-        module.manifestVersion = "version-non-supportee-be049"
+        module.manifestVersion = 999  # entier hors VERSIONS_MANIFESTE_SUPPORTEES (colonne Integer)
         await db.commit()
     etat = await _etat(client, proprietaire, organisation_id, module_id)
 

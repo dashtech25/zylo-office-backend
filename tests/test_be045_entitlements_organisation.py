@@ -204,7 +204,7 @@ async def test_proprietaire_lit_source_periode_quota_et_etat(
                                headers=_entete(registered_user["accessToken"], organization["id"]))
 
     assert reponse.status_code == 200
-    ligne = next(item for item in reponse.json() if item["entitlementCode"] == "be045.lecture")
+    ligne = next(item for item in reponse.json()["included"] if item["entitlementCode"] == "be045.lecture")
     assert ligne["source"] == "offre"
     assert ligne["scope"] == "organisation"
     assert ligne["state"] == "active"
@@ -228,5 +228,5 @@ async def test_quota_unit_absent_renvoie_null_sans_valeur_inventee(
     reponse = await client.get(f"/api/v1/organizations/{organization['id']}/entitlements",
                                headers=_entete(registered_user["accessToken"], organization["id"]))
 
-    ligne = next(item for item in reponse.json() if item["entitlementCode"] == "be045.sans.unite")
+    ligne = next(item for item in reponse.json()["included"] if item["entitlementCode"] == "be045.sans.unite")
     assert ligne["quotaUnit"] is None

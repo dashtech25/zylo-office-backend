@@ -92,6 +92,18 @@ class OrganizationEntitlementResponse(BaseModel):
     stateVersion: int
 
 
+class EntitlementsOrganisationResponse(BaseModel):
+    """Réponse de `GET /organizations/{organization_id}/entitlements` (BE-107).
+
+    Deux groupes distincts, jamais mélangés : `included` regroupe les droits accordés par
+    l'offre (`source` = `offre`), `addOns` tous les autres droits (achats additionnels,
+    essais, allocations, usage). Chaque ligne a la même forme que `OrganizationEntitlementResponse`.
+    """
+
+    included: list[OrganizationEntitlementResponse]
+    addOns: list[OrganizationEntitlementResponse]
+
+
 class CreateInvoiceRequest(BaseModel):
     subscriptionId: uuid.UUID
 

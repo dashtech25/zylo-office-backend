@@ -18,11 +18,13 @@ Les anciennes routes `/api/v1/billing/organizations/{id}/invoices` restent en pl
 (app/billing/router.py) ; elles ne sont pas la surface de lecture de BE-027.
 
 Entitlements d'une organisation désignée par son identifiant (BE-045) :
-- `GET /organizations/{organization_id}/entitlements` : liste des entitlements avec source,
-  niveau, état calculé, période, limite et unité de quota. Le chemin porte l'organisation ;
+- `GET /organizations/{organization_id}/entitlements` : entitlements avec source, niveau, état
+  calculé, période, limite et unité de quota, en deux groupes (BE-107) : `included` (source
+  `offre`) et `addOns` (autres sources). Le chemin porte l'organisation ;
   l'en-tête `X-Organization-Id` doit être identique (sinon 404, garde `organisation_cible`).
 - Non-membre ou autre tenant : 404 `organization_not_found`, sans aucune donnée.
 - Permission : `organization.entitlement.read` (QE-MOD-16). Membre sans elle : 403.
+- Lecture seule : POST, PATCH et DELETE sur ce chemin répondent 405.
 """
 
 import uuid
@@ -35,7 +37,7 @@ from app.billing import entitlements as calcul_entitlements
 from app.billing import service
 from app.billing.models import Invoice, Subscription
 from app.billing.permissions import BILLING_INVOICE_READ, ORGANIZATION_ENTITLEMENT_READ
-from app.billing.schemas import InvoiceResponse, OrganizationEntitlementResponse
+from app.billing.schemas import EntitlementsOrganisationResponse, InvoiceResponse, OrganizationEntitlementResponse
 from app.core.database import get_db
 from app.rbac.guards import get_current_organization_id
 from app.rbac.service import require_permission
@@ -43,6 +45,9 @@ from app.shared.pagination import PaginationParams, paginate
 from app.shared.schemas import Page
 
 router = APIRouter()
+
+# Source d'un droit inclus dans l'offre (sourceAttribution) ; tout autre droit est un add-on (BE-107).
+SOURCE_INCLUSE = "offre"
 
 
 @router.get(
@@ -80,23 +85,28 @@ async def get_current_invoice(
 
 @router.get(
     "/{organization_id}/entitlements",
-    response_model=list[OrganizationEntitlementResponse],
+    response_model=EntitlementsOrganisationResponse,
     dependencies=[Depends(require_permission(ORGANIZATION_ENTITLEMENT_READ))],
-    summary="Lister les entitlements d'une organisation (BE-045)",
+    summary="Lister les entitlements d'une organisation, droits inclus et add-ons séparés (BE-045, BE-107)",
 )
 async def list_organization_entitlements(
     organization_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
-) -> list[OrganizationEntitlementResponse]:
-    """Entitlements de l'organisation du chemin, état calculé à la lecture.
+) -> EntitlementsOrganisationResponse:
+    """Entitlements de l'organisation du chemin, état calculé à la lecture, en deux groupes.
 
     La garde (`get_current_organization_id`) refuse d'abord une organisation étrangère ou
     sans appartenance active par un 404 uniforme ; la permission est ensuite exigée (403).
     Seules les lignes de cette organisation sont lues (isolation). `quotaUnit` est nul quand
     la capacité ne porte pas d'unité.
+
+    Séparation (BE-107) : `included` = source `offre` (droits du plan), `addOns` = toute
+    autre source (achat additionnel, essai, allocation admin, usage réel). Les deux groupes
+    ne se recouvrent jamais ; l'ordre de lecture est conservé dans chaque groupe.
+    Lecture seule : la route n'expose aucune méthode d'écriture (POST/PATCH/DELETE = 405).
     """
     calcules = await calcul_entitlements.calculer_entitlements(db, organization_id)
-    return [
+    lignes = [
         OrganizationEntitlementResponse(
             id=entitlement.id,
             moduleCode=entitlement.moduleCode,
@@ -112,3 +122,7 @@ async def list_organization_entitlements(
         )
         for entitlement in calcules
     ]
+    return EntitlementsOrganisationResponse(
+        included=[ligne for ligne in lignes if ligne.source == SOURCE_INCLUSE],
+        addOns=[ligne for ligne in lignes if ligne.source != SOURCE_INCLUSE],
+    )

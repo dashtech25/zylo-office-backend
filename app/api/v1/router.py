@@ -49,6 +49,7 @@ from app.operator.health import admin_router as operator_admin_router
 from app.operator.health import internal_router as internal_health_router
 from app.operator.admin_audit_router import router as admin_audit_router
 from app.operator.cases_router import router as cases_router
+from app.operator.commands_router import router as commands_router
 from app.rbac.role_assignments_router import router as role_assignments_router
 
 api_router = APIRouter()
@@ -104,6 +105,8 @@ api_router.include_router(admin_audit_router, prefix="/admin", tags=["admin-audi
 api_router.include_router(role_assignments_router, prefix="/admin", tags=["admin-role-assignments"])
 # BE-123 : cas d'intervention de support (POST/GET /admin/cases, assign, close).
 api_router.include_router(cases_router, prefix="/admin", tags=["admin-cases"])
+# BE-124 : intentions de commande opérateur idempotentes (POST/GET /admin/commands).
+api_router.include_router(commands_router, prefix="/admin", tags=["admin-commands"])
 api_router.include_router(internal_health_router, tags=["health"])
 api_router.include_router(zylo_liquid_router, prefix="/zylo-liquid", tags=["zylo-liquid"])
 api_router.include_router(files_router, prefix="/zylo-liquid", tags=["files"])

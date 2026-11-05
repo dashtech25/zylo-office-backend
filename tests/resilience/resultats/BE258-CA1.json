@@ -1,0 +1,10 @@
+{
+  "scenario": "BE258-CA1",
+  "version": 1,
+  "fichier_test": "test_be258_ca1_migration_interrompue.py",
+  "resultat": "vert",
+  "date": "2026-11-05",
+  "tests": [
+    "test_be258_ca1_migration_interrompue_puis_reprise_sans_corruption"
+  ]
+}

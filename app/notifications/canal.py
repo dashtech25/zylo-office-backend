@@ -104,8 +104,9 @@ class AdaptateurCanal(Protocol):
     """Interface qu'un canal de livraison implémente.
 
     `livrer` reçoit un `MessageLivraison` et renvoie un `ResultatLivraison`. Un canal
-    indisponible lève `AppError` avec le code `CHANNEL_UNAVAILABLE` (503) ; toute autre
-    exception remonte à l'appelant sans être convertie en résultat.
+    indisponible lève `AppError` avec le code `CHANNEL_UNAVAILABLE` (503). Toute autre
+    exception (panne de la dépendance) est convertie par `livrer_notification` en
+    `CHANNEL_UNAVAILABLE`, sans son détail (BE-258 CA-3).
     """
 
     async def livrer(self, message: MessageLivraison) -> ResultatLivraison: ...
@@ -234,7 +235,17 @@ async def livrer_notification(db: AsyncSession, *, notificationId: uuid.UUID, ca
     )
     try:
         adaptateur = obtenir_adaptateur(canal)
-        resultat = _valider_resultat(await adaptateur.livrer(message))
+        try:
+            brut = await adaptateur.livrer(message)
+        except AppError:
+            raise
+        except Exception as exc:  # noqa: BLE001 : panne de dépendance, jamais relayée telle quelle (BE-258 CA-3)
+            raise AppError(
+                CODE_CANAL_INDISPONIBLE,
+                "Canal de notification indisponible.",
+                status_code=STATUS_CANAL_INDISPONIBLE,
+            ) from None
+        resultat = _valider_resultat(brut)
     except AppError as erreur:
         if erreur.code != CODE_CANAL_INDISPONIBLE:
             raise

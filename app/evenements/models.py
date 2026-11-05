@@ -31,20 +31,35 @@ class OutboxEvenement(UUIDPrimaryKeyMixin, Base):
     `payload` contient l'enveloppe canonique complète (BE-150), telle que validée. La
     ligne n'est visible aux autres transactions qu'après le commit de la transaction
     métier qui l'a écrite (CA-1).
+
+    BE-234 : `portee` distingue un événement de tenant (`tenantId` renseigné) d'un
+    événement plateforme (`tenantId` nul, type dans l'espace `Plateforme.`). La contrainte
+    `ck_outbox_evenement_portee` impose cette cohérence en base. `acteur` et `correlationId`
+    sont recopiés de l'enveloppe pour être interrogeables sans décoder `payload`. `tentatives`
+    est réservé à la consommation (BE-235) : la publication l'initialise à 0 et ne le modifie pas.
     """
 
     __tablename__ = "outbox_evenement"
     __table_args__ = (
         CheckConstraint("statut IN ('publie')", name="ck_outbox_evenement_statut"),
+        CheckConstraint("portee IN ('tenant', 'plateforme')", name="ck_outbox_evenement_portee"),
+        CheckConstraint(
+            "(portee = 'tenant' AND \"tenantId\" IS NOT NULL) OR (portee = 'plateforme' AND \"tenantId\" IS NULL)",
+            name="ck_outbox_evenement_portee_tenant",
+        ),
         {"comment": "Outbox : événements de domaine écrits dans la transaction métier, publiés après commit."},
     )
 
     eventId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True)
     eventType: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
     schemaVersion: Mapped[int] = mapped_column(Integer, nullable=False)
-    tenantId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True)
+    portee: Mapped[str] = mapped_column(String(20), nullable=False, server_default="tenant")
+    tenantId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=True, index=True)
+    acteur: Mapped[dict] = mapped_column(JSON, nullable=False, server_default="{}")
+    correlationId: Mapped[str | None] = mapped_column(String(200), nullable=True)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     statut: Mapped[str] = mapped_column(String(20), nullable=False, server_default="publie")
+    tentatives: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     publieAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

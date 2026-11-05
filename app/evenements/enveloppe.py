@@ -38,6 +38,11 @@ MARQUEURS_CLE_SECRETE = ("password", "passwd", "secret", "token", "apikey", "mot
 # l'identité est un TENANT_MISMATCH (CA-4), pas une correction silencieuse.
 CLES_TENANT_PAYLOAD = ("tenantId", "organizationId")
 
+# Espace de noms réservé aux événements plateforme (BE-234, CA-3). Un événement de tenant ne peut pas
+# l'utiliser : `valider_enveloppe` le refuse faute de `tenantId`, et `valider_enveloppe_plateforme`
+# exige ce préfixe pour tout événement sans tenant.
+PREFIXE_TYPE_PLATEFORME = "Plateforme."
+
 
 class EnveloppeEvenement(BaseModel):
     """Enveloppe validée d'un événement de domaine.
@@ -73,6 +78,18 @@ class EnveloppeEvenement(BaseModel):
         if valeur.tzinfo is None or valeur.utcoffset() is None:
             raise ValueError("occurredAt doit porter un fuseau horaire")
         return valeur.astimezone(timezone.utc)
+
+
+class EnveloppeEvenementPlateforme(EnveloppeEvenement):
+    """Enveloppe d'un événement plateforme (BE-234, CA-3) : aucun tenant, type dans l'espace `Plateforme.`.
+
+    Hérite de toutes les règles de `EnveloppeEvenement`, sauf `tenantId` qui doit être présent
+    et nul : un événement plateforme ne se rattache à aucune organisation. Son type commence par
+    `PREFIXE_TYPE_PLATEFORME`, ce qui le sépare de tout événement de tenant. Construire ce modèle
+    hors de `valider_enveloppe_plateforme` contourne ces vérifications.
+    """
+
+    tenantId: None = Field(description="Toujours nul : un événement plateforme n'appartient à aucun tenant (CA-3).")
 
 
 def _cle_est_secrete(cle: str) -> bool:
@@ -130,4 +147,36 @@ def valider_enveloppe(donnees: Mapping[str, Any], *, tenant_identite: uuid.UUID)
         if cle in enveloppe.payload and str(enveloppe.payload[cle]) != str(tenant_identite):
             raise AppError(code="TENANT_MISMATCH", message="Le payload cite un autre tenant que l'identité.", status_code=403)
 
+    return enveloppe
+
+
+def valider_enveloppe_plateforme(donnees: Mapping[str, Any]) -> EnveloppeEvenementPlateforme:
+    """Valide une enveloppe d'événement plateforme (BE-234, CA-3) et renvoie sa forme canonique.
+
+    Ordre des contrôles (le premier échec gagne) :
+    1. schéma : `EnveloppeEvenementPlateforme`, donc `tenantId` présent et nul -> `SCHEMA_INVALID` ;
+    2. espace de noms : type sans `PREFIXE_TYPE_PLATEFORME` -> `SCHEMA_INVALID` ;
+    3. secret : clé secrète dans le payload -> `SCHEMA_INVALID`.
+
+    L'appelant doit avoir vérifié qu'un émetteur plateforme interne agit (`PERMISSION_DENIED`
+    se contrôle dans `app.evenements.outbox`). Ne persiste ni ne distribue rien.
+    """
+    try:
+        enveloppe = EnveloppeEvenementPlateforme.model_validate(dict(donnees))
+    except ValidationError:
+        raise AppError(code="SCHEMA_INVALID", message="Enveloppe d'événement plateforme invalide.", status_code=400)
+
+    if not enveloppe.eventType.startswith(PREFIXE_TYPE_PLATEFORME):
+        raise AppError(
+            code="SCHEMA_INVALID",
+            message="Un événement sans tenant doit porter un type de l'espace plateforme.",
+            status_code=400,
+        )
+
+    if _contient_cle_secrete(enveloppe.payload):
+        raise AppError(
+            code="SCHEMA_INVALID",
+            message="Le payload contient une donnée secrète : événement refusé.",
+            status_code=400,
+        )
     return enveloppe

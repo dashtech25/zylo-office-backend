@@ -14,6 +14,15 @@ Contrat de publication (`enregistrer_evenement`) :
 - l'enveloppe est validée par `valider_enveloppe` : schéma, secret, tenant (CA-4) ;
 - un `eventId` déjà présent renvoie l'enveloppe sans nouvelle ligne (déduplication).
 
+BE-234, extension versionnée :
+- chaque ligne porte `acteur` et `correlationId` recopiés de l'enveloppe, et `schemaVersion` ;
+  `tentatives` part à 0 (CA-2) ;
+- un événement plateforme (sans tenant) passe par `enregistrer_evenement_plateforme`, réservé à
+  un émetteur interne (`PERMISSION_DENIED` sinon), avec un type dans l'espace `Plateforme.`. Il
+  est écrit avec `portee = plateforme` et `tenantId` nul (CA-3) ;
+- la lecture par tenant ne renvoie que les événements `portee = tenant` : un événement plateforme
+  n'est jamais lu ni distribué à un consommateur de tenant (CA-4).
+
 Contrat de consommation (`consommer_evenement`, `distribuer_pour_consommateur`) :
 - un événement n'est consommé que par des consommateurs du même tenant (CA-4) : un
   consommateur d'un autre tenant ne reçoit rien et rien n'est consigné ;
@@ -39,7 +48,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.erreurs.codes import CodeErreur, ErreurCatalogue
-from app.evenements.enveloppe import EnveloppeEvenement, valider_enveloppe
+from app.evenements.enveloppe import (
+    EnveloppeEvenement,
+    EnveloppeEvenementPlateforme,
+    valider_enveloppe,
+    valider_enveloppe_plateforme,
+)
 from app.evenements.models import ConsommationEvenement, OutboxEvenement
 
 journal = logging.getLogger(__name__)
@@ -53,13 +67,14 @@ async def enregistrer_evenement(
     *,
     emetteur_tenant: uuid.UUID | None,
 ) -> EnveloppeEvenement:
-    """Écrit un événement dans l'outbox, dans la transaction de l'appelant, sans commit.
+    """Écrit un événement de tenant dans l'outbox, dans la transaction de l'appelant, sans commit.
 
     `emetteur_tenant` est le tenant de l'identité authentifiée de l'émetteur ; `None` signifie
     qu'aucun émetteur authentifié n'agit. Renvoie l'enveloppe canonique.
 
     Erreurs : `PERMISSION_DENIED` (403) sans émetteur ; `SCHEMA_INVALID` ou `TENANT_MISMATCH`
-    selon `valider_enveloppe`. Aucune ligne n'est écrite en cas d'erreur.
+    selon `valider_enveloppe`. Un événement sans tenant est refusé `SCHEMA_INVALID` : il relève de
+    `enregistrer_evenement_plateforme` (BE-234, CA-3). Aucune ligne n'est écrite en cas d'erreur.
 
     La vérification d'un doublon est une lecture sans verrou : deux écritures concurrentes du
     même `eventId` se départagent par la contrainte d'unicité, et la seconde lève
@@ -69,7 +84,39 @@ async def enregistrer_evenement(
         raise ErreurCatalogue(CodeErreur.PERMISSION_DENIED, detail="émetteur d'événement non authentifié")
 
     enveloppe = valider_enveloppe(donnees, tenant_identite=emetteur_tenant)
+    return await _ecrire_evenement(db, enveloppe, portee="tenant")
 
+
+async def enregistrer_evenement_plateforme(
+    db: AsyncSession,
+    donnees: dict[str, Any],
+    *,
+    emetteur_plateforme: bool,
+) -> EnveloppeEvenementPlateforme:
+    """Écrit un événement plateforme (sans tenant) dans l'outbox, sans commit (BE-234, CA-3).
+
+    `emetteur_plateforme` doit valoir `True` : seul un acteur interne de la plateforme publie ce
+    type d'événement (droit « publication interne uniquement »). Sinon `PERMISSION_DENIED` (403).
+
+    Le type doit être dans l'espace `Plateforme.` et `tenantId` doit être nul : la ligne est
+    écrite avec `portee = plateforme`, ce qui la sépare des événements de tenant. Erreur :
+    `SCHEMA_INVALID` selon `valider_enveloppe_plateforme`. Aucune ligne n'est écrite en cas
+    d'erreur. Même règle de transaction que `enregistrer_evenement` : pas de commit ici.
+    """
+    if not emetteur_plateforme:
+        raise ErreurCatalogue(CodeErreur.PERMISSION_DENIED, detail="publication plateforme réservée aux acteurs internes")
+
+    enveloppe = valider_enveloppe_plateforme(donnees)
+    return await _ecrire_evenement(db, enveloppe, portee="plateforme")
+
+
+async def _ecrire_evenement(db: AsyncSession, enveloppe, *, portee: str):
+    """Insère la ligne d'outbox d'une enveloppe déjà validée ; renvoie l'enveloppe.
+
+    Factorise l'écriture pour les deux chemins (tenant et plateforme). Un `eventId` déjà présent
+    renvoie l'enveloppe sans nouvelle ligne (déduplication). `acteur` et `correlationId` sont
+    recopiés de l'enveloppe ; `tentatives` reste à sa valeur initiale 0 (consommation, BE-235).
+    """
     existant = await db.execute(select(OutboxEvenement.id).where(OutboxEvenement.eventId == enveloppe.eventId))
     if existant.scalar_one_or_none() is not None:
         journal.debug("événement déjà présent dans l'outbox (eventId=%s)", enveloppe.eventId)
@@ -80,9 +127,13 @@ async def enregistrer_evenement(
             eventId=enveloppe.eventId,
             eventType=enveloppe.eventType,
             schemaVersion=enveloppe.schemaVersion,
+            portee=portee,
             tenantId=enveloppe.tenantId,
+            acteur=enveloppe.actor,
+            correlationId=enveloppe.correlationId,
             payload=enveloppe.model_dump(mode="json"),
             statut="publie",
+            tentatives=0,
         )
     )
     await db.flush()
@@ -97,7 +148,9 @@ async def lire_evenements_pour_tenant(db: AsyncSession, tenant_id: uuid.UUID) ->
     renvoyé.
     """
     lignes = await db.execute(
-        select(OutboxEvenement).where(OutboxEvenement.tenantId == tenant_id).order_by(OutboxEvenement.createdAt, OutboxEvenement.eventId)
+        select(OutboxEvenement)
+        .where(OutboxEvenement.tenantId == tenant_id, OutboxEvenement.portee == "tenant")
+        .order_by(OutboxEvenement.createdAt, OutboxEvenement.eventId)
     )
     return [EnveloppeEvenement.model_validate(ligne.payload) for ligne in lignes.scalars()]
 

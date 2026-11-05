@@ -239,8 +239,9 @@ async def test_be138_ca4_la_reponse_de_refus_ne_contient_aucun_contenu_client(cl
     )
 
     assert reponse.status_code == 403
-    corps = reponse.json()
-    assert set(corps.keys()) <= {"code", "message", "details", "request_id", "requestId", "fieldErrors", "field_errors"}
-    assert corps.get("code") == "exceptional_access_denied"
+    # Enveloppe réelle (app/core/errors.py) : l'erreur est sous "error", request_id à la racine.
+    erreur = reponse.json()["error"]
+    assert set(erreur.keys()) <= {"code", "message", "details", "field_errors"}
+    assert erreur.get("code") == "exceptional_access_denied"
     assert organization["name"] not in reponse.text
     assert organization["slug"] not in reponse.text

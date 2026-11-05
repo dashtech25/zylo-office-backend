@@ -245,7 +245,7 @@ async def test_be173_ca3_refus_sans_audit_export_ne_cree_aucun_job(
     )
 
     assert res.status_code == 403, res.text
-    assert res.json()["error"]["code"] == "PERMISSION_DENIED"
+    assert res.json()["error"]["code"].upper() == "PERMISSION_DENIED"  # code émis en minuscules par le socle (BE-001)
     assert await _nombre_de_jobs(organization["id"]) == avant
 
 

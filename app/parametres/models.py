@@ -100,3 +100,40 @@ class SettingValue(UUIDPrimaryKeyMixin, Base):
     createdBy: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False, index=True)
     createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     reason: Mapped[str] = mapped_column(String(500), nullable=False)
+
+
+class ApprobationParametre(UUIDPrimaryKeyMixin, Base):
+    """Demande d'approbation d'un changement de paramètre sensible (BE-159).
+
+    Le changement demandé n'est pas écrit dans `setting_value` tant que la demande est en
+    attente : il est seulement porté par `valeurProposee`. L'application (une nouvelle version
+    appliquée) n'a lieu qu'à l'approbation, par `app.parametres.approbation`.
+
+    - `settingKey`, `scopeKind`, `scopeId` : paramètre et portée visés, comme dans `setting_value` ;
+      `scopeId` sert aussi d'isolation tenant pour les lectures et décisions (CA-5) ;
+    - `demandeur` : utilisateur qui a proposé le changement ; il ne peut jamais le décider ;
+    - `approbateur` : utilisateur qui a tranché ; nul tant que le statut est `en_attente` ;
+    - `statut` : `en_attente`, `approuvé` ou `rejeté` (CHECK en base). Une demande tranchée
+      ne change plus jamais de statut (CA-4) ;
+    - `motif` : raison de la demande, non vide. Le motif de la décision n'est pas stocké ici :
+      il est journalisé dans l'entrée d'audit `EVT-SET-02` ;
+    - `decidedAt` : date de la décision, nulle tant que la demande est en attente.
+    """
+
+    __tablename__ = "approbation_parametre"
+    __table_args__ = (
+        CheckConstraint("statut IN ('en_attente', 'approuvé', 'rejeté')", name="ck_approbation_parametre_statut"),
+        CheckConstraint("length(btrim(motif)) > 0", name="ck_approbation_parametre_motif_non_vide"),
+        {"comment": "Demandes d'approbation des changements de paramètres sensibles (BE-159)."},
+    )
+
+    settingKey: Mapped[str] = mapped_column(String(150), ForeignKey("setting_definition.key"), nullable=False)
+    scopeKind: Mapped[str] = mapped_column(String(20), nullable=False)
+    scopeId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    valeurProposee: Mapped[dict | list | str | int | float | bool | None] = mapped_column(JSON, nullable=False)
+    demandeur: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False)
+    approbateur: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=True)
+    statut: Mapped[str] = mapped_column(String(20), nullable=False, default="en_attente", server_default="en_attente")
+    motif: Mapped[str] = mapped_column(String(500), nullable=False)
+    createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    decidedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

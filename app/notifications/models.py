@@ -1,6 +1,6 @@
-"""Modèles de la capacité Notifications partagée : abonnements Web Push et
-éléments d'inbox explicitement adressés. Aucun type de notification ni
-producteur produit n'est défini dans ce module.
+"""Modèles de la capacité Notifications partagée : abonnements Web Push, éléments
+d'inbox explicitement adressés, catégories et règles de notification (BE-167).
+Aucun producteur métier n'est branché dans ce module.
 
 Tables : `notificationPushSubscription` (PushSubscription) et
 `notification_inbox_item` (NotificationInboxItem). Les tables sont listées
@@ -12,7 +12,7 @@ pour les tables décidées depuis, camelCase pour les plus anciennes."""
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -84,3 +84,52 @@ class NotificationInboxItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     readAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CategorieNotification(Base):
+    """Catégorie de notification déclarée par la plateforme (BE-167).
+
+    Clé naturelle `code` (identifiant stable, référencé par `regle_notification`).
+    - `audienceRegle` : règle d'audience de la catégorie, obligatoire et non vide
+      (CHECK en base, CA-1) ; sa résolution en destinataires relève de BE-169 ;
+    - `canalDefaut` : canal présumé, NULL par défaut. Aucun canal n'est présumé
+      (CA-4) ; la sémantique du canal par défaut reste QE-PAR-04 ;
+    - `actif` : statut obligatoire, vrai à la création.
+    """
+
+    __tablename__ = "categorie_notification"
+    __table_args__ = (
+        CheckConstraint("length(btrim(\"audienceRegle\")) > 0", name="ck_categorie_notification_audience_non_vide"),
+        CheckConstraint("length(btrim(code)) > 0", name="ck_categorie_notification_code_non_vide"),
+        {"comment": "Catégories de notification et leur audience (BE-167), sans canal présumé."},
+    )
+
+    code: Mapped[str] = mapped_column(String(80), primary_key=True)
+    libelle: Mapped[str] = mapped_column(String(200), nullable=False)
+    audienceRegle: Mapped[str] = mapped_column(String(120), nullable=False)
+    canalDefaut: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    actif: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+
+
+class RegleNotification(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Règle reliant un type d'événement du catalogue à une catégorie (BE-167).
+
+    - `evenementType` : type d'événement, validé à l'écriture contre le catalogue
+      (CA-2) ; une seule règle par couple (type, catégorie) ;
+    - `categorieCode` : clé étrangère vers `categorie_notification.code` ;
+    - `audience` : référence d'audience figée ici, résolue en destinataires à
+      l'envoi uniquement (BE-169). Ne contient jamais une liste de personnes.
+    La modification de la règle est réservée à l'autorité plateforme (CA-3).
+    """
+
+    __tablename__ = "regle_notification"
+    __table_args__ = (
+        UniqueConstraint("evenementType", "categorieCode", name="uq_regle_notification_evenement_categorie"),
+        {"comment": "Règles événement vers catégorie et audience (BE-167), configurées par la plateforme."},
+    )
+
+    evenementType: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
+    categorieCode: Mapped[str] = mapped_column(
+        String(80), ForeignKey("categorie_notification.code", ondelete="RESTRICT"), nullable=False
+    )
+    audience: Mapped[str] = mapped_column(String(120), nullable=False)

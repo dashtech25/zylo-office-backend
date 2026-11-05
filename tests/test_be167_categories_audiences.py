@@ -37,6 +37,17 @@ from app.notifications.models import CategorieNotification, RegleNotification
 from app.rbac.role_assignments import PORTEE_PLATEFORME, AdminRoleAssignment
 
 
+@pytest.fixture(autouse=True)
+async def _pool_neuf():
+    """Chaque test a sa propre boucle d'événements ; le moteur est un singleton dont
+    les connexions poolées restent liées à la boucle précédente. Même remise à zéro
+    que la fixture `client` de conftest.py."""
+    from app.core.database import engine
+
+    await engine.dispose()
+    yield
+
+
 def _code() -> str:
     return f"BE167-{uuid.uuid4().hex[:12]}"
 

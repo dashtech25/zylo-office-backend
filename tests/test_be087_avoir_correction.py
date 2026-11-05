@@ -63,6 +63,13 @@ async def _approbateur_membre(client: AsyncClient, organization_id: str) -> str:
     return approbateur["id"]
 
 
+async def _identifiant(client: AsyncClient, token: str) -> str:
+    """Identifiant de l'utilisateur connecté, lu sur /auth/me (le fixture registered_user ne le porte pas)."""
+    reponse = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert reponse.status_code == 200, reponse.text
+    return reponse.json()["id"]
+
+
 def _corps(*, approbateur_id: str | None, motif: str = MOTIF_AVOIR, montant: int = MONTANT_AVOIR) -> dict:
     return {"amount": montant, "reason": motif, "approverId": approbateur_id}
 
@@ -107,11 +114,11 @@ async def test_avoir_ecrit_une_entree_d_audit_avec_motif_et_approbateur(client: 
     assert reponse.status_code == 201, reponse.text
     async with AsyncSessionLocal() as db:
         entree = await db.scalar(
-            select(AuditEvent).where(AuditEvent.action == "billing.credit_note.issue", AuditEvent.entity_id == uuid.UUID(reponse.json()["id"]))
+            select(AuditEvent).where(AuditEvent.action == "billing.credit_note.issue", AuditEvent.entityId == uuid.UUID(reponse.json()["id"]))
         )
     assert entree is not None
     assert entree.reason == MOTIF_AVOIR
-    assert entree.approval_id == approbateur
+    assert entree.approvalId == approbateur
 
 
 async def test_avoir_sans_motif_renvoie_approval_required_sans_effet(client: AsyncClient, registered_user: dict, organization: dict):
@@ -125,7 +132,7 @@ async def test_avoir_sans_motif_renvoie_approval_required_sans_effet(client: Asy
             f"/api/v1/billing/invoices/{facture_id}/credit-notes",
             json=_corps(approbateur_id=approbateur, motif=motif), headers=_entetes(token, organisation_id),
         )
-        assert reponse.status_code == 422, reponse.text
+        assert reponse.status_code == 409, reponse.text
         assert reponse.json()["error"]["code"] == "APPROVAL_REQUIRED"
     assert await _nombre_d_avoirs(facture_id) == 0
 
@@ -140,7 +147,7 @@ async def test_avoir_sans_approbateur_renvoie_approval_required_sans_effet(clien
         json=_corps(approbateur_id=None), headers=_entetes(token, organisation_id),
     )
 
-    assert reponse.status_code == 422, reponse.text
+    assert reponse.status_code == 409, reponse.text
     assert reponse.json()["error"]["code"] == "APPROVAL_REQUIRED"
     assert await _nombre_d_avoirs(facture_id) == 0
 
@@ -152,10 +159,10 @@ async def test_approbateur_identique_a_l_acteur_renvoie_approval_required(client
 
     reponse = await client.post(
         f"/api/v1/billing/invoices/{facture_id}/credit-notes",
-        json=_corps(approbateur_id=registered_user["id"]), headers=_entetes(token, organisation_id),
+        json=_corps(approbateur_id=await _identifiant(client, token)), headers=_entetes(token, organisation_id),
     )
 
-    assert reponse.status_code == 422, reponse.text
+    assert reponse.status_code == 409, reponse.text
     assert reponse.json()["error"]["code"] == "APPROVAL_REQUIRED"
     assert await _nombre_d_avoirs(facture_id) == 0
 
@@ -171,7 +178,7 @@ async def test_approbateur_non_membre_de_l_organisation_renvoie_approval_require
         json=_corps(approbateur_id=hors_organisation["id"]), headers=_entetes(token, organisation_id),
     )
 
-    assert reponse.status_code == 422, reponse.text
+    assert reponse.status_code == 409, reponse.text
     assert reponse.json()["error"]["code"] == "APPROVAL_REQUIRED"
     assert await _nombre_d_avoirs(facture_id) == 0
 

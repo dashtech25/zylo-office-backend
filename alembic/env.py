@@ -38,7 +38,6 @@ from app.operator import secrets_models as operator_secrets_models  # noqa: F401
 from app.parametres import models as parametres_models  # noqa: F401
 from app.rbac import models as rbac_models  # noqa: F401
 from app.release import models as release_models  # noqa: F401
-from app.tenants import models as tenants_models  # noqa: F401
 from app.shared import geo as shared_geo_models  # noqa: F401
 from app.shared import currency as shared_currency_models  # noqa: F401
 

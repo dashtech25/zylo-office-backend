@@ -6,16 +6,24 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.errors import AppError
 from app.core.security import get_current_user
 from app.identity.models import User
 from app.identity.permissions import ORGANIZATION_MANAGE
 from app.identity.service import require_organization_member
 from app.core.idempotency import require_idempotency_key, run_idempotent
-from app.modules_registry import declarations, installation, service
-from app.modules_registry.models import Module, OrganizationModule
-from app.modules_registry.permissions import MODULE_MANAGE, ORGANIZATION_MODULE_INSTALL, ORGANIZATION_MODULE_READ
+from app.modules_registry import declarations, disponibilite, installation, service
+from app.modules_registry.models import Module, ModuleInstallation, OrganizationModule
+from app.modules_registry.permissions import (
+    MODULE_MANAGE,
+    ORGANIZATION_MODULE_ACTIVATE,
+    ORGANIZATION_MODULE_INSTALL,
+    ORGANIZATION_MODULE_READ,
+)
 from app.modules_registry.schemas import (
     ActivateModuleRequest,
+    DisponibiliteRequest,
+    DisponibiliteResponse,
     InstallModuleRequest,
     InstalledModuleResponse,
     ModuleAccessResponse,
@@ -156,6 +164,101 @@ async def lire_operation_installation(
     opération d'une autre organisation."""
     ligne = await installation.lire_installation_par_operation(db, organization_id, module_id, operation_id)
     return ModuleInstallationResponse.model_validate(ligne)
+
+
+def _reponse_disponibilite(ligne: ModuleInstallation) -> DisponibiliteResponse:
+    """Projette l'installation sur la réponse de disponibilité, avec l'explication de l'état."""
+    return DisponibiliteResponse(
+        id=ligne.id,
+        organizationId=ligne.organizationId,
+        moduleId=ligne.moduleId,
+        moduleVersionId=ligne.moduleVersionId,
+        state=ligne.state,
+        stateVersion=ligne.stateVersion,
+        operationId=ligne.operationId,
+        lastErrorCode=ligne.lastErrorCode,
+        explanation=disponibilite.expliquer_etat(ligne.state),
+    )
+
+
+@organizations_modules_router.get(
+    "/{organization_id}/modules/{module_id}",
+    response_model=DisponibiliteResponse,
+    summary="Lire l'état de disponibilité d'un module pour l'organisation (BE-048)",
+    dependencies=[Depends(require_permission(ORGANIZATION_MODULE_READ))],
+)
+async def lire_disponibilite_module(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> DisponibiliteResponse:
+    """Renvoie l'état courant de l'installation du module et son explication.
+
+    404 si le module n'a pas d'installation non retirée dans cette organisation (y compris pour une
+    autre organisation, CA-6)."""
+    ligne = await disponibilite._installation_courante(db, organization_id, module_id)
+    if ligne is None:
+        raise AppError(code="MODULE_INSTALLATION_NOT_FOUND", message="Installation introuvable.", status_code=404)
+    return _reponse_disponibilite(ligne)
+
+
+@organizations_modules_router.post(
+    "/{organization_id}/modules/{module_id}/activation",
+    response_model=DisponibiliteResponse,
+    summary="Activer un module installé pour l'organisation (BE-048)",
+    dependencies=[Depends(require_permission(ORGANIZATION_MODULE_ACTIVATE))],
+)
+async def activer_module(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    data: DisponibiliteRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DisponibiliteResponse:
+    """Passe l'installation à `active` si les gardes sont franchies (voir `disponibilite.py`).
+
+    Exige `organization.module.activate` (403 sans lui). Gardes en échec : 409 ; l'état ne change pas.
+    Une panne du fournisseur d'activation ne fait pas échouer la requête : la réponse porte
+    `inactive_error` et `lastErrorCode`."""
+    ligne = await disponibilite.executer_activation(
+        db,
+        organization_id=organization_id,
+        acteur_id=current_user.id,
+        module_id=module_id,
+        state_version=data.stateVersion,
+        confirm=data.confirm,
+    )
+    await db.commit()
+    await db.refresh(ligne)
+    return _reponse_disponibilite(ligne)
+
+
+@organizations_modules_router.post(
+    "/{organization_id}/modules/{module_id}/deactivation",
+    response_model=DisponibiliteResponse,
+    summary="Désactiver un module pour l'organisation (BE-048)",
+    dependencies=[Depends(require_permission(ORGANIZATION_MODULE_ACTIVATE))],
+)
+async def desactiver_module(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    data: DisponibiliteRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DisponibiliteResponse:
+    """Passe l'installation `active` à `inactive`, sauf si un module `active` en dépend (409
+    `MODULE_HAS_ACTIVE_DEPENDANTS`, liste dans `details`)."""
+    ligne = await disponibilite.executer_desactivation(
+        db,
+        organization_id=organization_id,
+        acteur_id=current_user.id,
+        module_id=module_id,
+        state_version=data.stateVersion,
+        confirm=data.confirm,
+    )
+    await db.commit()
+    await db.refresh(ligne)
+    return _reponse_disponibilite(ligne)
 
 
 @organizations_modules_router.put(

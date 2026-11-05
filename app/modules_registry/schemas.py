@@ -255,3 +255,27 @@ class ModuleInstallationResponse(BaseModel):
     lastErrorCode: str | None
 
     model_config = {"from_attributes": True}
+
+
+class DisponibiliteRequest(BaseModel):
+    """Corps des routes d'activation et de désactivation de disponibilité (BE-048).
+
+    `stateVersion` est la version d'état lue par le client ; `confirm` doit valoir `true` (garde de
+    confirmation explicite)."""
+
+    stateVersion: int = Field(ge=0)
+    confirm: bool = False
+
+
+class DisponibiliteResponse(BaseModel):
+    """Disponibilité d'un module pour l'organisation : état courant et explication (BE-048)."""
+
+    id: uuid.UUID
+    organizationId: uuid.UUID
+    moduleId: uuid.UUID
+    moduleVersionId: uuid.UUID
+    state: str
+    stateVersion: int
+    operationId: uuid.UUID
+    lastErrorCode: str | None
+    explanation: str

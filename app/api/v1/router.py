@@ -9,6 +9,7 @@ from app.billing.invoices_router import router as billing_invoices_router
 from app.billing.allocation_router import router as billing_allocation_router
 from app.billing.consent_router import router as billing_consent_router
 from app.billing.exports.router import router as billing_exports_router
+from app.billing.history.router import router as billing_history_router
 from app.billing.router import router as billing_router
 from app.billing.subscriptions.router import router as billing_subscriptions_router
 from app.billing.cancellation.router import router as billing_cancellation_router
@@ -75,6 +76,8 @@ api_router.include_router(audit_router, prefix="/audit", tags=["audit"])
 api_router.include_router(organization_audit_router, prefix="/organizations", tags=["audit"])
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(billing_router, prefix="/billing", tags=["billing"])
+# BE-099 : historique commercial du tenant courant (GET /api/v1/billing/history).
+api_router.include_router(billing_history_router, prefix="/billing", tags=["billing"])
 api_router.include_router(billing_invoices_router, prefix="/billing", tags=["billing"])
 # BE-079 : agrégat abonnement (GET /billing/subscriptions/{subscriptionId}).
 api_router.include_router(billing_subscriptions_router, prefix="/billing", tags=["billing"])

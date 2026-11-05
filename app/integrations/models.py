@@ -14,8 +14,9 @@ transitions autorisées sont dans `app/integrations/registre.py`.
 """
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -61,3 +62,50 @@ class Connecteur(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     nom: Mapped[str] = mapped_column(String(255), nullable=False)
     etat: Mapped[str] = mapped_column(String(16), nullable=False)
     versionConfiguration: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+
+
+ISSUE_SUCCES = "succes"
+ISSUE_ECHEC = "echec"
+
+
+class TentativeIntegration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Une tentative d'effet d'intégration sur un connecteur, sans contenu (BE-164).
+
+    - `connecteurId` et `eventId` forment la clé d'effet : une seule ligne `succes` par
+      couple (CA-3, garanti par l'index unique partiel) ;
+    - `correlationId` relie la tentative à la chaîne de traitement de l'événement ;
+    - `dureeMs` est la durée mesurée de l'appel, `tentativeNo` son rang (à partir de 1) ;
+    - `prochaineTentativeAt` est renseigné seulement pour un échec transitoire ;
+    - aucune colonne de contenu (payload, corps de réponse) : le journal ne garde que des
+      métadonnées (CA-1).
+
+    Écart assumé avec la définition : le rattachement au tenant s'appelle `organizationId`
+    (convention retenue par BE-160), et le nom de table est `tentativeIntegration`
+    (CLAUDE.md : tables en camelCase).
+    """
+
+    __tablename__ = "tentativeIntegration"
+    __table_args__ = (
+        CheckConstraint(f"issue IN ('{ISSUE_SUCCES}', '{ISSUE_ECHEC}')", name="ck_tentativeIntegration_issue"),
+        CheckConstraint('"dureeMs" >= 0', name="ck_tentativeIntegration_duree_positive"),
+        CheckConstraint('"tentativeNo" >= 1', name="ck_tentativeIntegration_tentative_positive"),
+        Index(
+            "uq_tentativeIntegration_effet_succes",
+            "connecteurId",
+            "eventId",
+            unique=True,
+            postgresql_where=text(f"issue = '{ISSUE_SUCCES}'"),
+        ),
+        Index("ix_tentativeIntegration_organizationId_createdAt", "organizationId", "createdAt"),
+        {"comment": "Journal des tentatives d'intégration : métadonnées sans payload (BE-164)."},
+    )
+
+    connecteurId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("connecteur.id"), nullable=False)
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False)
+    correlationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    eventId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    issue: Mapped[str] = mapped_column(String(16), nullable=False)
+    codeErreur: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    dureeMs: Mapped[int] = mapped_column(Integer, nullable=False)
+    tentativeNo: Mapped[int] = mapped_column(Integer, nullable=False)
+    prochaineTentativeAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

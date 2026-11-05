@@ -176,6 +176,11 @@ class Settings(BaseSettings):
     # définition). Hypothèse appliquée : 24 h. Une clé plus ancienne est traitée
     # comme nouvelle (app/core/idempotency.py). Lu à chaque appel, pas à l'import.
     IDEMPOTENCY_KEY_TTL_HOURS: int = 24
+    # Backoff des tentatives d'intégration (BE-164, QE-PAR-09) : valeurs NON DÉFINIES
+    # par la définition. Aucun défaut codé : `None` tant que l'environnement ne les fournit
+    # pas, et la politique refuse de démarrer (app/integrations/tentatives.py).
+    INTEGRATION_BACKOFF_BASE_SECONDS: int | None = None
+    INTEGRATION_BACKOFF_CAP_SECONDS: int | None = None
     # Réinitialisation par e-mail, token fragment pour qu'il ne soit pas envoyé
     # dans les journaux/referers HTTP.
     PASSWORD_RESET_URL_BASE: str = "http://localhost:3001/forgot-password"

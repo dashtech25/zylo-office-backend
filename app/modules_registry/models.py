@@ -97,6 +97,8 @@ class ModuleVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class OrganizationModule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Activation d'un module pour une organisation (table `organizationModule`) : une ligne par couple organisation et module, avec son statut.
+    """
     __tablename__ = "organizationModule"
     __table_args__ = (
         UniqueConstraint("organizationId", "moduleCode", name="uq_organizationModule_org_module"),

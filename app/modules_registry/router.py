@@ -465,6 +465,8 @@ async def set_current_organization_module_activation(
 
 @router.get("", response_model=Page[ModuleResponse])
 async def list_modules(pagination: PaginationParams = Depends(), db: AsyncSession = Depends(get_db)) -> Page:
+    """Liste paginée du catalogue des modules, sans donnée d'organisation.
+    """
     return await paginate(db, select(Module).order_by(Module.code), pagination, ModuleResponse)
 
 
@@ -476,6 +478,8 @@ async def list_modules(pagination: PaginationParams = Depends(), db: AsyncSessio
 async def list_organization_modules(
     organization_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 ) -> list[InstalledModuleResponse]:
+    """Liste les modules installés de l'organisation ciblée. Garde : appartenance active à l'organisation (`require_organization_member`).
+    """
     return await service.list_installed_modules(db, organization_id)
 
 
@@ -490,6 +494,8 @@ async def activate(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> OrganizationModule:
+    """Active un module pour l'organisation ciblée. Garde : permission `modules.module.manage` et appartenance ; un refus de garde d'état répond 409.
+    """
     return await service.activate_module(db, organization_id, current_user.id, data.moduleCode)
 
 
@@ -504,6 +510,8 @@ async def deactivate(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> OrganizationModule:
+    """Désactive un module pour l'organisation ciblée. Garde : permission `modules.module.manage` et appartenance ; un refus de garde d'état répond 409.
+    """
     return await service.deactivate_module(db, organization_id, current_user.id, data.moduleCode)
 
 

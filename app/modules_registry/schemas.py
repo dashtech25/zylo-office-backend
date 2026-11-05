@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 
 
 class ModuleResponse(BaseModel):
+    """Représentation publique d'un module du catalogue : identifiant, code, nom, description et version.
+    """
     id: uuid.UUID
     code: str
     name: str
@@ -16,6 +18,8 @@ class ModuleResponse(BaseModel):
 
 
 class OrganizationModuleResponse(BaseModel):
+    """Représentation de l'activation d'un module pour une organisation : identifiant, organisation, code du module et statut.
+    """
     id: uuid.UUID
     organizationId: uuid.UUID
     moduleCode: str
@@ -25,6 +29,8 @@ class OrganizationModuleResponse(BaseModel):
 
 
 class ActivateModuleRequest(BaseModel):
+    """Corps d'une demande d'activation ou de désactivation : code du module visé.
+    """
     moduleCode: str
 
 
@@ -102,6 +108,8 @@ class PublierVersionRequest(BaseModel):
 
 
 class ModuleAdminResponse(BaseModel):
+    """Fiche d'un module vue par la console plateforme, avec son état de publication et sa visibilité.
+    """
     id: uuid.UUID
     code: str
     name: str
@@ -114,6 +122,8 @@ class ModuleAdminResponse(BaseModel):
 
 
 class ModuleVersionAdminResponse(BaseModel):
+    """Version d'un module vue par la console plateforme : identifiant, module, numéro de version et empreinte.
+    """
     id: uuid.UUID
     moduleId: uuid.UUID
     version: str

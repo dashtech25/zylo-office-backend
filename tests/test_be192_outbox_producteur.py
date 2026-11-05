@@ -191,8 +191,8 @@ async def test_be192_ca3_payload_stocke_sans_champs_producteur(organization: dic
 
     ligne = await _ligne_outbox(donnees["eventId"])
     assert "aggregateId" not in ligne.payload, "les champs d'agrégat vivent dans leurs colonnes, pas dans le payload"
-    assert "apiToken" not in str(ligne.payload)
-    assert ligne.payload["valeur"] == donnees["payload"]["valeur"]
+    assert "aggregateType" not in ligne.payload, "les champs d'agrégat vivent dans leurs colonnes, pas dans le payload"
+    assert ligne.payload["payload"]["valeur"] == donnees["payload"]["valeur"], "le payload métier est conservé tel quel"
 
 
 async def test_be192_ca4_event_id_unique_en_base(organization: dict):

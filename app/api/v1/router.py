@@ -15,6 +15,7 @@ from app.billing.trials.router import router as billing_trials_router
 from app.billing.plan_changes.router import router as billing_plan_changes_router
 
 from app.billing.quotes.router import router as billing_quotes_router
+from app.billing.checkouts.router import router as billing_checkouts_router
 from app.files.router import router as files_router
 from app.identity.router import router as organizations_router
 from app.identity.router import account_router
@@ -80,6 +81,7 @@ api_router.include_router(billing_plan_changes_router, prefix="/billing", tags=[
 
 # BE-077 : devis (POST /billing/quotes, GET /billing/quotes/{quoteId}, POST .../accept).
 api_router.include_router(billing_quotes_router, prefix="/billing", tags=["billing"])
+api_router.include_router(billing_checkouts_router, prefix="/billing", tags=["billing"])
 api_router.include_router(billing_lecture_router, prefix="/organizations", tags=["billing"])
 # BE-046 : attribution et révocation des sièges d'entitlement (sous /organizations/{id}/entitlements).
 api_router.include_router(billing_allocation_router, prefix="/organizations", tags=["billing"])

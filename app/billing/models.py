@@ -452,3 +452,32 @@ class Quote(Base):
     expiresAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Fin de validité ; NULL tant que QE-FAC-21 n'est pas tranchée.")
     createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     pricingSnapshotJson: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="Prix, devise et taxe figés à la résolution (BE-078) ; NULL avant `priced`.")
+
+
+class Checkout(Base):
+    """Checkout d'achat ouvert depuis un devis `accepted` (BE-081).
+
+    Machine d'état : `open -> pending -> completed | failed | cancelled | expired`. BE-081
+    ne crée que l'état `open` ; `pending` vient de la soumission (BE-082) et `completed`
+    de la confirmation du fournisseur (BE-083 / BE-084). Le retour de l'interface ne
+    produit jamais `completed` (CA-2).
+
+    Le tenant n'est pas porté par cette table : le périmètre de lecture passe par
+    `quote.beneficiaryTenantId`. Les colonnes sont celles de la définition ; les
+    colonnes exactes restent NON DÉFINIES (QE-FAC-04). `version` est le verrou optimiste
+    (BE-072), initialisé à 1.
+    """
+    __tablename__ = "checkout"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('open', 'pending', 'completed', 'failed', 'cancelled', 'expired')",
+            name="ck_checkout_status",
+        ),
+        {"comment": "Checkout d'achat issu d'un devis accepté (BE-081). Colonnes exactes non définies (QE-FAC-04)."},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    quoteId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("quote.id"), nullable=False, index=True, comment="Devis accepté dont le checkout est issu.")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open", comment="open, pending, completed, failed, cancelled ou expired.")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, comment="Verrou optimiste (BE-072), incrémenté à chaque transition.")
+    createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

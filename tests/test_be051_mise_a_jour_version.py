@@ -145,6 +145,12 @@ def _corps(cible_id: uuid.UUID, state_version: int = 0, confirmation: bool | Non
     return corps
 
 
+async def _version_courante(module_id: uuid.UUID, organisation_id: str) -> int:
+    """Lit la version d'état courante de l'installation : la commande doit la reprendre (BE-047 l'a
+    portée à 3 après une installation réussie)."""
+    return (await _etat_installation(module_id, organisation_id)).stateVersion
+
+
 def _code_erreur(reponse) -> str:
     return reponse.json()["error"]["code"]
 
@@ -194,7 +200,7 @@ async def test_ca1_version_cible_non_publiee_renvoie_422(client: AsyncClient):
 
     reponse = await client.post(
         _url(organisation_id, module_id),
-        json=_corps(cible_id),
+        json=_corps(cible_id, await _version_courante(module_id, organisation_id)),
         headers={**_entete(proprietaire["token"], organisation_id), EN_TETE_IDEMPOTENCE: str(uuid.uuid4())},
     )
 
@@ -212,7 +218,7 @@ async def test_ca2_mise_a_jour_incompatible_renvoie_409_et_reste_sur_la_source(c
 
     reponse = await client.post(
         _url(organisation_id, module_id),
-        json=_corps(cible_id),
+        json=_corps(cible_id, await _version_courante(module_id, organisation_id)),
         headers={**_entete(proprietaire["token"], organisation_id), EN_TETE_IDEMPOTENCE: str(uuid.uuid4())},
     )
 
@@ -232,7 +238,7 @@ async def test_plan_absent_renvoie_409_mise_a_jour_non_autorisee(client: AsyncCl
 
     reponse = await client.post(
         _url(organisation_id, module_id),
-        json=_corps(cible_id),
+        json=_corps(cible_id, await _version_courante(module_id, organisation_id)),
         headers={**_entete(proprietaire["token"], organisation_id), EN_TETE_IDEMPOTENCE: str(uuid.uuid4())},
     )
 
@@ -252,7 +258,7 @@ async def test_plan_sans_retour_arriere_exige_une_confirmation_explicite(client:
 
     sans_confirmation = await client.post(
         _url(organisation_id, module_id),
-        json=_corps(cible_id),
+        json=_corps(cible_id, await _version_courante(module_id, organisation_id)),
         headers={**entetes, EN_TETE_IDEMPOTENCE: str(uuid.uuid4())},
     )
     assert sans_confirmation.status_code == 409
@@ -261,7 +267,7 @@ async def test_plan_sans_retour_arriere_exige_une_confirmation_explicite(client:
 
     avec_confirmation = await client.post(
         _url(organisation_id, module_id),
-        json=_corps(cible_id, confirmation=True),
+        json=_corps(cible_id, await _version_courante(module_id, organisation_id), confirmation=True),
         headers={**entetes, EN_TETE_IDEMPOTENCE: str(uuid.uuid4())},
     )
     assert avec_confirmation.status_code == 200, avec_confirmation.text
@@ -280,7 +286,7 @@ async def test_plan_avec_retour_arriere_prouve_ne_demande_pas_de_confirmation(cl
 
     reponse = await client.post(
         _url(organisation_id, module_id),
-        json=_corps(cible_id),
+        json=_corps(cible_id, await _version_courante(module_id, organisation_id)),
         headers={**_entete(proprietaire["token"], organisation_id), EN_TETE_IDEMPOTENCE: str(uuid.uuid4())},
     )
 
@@ -338,7 +344,7 @@ async def test_ca4_acteur_sans_droit_de_mise_a_jour_recoit_403_sans_changement(c
 
     reponse = await client.post(
         _url(organisation_id, module_id),
-        json=_corps(cible_id),
+        json=_corps(cible_id, await _version_courante(module_id, organisation_id)),
         headers={**_entete(membre["token"], organisation_id), EN_TETE_IDEMPOTENCE: str(uuid.uuid4())},
     )
 
@@ -360,7 +366,7 @@ async def test_ca5_mise_a_jour_dans_une_autre_organisation_repond_404(client: As
 
     reponse = await client.post(
         _url(org_b, module_id),
-        json=_corps(cible_id),
+        json=_corps(cible_id, await _version_courante(module_id, org_b)),
         headers={**_entete(proprietaire_a["token"], org_a), EN_TETE_IDEMPOTENCE: str(uuid.uuid4())},
     )
 
@@ -400,7 +406,7 @@ async def test_sans_en_tete_idempotency_key_la_mise_a_jour_est_refusee(client: A
 
     reponse = await client.post(
         _url(organisation_id, module_id),
-        json=_corps(cible_id),
+        json=_corps(cible_id, await _version_courante(module_id, organisation_id)),
         headers=_entete(proprietaire["token"], organisation_id),
     )
 

@@ -286,12 +286,12 @@ async def test_ca4_desactivation_avec_dependant_actif_409_liste_des_dependants(c
     organisation_id = await _organisation(client, proprietaire)
     module_a, version_a, code_a = await _module_avec_version()
     await _entitlement_actif(organisation_id, code_a)
-    await _installer(organisation_id, proprietaire["id"], module_a, version_a, "ca4-a")
-    await _activer_service(organisation_id, proprietaire["id"], module_a, 0)
+    installee_a = await _installer(organisation_id, proprietaire["id"], module_a, version_a, "ca4-a")
+    await _activer_service(organisation_id, proprietaire["id"], module_a, installee_a["stateVersion"])
     module_b, version_b, code_b = await _module_avec_version(prerequisites=[{"code": code_a}])
     await _entitlement_actif(organisation_id, code_b)
-    await _installer(organisation_id, proprietaire["id"], module_b, version_b, "ca4-b")
-    await _activer_service(organisation_id, proprietaire["id"], module_b, 0)
+    installee_b = await _installer(organisation_id, proprietaire["id"], module_b, version_b, "ca4-b")
+    await _activer_service(organisation_id, proprietaire["id"], module_b, installee_b["stateVersion"])
     avant_a = await _lire_installation(organisation_id, module_a)
 
     reponse = await client.post(

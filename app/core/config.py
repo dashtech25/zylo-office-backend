@@ -191,6 +191,10 @@ class Settings(BaseSettings):
     # BE-163 : fenêtre anti-rejeu des webhooks entrants (QE-PAR-09). Aucune valeur par défaut
     # codée : sans cette valeur, la réception des webhooks échoue fermée (503).
     WEBHOOK_FENETRE_ANTI_REJEU_SECONDS: int | None = None
+    # Consommation d'événements (BE-235, QE-EXP-08) : nombre maximal de tentatives par
+    # consommateur avant envoi en lettre morte (DLQ). NON DÉFINI par la définition : aucun
+    # défaut codé. À None, la consommation refuse de tourner (503) au lieu de deviner.
+    EVENTS_CONSUMER_MAX_TENTATIVES: int | None = None
     # Réinitialisation par e-mail, token fragment pour qu'il ne soit pas envoyé
     # dans les journaux/referers HTTP.
     PASSWORD_RESET_URL_BASE: str = "http://localhost:3001/forgot-password"

@@ -85,3 +85,34 @@ class ConsommationEvenement(UUIDPrimaryKeyMixin, Base):
         UUID(as_uuid=True), ForeignKey("outbox_evenement.eventId"), nullable=False, index=True
     )
     createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class DeadLetter(UUIDPrimaryKeyMixin, Base):
+    """Entrée de la file de lettres mortes (BE-235) : un événement dont le consommateur a épuisé ses tentatives.
+
+    Une entrée est créée seulement après le dernier échec d'un consommateur (CA-2). Elle porte
+    le tenant pour l'isolation (CA-4) et le nom de la classe d'erreur, jamais le message d'erreur
+    ni le payload : le motif ne doit pas exposer de donnée métier dans les journaux ou l'API.
+
+    `statut` vaut `en_attente` jusqu'au replay réussi, puis `rejoue`. L'unicité du couple
+    (`consommateur`, `eventId`) empêche deux entrées pour le même échec : un lot relancé ne
+    rejoue pas un message déjà en DLQ.
+    """
+
+    __tablename__ = "dead_letters"
+    __table_args__ = (
+        UniqueConstraint("consommateur", "eventId", name="uq_dead_letters_consommateur_event"),
+        CheckConstraint("statut IN ('en_attente', 'rejoue')", name="ck_dead_letters_statut"),
+        {"comment": "File de lettres mortes : événements en échec définitif pour un consommateur, rejouables par un opérateur."},
+    )
+
+    eventId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("outbox_evenement.eventId"), nullable=False, index=True
+    )
+    consommateur: Mapped[str] = mapped_column(String(150), nullable=False)
+    motif: Mapped[str] = mapped_column(String(200), nullable=False)
+    tentatives: Mapped[int] = mapped_column(Integer, nullable=False)
+    tenantId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True)
+    statut: Mapped[str] = mapped_column(String(20), nullable=False, server_default="en_attente")
+    createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    rejoueAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

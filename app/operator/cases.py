@@ -2,7 +2,8 @@
 
 Table `intervention_case` : un ticket ouvert par un agent support (L1 ou L2) pour
 une organisation (`tenantId`) ou pour la plateforme (`tenantId` NULL). Le cycle de
-vie est linéaire : `ouvert` -> `affecte` -> `cloture`. Chaque transition produit une
+vie : `ouvert` -> `affecte` -> `cloture`, avec un passage possible par `escalade`
+(BE-142) ; une escalade ouverte met le cas à `escalade`. Chaque transition produit une
 entrée d'audit dans `audit_event` (BE-007, écrite par `app.audit.admin_audit`).
 
 Droits (définition BE-123) :
@@ -43,7 +44,9 @@ from app.rbac.role_assignments import AdminRoleAssignment
 from app.shared.models import UUIDPrimaryKeyMixin
 
 PRIORITES = ("basse", "normale", "haute")
-ETATS = ("ouvert", "affecte", "cloture")
+ETATS = ("ouvert", "affecte", "escalade", "cloture")
+# Ouvrir une escalade fait passer le cas à `escalade` (BE-142 CA-2).
+ETAT_ESCALADE = "escalade"
 
 ROLES_OUVERTURE = frozenset({"agent_support_l1", "agent_support_l2"})
 ROLES_GESTION = frozenset({"securite_incident_commander"})
@@ -66,7 +69,7 @@ class InterventionCase(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "intervention_case"
     __table_args__ = (
         CheckConstraint("priority IN ('basse', 'normale', 'haute')", name="ck_intervention_case_priority"),
-        CheckConstraint("status IN ('ouvert', 'affecte', 'cloture')", name="ck_intervention_case_status"),
+        CheckConstraint("status IN ('ouvert', 'affecte', 'escalade', 'cloture')", name="ck_intervention_case_status"),
         {"comment": "Cas d'intervention de support, ouvert et clos par les agents administratifs (BE-123)."},
     )
 

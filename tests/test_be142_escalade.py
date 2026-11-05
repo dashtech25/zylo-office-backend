@@ -93,6 +93,24 @@ async def _escalader(client: AsyncClient, agent: dict, cas_id: str, niveau: int 
     return await client.post(f"{CHEMIN_CAS}/{cas_id}/escalations", json=corps, headers=_entetes(agent))
 
 
+async def _verifier_cas(cas_id: str, acteur_id: str) -> None:
+    """Enregistre la vérification exigée par la clôture d'un cas (BE-123, CA-4)."""
+    from app.audit.admin_audit import ecrire_evenement_admin
+
+    async with AsyncSessionLocal() as db:
+        await ecrire_evenement_admin(
+            db,
+            organization_id=None,
+            actor_user_id=uuid.UUID(acteur_id),
+            action="admin.case.verification",
+            entity_type="InterventionCase",
+            entity_id=uuid.UUID(cas_id),
+            summary="Vérification du cas enregistrée",
+            correlation_id="be142-verif",
+        )
+        await db.commit()
+
+
 async def _etat_du_cas(client: AsyncClient, agent: dict, cas_id: str) -> str:
     reponse = await client.get(f"{CHEMIN_CAS}/{cas_id}", headers=_entetes(agent))
     assert reponse.status_code == 200, reponse.text
@@ -246,11 +264,13 @@ async def test_be142_ouverture_sur_un_cas_clos_recoit_409(client: AsyncClient, r
     responsable = await _nouvel_utilisateur(client)
     await _accorder(responsable["id"], "securite_incident_commander", "platform")
     cas = await _ouvrir_cas(client, agent, None)
-    await client.post(
+    await _verifier_cas(cas["id"], responsable["id"])
+    cloture = await client.post(
         f"{CHEMIN_CAS}/{cas['id']}/close",
         json={"closureReason": "Résolu"},
         headers=_entetes(responsable),
     )
+    assert cloture.status_code == 200, cloture.text
 
     reponse = await _escalader(client, agent, cas["id"])
 

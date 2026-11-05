@@ -130,6 +130,12 @@ class Settings(BaseSettings):
     # BE-173 (QE-PAR-07) : durée de rétention d'un export d'audit, en secondes. Aucune
     # valeur par défaut : sans configuration, une demande d'export est refusée (503).
     AUDIT_EXPORT_EXPIRATION_SECONDS: int | None = None
+    # BE-244 (QE-EXP-04) : politique de sauvegarde. Aucune valeur par défaut : la définition
+    # laisse fréquence, RPO et rétention NON DÉFINI. Sans configuration, aucune sauvegarde
+    # n'est lancée (app/operator/sauvegarde_chiffree.py, lire_politique_sauvegarde).
+    BACKUP_FREQUENCE: str = ""
+    BACKUP_RPO_HEURES: int | None = None
+    BACKUP_RETENTION_JOURS: int | None = None
     STORAGE_S3_ENDPOINT_URL: str | None = None
     STORAGE_S3_BUCKET: str = "zylo-office-documents"
     STORAGE_S3_ACCESS_KEY: str | None = None

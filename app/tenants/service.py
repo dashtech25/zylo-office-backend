@@ -35,9 +35,8 @@ from app.core.erreurs.codes import CodeErreur, ErreurCatalogue
 from app.core.errors import AppError
 from app.core.versioning import lever_conflit_de_version
 from app.evenements.outbox import enregistrer_evenement_plateforme
-from app.identity.models import Organization, OrganizationUser
+from app.identity.models import Organization, OrganizationUser, Tenant
 from app.tenants.machine import transition_autorisee
-from app.tenants.models import Tenant
 from app.tenants.permissions import a_droit_gestion_tenant, exiger_gestion_tenant
 
 ACTION_CREATION = "tenant.create"

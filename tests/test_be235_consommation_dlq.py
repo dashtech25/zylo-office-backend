@@ -36,6 +36,15 @@ from app.rbac.role_assignments import AdminRoleAssignment
 CHEMIN_DLQ = "/api/v1/internal/dead-letters"
 
 
+@pytest.fixture(autouse=True)
+def configuration_consommation(monkeypatch):
+    """Renseigne le nombre maximal de tentatives (QE-EXP-08 : aucune valeur par défaut codée).
+
+    Chaque test peut surcharger cette valeur ; sans elle, la consommation refuse de tourner.
+    """
+    monkeypatch.setattr(settings, "EVENTS_CONSUMER_MAX_TENTATIVES", 3)
+
+
 def _enveloppe(tenant: uuid.UUID, **surcharges) -> dict:
     """Enveloppe brute conforme à BE-150, identique à la forme de test de BE-234."""
     brute = {
@@ -96,7 +105,16 @@ async def _compter_dead_letters(event_id: str) -> int:
 
 
 def _entetes(utilisateur: dict, portee: str) -> dict:
-    return {"Authorization": f"Bearer {utilisateur['accessToken']}", "X-Admin-Scope": portee}
+    entetes = {"Authorization": f"Bearer {utilisateur['accessToken']}"}
+    if portee:
+        entetes["X-Admin-Scope"] = portee
+    return entetes
+
+
+async def _identifiant(client: AsyncClient, utilisateur: dict) -> str:
+    """Identifiant du compte connecté, lu par `/auth/me` (la fixture `registered_user` ne le porte pas)."""
+    res = await client.get("/api/v1/auth/me", headers=_entetes(utilisateur, ""))
+    return res.json()["id"]
 
 
 async def _donner_autorite_plateforme(user_id: str) -> None:
@@ -195,7 +213,7 @@ async def test_be235_ca4_replay_hors_portee_donne_404(client: AsyncClient, regis
     tenant_autre = await _nouvelle_organisation()
     donnees = await _publier(tenant_autre)
     dead_letter_id = await _dead_letter_en_base(tenant_autre, donnees["eventId"])
-    await _donner_autorite_plateforme(registered_user["id"])
+    await _donner_autorite_plateforme(await _identifiant(client, registered_user))
     monkeypatch.setitem(CONSOMMATEURS, "consommateur-be235", lambda evenement: None)
 
     res = await client.post(
@@ -211,7 +229,7 @@ async def test_be235_ca4_liste_ne_montre_que_le_tenant_de_la_portee(client: Asyn
     tenant_autre = await _nouvelle_organisation()
     donnees_autre = await _publier(tenant_autre)
     await _dead_letter_en_base(tenant_autre, donnees_autre["eventId"])
-    await _donner_autorite_plateforme(registered_user["id"])
+    await _donner_autorite_plateforme(await _identifiant(client, registered_user))
 
     res = await client.get(CHEMIN_DLQ, headers=_entetes(registered_user, f"tenant:{tenant_portee}"))
 

@@ -12,7 +12,7 @@ pour les tables décidées depuis, camelCase pour les plus anciennes."""
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -164,3 +164,44 @@ class PreferenceNotification(UUIDPrimaryKeyMixin, Base):
     consentement: Mapped[bool] = mapped_column(Boolean, nullable=False)
     horodatageConsentement: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     sourceConsentement: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class Notification(UUIDPrimaryKeyMixin, Base):
+    """Notification produite par le moteur (BE-169) pour un destinataire.
+
+    Une ligne par (événement d'origine, catégorie, destinataire). Le moteur crée
+    les lignes ; le canal (BE-170) met à jour `statut` vers `envoyee` ou `echec`.
+
+    - `statut` : `en_attente` (éligible et consentant), `supprimee` (motif dans
+      `motifSuppression`, ex. `CONSENT_SUPPRESSED`), `envoyee`, `echec` ;
+    - `eventId` : identifiant de l'événement d'origine, clé d'idempotence avec la
+      catégorie et le destinataire (CA-4). Pas de clé étrangère : l'événement peut
+      venir de l'outbox ou d'un producteur interne.
+
+    Aucune colonne de tenant : le destinataire appartient à un seul tenant au moment
+    de la résolution d'audience (CA-5), la trace par tenant reste dans l'événement.
+    """
+
+    __tablename__ = "notification"
+    __table_args__ = (
+        UniqueConstraint("eventId", "categorieCode", "destinataireId", name="uq_notification_event_categorie_destinataire"),
+        CheckConstraint(
+            "statut IN ('en_attente', 'supprimee', 'envoyee', 'echec')", name="ck_notification_statut"
+        ),
+        CheckConstraint(
+            "(statut = 'supprimee') = (\"motifSuppression\" IS NOT NULL)",
+            name="ck_notification_motif_suppression",
+        ),
+        {"comment": "Notification produite par le moteur (BE-169) : audience résolue à l'envoi, déduplication par événement."},
+    )
+
+    eventId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    categorieCode: Mapped[str] = mapped_column(
+        String(80), ForeignKey("categorie_notification.code", ondelete="RESTRICT"), nullable=False
+    )
+    destinataireId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    statut: Mapped[str] = mapped_column(String(20), nullable=False)
+    motifSuppression: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    creeAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

@@ -41,6 +41,7 @@ s'appuiera.
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -51,8 +52,10 @@ from app.core.erreurs.codes import CodeErreur, ErreurCatalogue
 from app.evenements.enveloppe import (
     EnveloppeEvenement,
     EnveloppeEvenementPlateforme,
+    EnveloppeProducteur,
     valider_enveloppe,
     valider_enveloppe_plateforme,
+    valider_enveloppe_producteur,
 )
 from app.evenements.models import ConsommationEvenement, OutboxEvenement
 
@@ -110,12 +113,48 @@ async def enregistrer_evenement_plateforme(
     return await _ecrire_evenement(db, enveloppe, portee="plateforme")
 
 
-async def _ecrire_evenement(db: AsyncSession, enveloppe, *, portee: str):
+async def enregistrer_evenement_producteur(
+    db: AsyncSession,
+    donnees: dict[str, Any],
+    *,
+    emetteur_tenant: uuid.UUID | None,
+    tenant_agregat: uuid.UUID,
+) -> EnveloppeProducteur:
+    """Écrit dans l'outbox un événement produit par un agrégat (BE-192), sans commit.
+
+    Même contrat de transaction que `enregistrer_evenement` : l'appelant applique sa mutation
+    dans la même session puis committe ; un rollback supprime la mutation et sa ligne ensemble
+    (CA-1). `tenant_agregat` est le tenant de l'agrégat modifié : la ligne doit porter ce même
+    tenant, sinon `TENANT_MISMATCH` (CA-5). Sans émetteur authentifié, `PERMISSION_DENIED`.
+
+    Les champs d'agrégat et de producteur sont écrits dans leurs colonnes ; `recordedAt` est
+    fixé ici, en UTC, et la ligne reçoit la même valeur pour `createdAt`.
+    """
+    if emetteur_tenant is None:
+        raise ErreurCatalogue(CodeErreur.PERMISSION_DENIED, detail="émetteur d'événement non authentifié")
+
+    enveloppe = valider_enveloppe_producteur(donnees, tenant_identite=emetteur_tenant, tenant_agregat=tenant_agregat)
+    maintenant = datetime.now(timezone.utc)
+    enveloppe = enveloppe.model_copy(update={"recordedAt": maintenant})
+    colonnes = {
+        "aggregateType": enveloppe.aggregateType,
+        "aggregateId": enveloppe.aggregateId,
+        "aggregateVersion": enveloppe.aggregateVersion,
+        "producer": enveloppe.producer,
+        "createdAt": maintenant,
+    }
+    return await _ecrire_evenement(db, enveloppe, portee="tenant", colonnes=colonnes)
+
+
+async def _ecrire_evenement(db: AsyncSession, enveloppe, *, portee: str, colonnes: dict[str, Any] | None = None):
     """Insère la ligne d'outbox d'une enveloppe déjà validée ; renvoie l'enveloppe.
 
-    Factorise l'écriture pour les deux chemins (tenant et plateforme). Un `eventId` déjà présent
-    renvoie l'enveloppe sans nouvelle ligne (déduplication). `acteur` et `correlationId` sont
-    recopiés de l'enveloppe ; `tentatives` reste à sa valeur initiale 0 (consommation, BE-235).
+    Factorise l'écriture pour les chemins tenant, plateforme et producteur. Un `eventId` déjà
+    présent renvoie l'enveloppe sans nouvelle ligne (déduplication). `acteur` et `correlationId`
+    sont recopiés de l'enveloppe ; `tentatives` reste à sa valeur initiale 0 (consommation, BE-235).
+    `colonnes` ajoute des colonnes propres au producteur (BE-192) ; le payload ne reçoit que les
+    champs de l'enveloppe BE-150, pour que les lecteurs existants (`EnveloppeEvenement`, qui
+    refuse les champs inconnus) continuent de le relire.
     """
     existant = await db.execute(select(OutboxEvenement.id).where(OutboxEvenement.eventId == enveloppe.eventId))
     if existant.scalar_one_or_none() is not None:
@@ -131,10 +170,11 @@ async def _ecrire_evenement(db: AsyncSession, enveloppe, *, portee: str):
             tenantId=enveloppe.tenantId,
             acteur=enveloppe.actor,
             correlationId=enveloppe.correlationId,
-            payload=enveloppe.model_dump(mode="json"),
+            payload=enveloppe.model_dump(mode="json", include=set(EnveloppeEvenement.model_fields)),
             dataClassification=enveloppe.dataClassification,
             statut="publie",
             tentatives=0,
+            **(colonnes or {}),
         )
     )
     await db.flush()

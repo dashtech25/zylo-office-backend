@@ -28,3 +28,10 @@ ORGANIZATION_MODULE_UPGRADE = "organization.module.upgrade"
 # organisation `{orgId}`. Distincte de l'activation : un acteur qui peut désactiver ne peut pas
 # désinstaller sans ce droit. Accordée au propriétaire (OWNER_DEFAULT_PERMISSIONS).
 ORGANIZATION_MODULE_UNINSTALL = "organization.module.uninstall"
+
+# Suspension et reprise d'un module pour l'organisation (BE-049, QE-MOD-07/16 : codes recommandés).
+# `organization.module.suspend` : origine `client`, portée organisation `{orgId}`, accordée au
+# propriétaire (OWNER_DEFAULT_PERMISSIONS). `platform.module.suspend` : origines `commercial` et
+# `security`, portée plateforme, attribuée par allowlist d'environnement (`platform_rights.py`).
+ORGANIZATION_MODULE_SUSPEND = "organization.module.suspend"
+PLATFORM_MODULE_SUSPEND = "platform.module.suspend"

@@ -10,7 +10,9 @@ listes d'identifiants d'utilisateurs séparées par des virgules.
 - `PLATFORM_MODULE_WRITE_USER_IDS` : comptes autorisés à créer fiches et versions ;
 - `PLATFORM_MODULE_PUBLISH_USER_IDS` : comptes autorisés à publier une version ;
 - `PLATFORM_RECONCILIATION_RESOLVE_USER_IDS` : comptes autorisés à lire et résoudre les cas de
-  réconciliation (BE-052).
+  réconciliation (BE-052) ;
+- `PLATFORM_MODULE_SUSPEND_USER_IDS` : comptes autorisés à suspendre ou reprendre un module d'origine
+  `commercial` ou `security` (BE-049).
 
 Refus par défaut : variable absente ou vide, valeur mal formée ignorée (jamais un élargissement).
 Les variables sont relues à chaque appel, pour qu'un changement de configuration prenne effet sans
@@ -23,6 +25,7 @@ import uuid
 from app.core.errors import AppError
 from app.modules_registry.permissions import (
     PLATFORM_MODULE_PUBLISH,
+    PLATFORM_MODULE_SUSPEND,
     PLATFORM_MODULE_WRITE,
     PLATFORM_RECONCILIATION_RESOLVE,
 )
@@ -31,6 +34,7 @@ _VARIABLE_PAR_DROIT: dict[str, str] = {
     PLATFORM_MODULE_WRITE: "PLATFORM_MODULE_WRITE_USER_IDS",
     PLATFORM_MODULE_PUBLISH: "PLATFORM_MODULE_PUBLISH_USER_IDS",
     PLATFORM_RECONCILIATION_RESOLVE: "PLATFORM_RECONCILIATION_RESOLVE_USER_IDS",
+    PLATFORM_MODULE_SUSPEND: "PLATFORM_MODULE_SUSPEND_USER_IDS",
 }
 
 

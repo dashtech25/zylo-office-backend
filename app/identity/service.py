@@ -34,6 +34,7 @@ from app.identity.schemas import CreateOrganizationRequest, UpdateOrganizationRe
 from app.modules_registry.permissions import (
     MODULE_MANAGE,
     ORGANIZATION_MODULE_ACTIVATE,
+    ORGANIZATION_MODULE_SUSPEND,
     ORGANIZATION_MODULE_INSTALL,
     ORGANIZATION_MODULE_READ,
     ORGANIZATION_MODULE_UNINSTALL,
@@ -64,6 +65,7 @@ OWNER_DEFAULT_PERMISSIONS = [
     (ORGANIZATION_MODULE_READ, "modules_registry", "Lire les permissions déclarées par les modules de l'organisation (BE-055)."),
     (ORGANIZATION_MODULE_INSTALL, "modules_registry", "Installer techniquement un module pour l'organisation (BE-047)."),
     (ORGANIZATION_MODULE_ACTIVATE, "modules_registry", "Activer ou désactiver un module installé pour l'organisation (BE-048)."),
+    (ORGANIZATION_MODULE_SUSPEND, "modules_registry", "Suspendre ou reprendre un module pour l'organisation, origine client (BE-049)."),
     (ORGANIZATION_MODULE_UPGRADE, "modules_registry", "Mettre à jour une installation de module vers une version supérieure (BE-051)."),
     (ORGANIZATION_MODULE_UNINSTALL, "modules_registry", "Désinstaller un module de l'organisation, sans purge des données (BE-050)."),
     (ROLE_MANAGE, "rbac", "Créer des rôles et modifier leurs permissions, attribuer/retirer un rôle."),

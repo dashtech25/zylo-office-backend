@@ -280,6 +280,28 @@ class DisponibiliteRequest(BaseModel):
     confirm: bool = False
 
 
+class SuspensionRequest(BaseModel):
+    """Corps de la suspension d'un module (BE-049, CA-1).
+
+    `origin` est obligatoire et prend une des trois valeurs de la définition ; `reason` est le motif,
+    obligatoire et non vide. Une valeur absente ou hors liste donne 422 avant tout contrôle métier.
+    `stateVersion` est la version d'état lue par le client (BE-041)."""
+
+    origin: Literal["client", "commercial", "security"]
+    reason: str = Field(min_length=1, max_length=2000)
+    stateVersion: int = Field(ge=0)
+
+
+class ReactivationRequest(BaseModel):
+    """Corps de la reprise d'un module suspendu (BE-049).
+
+    `resolutionReference` référence la résolution de la cause de suspension ; elle est journalisée
+    comme motif de la transition de reprise. `stateVersion` est la version d'état lue par le client."""
+
+    stateVersion: int = Field(ge=0)
+    resolutionReference: str = Field(min_length=1, max_length=200)
+
+
 class DisponibiliteResponse(BaseModel):
     """Disponibilité d'un module pour l'organisation : état courant et explication (BE-048)."""
 

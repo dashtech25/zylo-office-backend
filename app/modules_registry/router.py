@@ -25,6 +25,8 @@ from app.modules_registry.permissions import (
 from app.modules_registry.schemas import (
     ActivateModuleRequest,
     DisponibiliteRequest,
+    ReactivationRequest,
+    SuspensionRequest,
     DisponibiliteResponse,
     InstallModuleRequest,
     InstalledModuleResponse,
@@ -357,6 +359,71 @@ async def desactiver_module(
         module_id=module_id,
         state_version=data.stateVersion,
         confirm=data.confirm,
+    )
+    await db.commit()
+    await db.refresh(ligne)
+    return _reponse_disponibilite(ligne)
+
+
+@organizations_modules_router.post(
+    "/{organization_id}/modules/{module_id}/suspensions",
+    response_model=DisponibiliteResponse,
+    summary="Suspendre un module pour l'organisation (BE-049)",
+)
+async def suspendre_module(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    data: SuspensionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DisponibiliteResponse:
+    """Passe le module `active` à `suspended` (origine, motif et acteur journalisés).
+
+    Le droit dépend de l'origine (`disponibilite.verifier_droit_suspension`) : `client` exige
+    `organization.module.suspend` ; `commercial` et `security` exigent `platform.module.suspend`.
+    Refus : 403, sans changement d'état. Motif absent ou origine inconnue : 422."""
+    await disponibilite.verifier_droit_suspension(db, current_user.id, organization_id, data.origin)
+    ligne = await disponibilite.executer_suspension(
+        db,
+        organization_id=organization_id,
+        acteur_id=current_user.id,
+        module_id=module_id,
+        origine=data.origin,
+        motif=data.reason,
+        state_version=data.stateVersion,
+    )
+    await db.commit()
+    await db.refresh(ligne)
+    return _reponse_disponibilite(ligne)
+
+
+@organizations_modules_router.post(
+    "/{organization_id}/modules/{module_id}/reactivations",
+    response_model=DisponibiliteResponse,
+    summary="Reprendre un module suspendu pour l'organisation (BE-049)",
+)
+async def reprendre_module(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    data: ReactivationRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DisponibiliteResponse:
+    """Repasse le module `suspended` à `active` si release et entitlement le permettent.
+
+    Le droit exigé est celui de l'origine de la suspension courante (une suspension sans origine
+    enregistrée est traitée comme `client`). Refus de droit : 403. Gardes de version, release et
+    entitlement : 409 (voir `disponibilite.executer_reactivation`) ; l'état reste `suspended`."""
+    installation_courante = await disponibilite._installation_courante(db, organization_id, module_id)
+    origine = (installation_courante.suspensionOrigin if installation_courante else None) or "client"
+    await disponibilite.verifier_droit_suspension(db, current_user.id, organization_id, origine)
+    ligne = await disponibilite.executer_reactivation(
+        db,
+        organization_id=organization_id,
+        acteur_id=current_user.id,
+        module_id=module_id,
+        state_version=data.stateVersion,
+        resolution_reference=data.resolutionReference,
     )
     await db.commit()
     await db.refresh(ligne)

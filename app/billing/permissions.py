@@ -40,3 +40,7 @@ BILLING_INVOICE_FINALIZE = "billing.invoice.finalize"
 # d'un compte payeur. Porte les rôles ACTF-04 (acheteur) et ACTF-05 (contact de facturation) ;
 # accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS (app/identity/service.py). Sans elle : 403 FORBIDDEN.
 BILLING_DATA_EXPORT_REQUEST = "billing.data_export.request"
+# BE-093 (ACTF-09, finance) : demander un remboursement. L'approbation (ACTF-08) n'est pas une
+# permission ici : elle est contrôlée par la règle d'approbation (app/billing/refunds/service.py).
+# Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
+BILLING_REFUND_REQUEST = "billing.refund.request"

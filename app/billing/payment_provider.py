@@ -60,6 +60,15 @@ class PaymentProvider(ABC):
         """
         raise NotImplementedError
 
+    async def rembourser(self, amount_minor: int, currency: str, reference: str) -> bool:
+        """Demande au prestataire le remboursement de `amount_minor` pour la référence interne `reference`.
+
+        Retourne True si le prestataire confirme le remboursement, False s'il le refuse. Un délai
+        dépassé ou une erreur inattendue remonte en exception : l'issue est alors inconnue
+        (BE-093, `pending`). Non implémenté par défaut : tout adaptateur qui rembourse le redéfinit.
+        """
+        raise NotImplementedError
+
     async def create_checkout(self, amount_minor: int, currency: str, reference: str) -> CheckoutIntent:
         """Ouvre un checkout chez le prestataire et renvoie un `CheckoutIntent`.
 
@@ -91,6 +100,10 @@ class FlutterwaveTestProvider(PaymentProvider):
 
     async def charge(self, amount_cents: int, currency: str, reference: str) -> bool:
         raise AppError(code="PROVIDER_UNAVAILABLE", message="Aucune transaction ne peut être initiée.", status_code=503)
+
+    async def rembourser(self, amount_minor: int, currency: str, reference: str) -> bool:
+        # Stub sandbox (BE-093) : aucun remboursement n'est initié, comme pour `charge`.
+        raise AppError(code="PROVIDER_UNAVAILABLE", message="Aucun remboursement ne peut être initié.", status_code=503)
 
     async def create_checkout(self, amount_minor: int, currency: str, reference: str) -> CheckoutIntent:
         # A live key can never silently enable checkout from this stub.

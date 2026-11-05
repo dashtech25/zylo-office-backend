@@ -51,6 +51,7 @@ from app.shared.storage_router import storage_router
 from app.operator.router import router as operator_router
 from app.operator.health import admin_router as operator_admin_router
 from app.operator.health import internal_router as internal_health_router
+from app.release.flags_router import router as flags_router
 from app.billing.entitlement_events_router import router as billing_entitlement_events_router
 from app.operator.admin_audit_router import router as admin_audit_router
 from app.operator.exceptional_access import router as exceptional_access_router
@@ -139,6 +140,8 @@ api_router.include_router(subscription_diagnostic_router, prefix="/admin", tags=
 api_router.include_router(internal_health_router, tags=["health"])
 # BE-058 : événements de service de facturation (POST /internal/billing/entitlement-events).
 api_router.include_router(billing_entitlement_events_router, prefix="/internal", tags=["billing"])
+# BE-251 : feature flags serveur (GET/PUT /api/v1/internal/flags), réservés à l'exploitation.
+api_router.include_router(flags_router, prefix="/internal", tags=["release"])
 api_router.include_router(zylo_liquid_router, prefix="/zylo-liquid", tags=["zylo-liquid"])
 api_router.include_router(files_router, prefix="/zylo-liquid", tags=["files"])
 api_router.include_router(location_router, prefix="/zylo-liquid", tags=["location"])

@@ -22,6 +22,7 @@ from app.billing.payment_attempts.router import router as billing_payment_attemp
 from app.billing.refunds.router import router as billing_refunds_router
 from app.files.router import router as files_router
 from app.identity.router import router as organizations_router
+from app.integrations.router import router as connecteurs_router
 from app.identity.router import account_router
 from app.identity.router import users_router
 from app.location.router import router as location_router
@@ -33,7 +34,7 @@ from app.modules_registry.admin_router import router as modules_admin_router
 from app.modules_registry.reconciliation_router import router as reconciliation_admin_router
 from app.modules_registry.catalog_router import router as catalog_router
 from app.modules_registry.router import router as modules_router
-from app.integrations.router import router as lettres_mortes_router
+from app.integrations.router import lettres_mortes_router
 from app.rbac.grants_membres import router as grants_membres_router
 from app.rbac.acces_effectif_router import router as acces_effectif_router
 from app.rbac.module_router import router as rbac_module_router
@@ -77,6 +78,8 @@ api_router.include_router(reconciliation_admin_router, prefix="/admin", tags=["a
 api_router.include_router(catalog_router, prefix="/catalog", tags=["catalog"])
 api_router.include_router(module_audit_router, prefix="/organizations", tags=["modules"])
 api_router.include_router(rbac_router, prefix="/rbac", tags=["rbac"])
+# BE-162 : routes des connecteurs d'intégration (registre BE-160).
+api_router.include_router(connecteurs_router, tags=["integrations"])
 # BE-016 : lecture des rôles de l organisation courante (lecture seule).
 api_router.include_router(roles_lecture_router, prefix="/organizations", tags=["rbac"])
 api_router.include_router(grants_membres_router, prefix="/organizations", tags=["rbac"])

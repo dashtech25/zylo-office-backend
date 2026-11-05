@@ -26,10 +26,10 @@ Refus (réponses) :
   un administrateur sait qu'il lui manque un droit, il ne doit pas croire que
   le tenant n'existe pas.
 
-Source de l'autorité plateforme : la liste d'exploitation `OPERATOR_READ_USER_IDS`
-(`app/operator/permissions.py::has_platform_authority`). Elle reste la seule
-source tant que les affectations globales de rôle (BE-121) n'existent pas ; la
-règle de décision, elle, ne dépend que de cette fonction.
+Source de l'autorité plateforme : une affectation active de rôle d'opérateur
+plateforme en portée `platform` (BE-121, `app/rbac/role_assignments.py`). Elle
+remplace la liste d'exploitation `OPERATOR_READ_USER_IDS`, qui ne sert plus à
+la portée d'administration (elle reste celle de la console opérateur BE-030).
 
 Aucune table : BE-120 ne crée ni colonne ni migration. Aucune route n'est
 ajoutée ici ; les routes d'administration (BE-121 et suivants) dépendent de
@@ -46,8 +46,8 @@ from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.security import get_current_user
 from app.identity.models import User
-from app.operator.permissions import has_platform_authority
 from app.rbac.guards import assert_active_membership
+from app.rbac.role_assignments import has_platform_authority
 
 EN_TETE_PORTEE = "X-Admin-Scope"
 PORTEE_PLATEFORME = "platform"
@@ -151,7 +151,7 @@ async def require_admin_scope(
     `assert_tenant_content_scope` pour chaque ressource tenant lue ou écrite.
     """
     scope = admin_scope_from_request(request)
-    if not has_platform_authority(current_user.id):
+    if not await has_platform_authority(db, current_user.id):
         raise _refus()
     if not scope.is_platform:
         try:

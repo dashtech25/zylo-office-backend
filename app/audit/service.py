@@ -69,6 +69,7 @@ async def record_audit_event(
     visibility: str | None = None,
     data_classification: str | None = None,
     correlation_id: str | None = None,
+    sans_organisation: bool = False,
 ) -> AuditEvent:
     """Écrit exactement une entrée dans la table unique `audit_event` (BE-007).
 
@@ -96,7 +97,10 @@ async def record_audit_event(
     Les paramètres positionnels existants sont inchangés ; `result`,
     `actor_type`, `reason`, `approval_id`, `visibility`, `data_classification`
     sont keyword-only et optionnels."""
-    if organization_id is None:
+    # `sans_organisation` n'est vrai que pour les entrées d'administration de
+    # portée plateforme (BE-121 CA-4, BE-122) : elles ne sont rattachées à aucun
+    # tenant, `organizationId` reste NULL. Par défaut, l'invariant BE-007 tient.
+    if organization_id is None and not sans_organisation:
         raise AppError(
             code="audit_invalid_write",
             message="Écriture d'audit refusée : organisation absente.",

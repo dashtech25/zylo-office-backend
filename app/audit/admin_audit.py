@@ -88,7 +88,7 @@ def _cle_interdite(valeur: Any) -> str | None:
 async def ecrire_evenement_admin(
     db: AsyncSession,
     *,
-    organization_id: uuid.UUID,
+    organization_id: uuid.UUID | None,
     actor_user_id: uuid.UUID,
     action: str,
     entity_type: str,
@@ -102,6 +102,11 @@ async def ecrire_evenement_admin(
 ) -> AuditEvent:
     """Ajoute une entrée d'audit administrative dans `audit_event`, sans la valider
     ni la commiter (l'appelant gère la transaction, comme BE-007).
+
+    `organization_id` vaut `None` pour une action de portée plateforme (BE-121
+    CA-4) : l'entrée n'est alors rattachée à aucun tenant (`organizationId` NULL,
+    lue par la portée plateforme de BE-122). Ce cas est le seul où le service
+    BE-007 accepte une organisation absente (paramètre `sans_organisation`).
 
     Lève `AppError` 422 et n'écrit rien si :
     - `correlation_id` est absent ou vide (`audit_correlation_absente`) ;
@@ -132,6 +137,7 @@ async def ecrire_evenement_admin(
         scope_resource_id=scope_resource_id,
         result=result,
         correlation_id=correlation_id,
+        sans_organisation=organization_id is None,
     )
 
 

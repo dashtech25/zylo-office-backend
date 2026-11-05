@@ -19,3 +19,12 @@ Module : `app/evenements/outbox.py`, tables dans `app/evenements/models.py`, mig
 ## Hors périmètre
 
 Le mécanisme de file (worker, polling, ordre par entité, rétention) n'est pas défini : QE-PAR-10.
+
+## Extension BE-234 (versionnée)
+
+- Migration `b234a0d1e2f3` (revise `5e31981cf46c`) : colonnes `portee`, `acteur`, `correlationId`, `tentatives` ; `tenantId` devient nullable ; contraintes `ck_outbox_evenement_portee` et `ck_outbox_evenement_portee_tenant`. Le downgrade supprime les événements plateforme : perte volontaire.
+- Événement plateforme : `enregistrer_evenement_plateforme(db, donnees, emetteur_plateforme=...)`. Le type doit commencer par `Plateforme.` (`PREFIXE_TYPE_PLATEFORME`), `tenantId` doit être nul. Émetteur non interne : `PERMISSION_DENIED` 403.
+- Un événement sans tenant refusé par le chemin tenant : `SCHEMA_INVALID`.
+- La lecture par tenant ne renvoie que `portee = tenant`.
+
+Lacune connue : aucune table de consommateurs autorisés par tenant n'existe. L'isolation repose sur le `tenant_id` passé par l'appelant (QE à traiter avec BE-235).

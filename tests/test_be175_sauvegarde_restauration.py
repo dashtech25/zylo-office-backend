@@ -40,7 +40,7 @@ from app.audit.service import record_audit_event
 from app.core.database import AsyncSessionLocal
 from app.core.errors import AppError
 from app.core.logging import request_id_ctx
-from app.exploitation.restauration import restaurer_sauvegarde, sauvegarder_base
+from app.operator.restauration import restaurer_sauvegarde, sauvegarder_base
 from app.identity.models import User
 from app.parametres.models import SettingDefinition
 from app.parametres.service import ecrire_version, lire_valeur_courante

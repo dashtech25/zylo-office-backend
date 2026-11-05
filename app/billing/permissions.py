@@ -48,3 +48,6 @@ BILLING_HISTORY_READ = "billing.history.read"
 # permission ici : elle est contrôlée par la règle d'approbation (app/billing/refunds/service.py).
 # Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
 BILLING_REFUND_REQUEST = "billing.refund.request"
+# BE-095 (ACTF-09, finance) : lancer une réconciliation des paiements (POST /billing/reconciliations).
+# Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
+BILLING_RECONCILIATION_RUN = "billing.reconciliation.run"

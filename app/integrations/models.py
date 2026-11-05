@@ -98,6 +98,50 @@ class SecretIntegration(UUIDPrimaryKeyMixin, Base):
     )
 
 
+class IntegrationLink(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Lien d'un tenant vers un compte d'un fournisseur externe (BE-239).
+
+    Table `integration_links`. Une ligne par connexion : elle porte la référence composée
+    `remoteKey` (`fournisseur/compte/ressource`, CA-1), l'état `statut` (`connectée` ou
+    `déconnectée`), le curseur de synchronisation `curseurSync` et le résultat de la dernière
+    réconciliation (`derniereReconciliation`, `statutReconciliation`).
+
+    - `connecteurId` : connecteur du registre (BE-160) qui porte le secret ; unique, car un
+      connecteur ne sert qu'à un lien ;
+    - aucun secret ici : la valeur reste dans le coffre, seule la référence est en base (BE-161) ;
+    - unicité de `(organizationId, provider, externalAccount)` tant que le lien existe : deux
+      connexions actives au même compte d'un même tenant sont impossibles.
+    """
+
+    __tablename__ = "integration_links"
+    __table_args__ = (
+        CheckConstraint("statut IN ('connectée', 'déconnectée')", name="ck_integration_links_statut"),
+        CheckConstraint(
+            "\"statutReconciliation\" IS NULL OR \"statutReconciliation\" IN ('succes', 'echec')",
+            name="ck_integration_links_statut_reconciliation",
+        ),
+        CheckConstraint("length(btrim(\"remoteKey\")) > 0", name="ck_integration_links_remote_key_non_vide"),
+        UniqueConstraint(
+            "organizationId", "provider", "externalAccount", name="uq_integration_links_tenant_compte"
+        ),
+        {"comment": "Liens tenant vers des comptes de fournisseurs externes, sans secret (BE-239)."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True
+    )
+    connecteurId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("connecteur.id"), nullable=False, unique=True
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    externalAccount: Mapped[str] = mapped_column(String(128), nullable=False)
+    remoteKey: Mapped[str] = mapped_column(String(512), nullable=False)
+    statut: Mapped[str] = mapped_column(String(16), nullable=False, server_default="connectée")
+    curseurSync: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    derniereReconciliation: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    statutReconciliation: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+
 ISSUE_SUCCES = "succes"
 ISSUE_ECHEC = "echec"
 

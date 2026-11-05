@@ -52,6 +52,14 @@ class SecretStore:
             raise ValueError("Une rotation exige une valeur non vide.")
         self._valeurs[nom] = nouvelle_valeur
 
+    def supprimer(self, nom: str) -> None:
+        """Retire la valeur de `nom` du magasin : plus aucune résolution ni signature possible.
+
+        Utilisé à la déconnexion d'une intégration (BE-239, CA-2) pour couper l'accès au
+        secret. Supprimer une valeur absente ne lève rien : l'opération est idempotente.
+        """
+        self._valeurs.pop(nom, None)
+
     def signe(self, nom: str, message: bytes) -> str:
         """Signature HMAC-SHA256 de `message` avec la valeur courante de `nom`.
 

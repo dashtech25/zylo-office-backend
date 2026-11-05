@@ -36,6 +36,7 @@ from app.modules_registry.reconciliation_router import router as reconciliation_
 from app.modules_registry.catalog_router import router as catalog_router
 from app.modules_registry.router import router as modules_router
 from app.integrations.router import lettres_mortes_router
+from app.integrations.liens_router import router as liens_router
 from app.integrations.webhooks import router as webhooks_entrants_router
 from app.rbac.grants_membres import router as grants_membres_router
 from app.rbac.acces_effectif_router import router as acces_effectif_router
@@ -98,6 +99,7 @@ api_router.include_router(operations_router, prefix="/operations", tags=["operat
 api_router.include_router(rbac_router, prefix="/rbac", tags=["rbac"])
 # BE-162 : routes des connecteurs d'intégration (registre BE-160).
 api_router.include_router(connecteurs_router, tags=["integrations"])
+api_router.include_router(liens_router, tags=["integrations"])
 # BE-016 : lecture des rôles de l organisation courante (lecture seule).
 api_router.include_router(roles_lecture_router, prefix="/organizations", tags=["rbac"])
 api_router.include_router(grants_membres_router, prefix="/organizations", tags=["rbac"])

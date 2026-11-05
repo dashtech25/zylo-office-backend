@@ -4,13 +4,15 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.audit import consultation, service
-from app.audit.schemas import AuditEvenementResponse, AuditLogResponse
+from app.audit import consultation, export_job, service
+from app.audit.permissions import AUDIT_EXPORT
+from app.audit.schemas import AuditEvenementResponse, AuditLogResponse, ExportAuditCreate, ExportAuditResponse
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.identity.models import User
 from app.identity.service import require_organization_member
 from app.rbac.guards import get_current_organization_id
+from app.rbac.service import require_permission
 from app.shared.pagination import PaginationParams
 from app.shared.schemas import Page, PageMeta
 
@@ -44,6 +46,74 @@ async def _page_de_journal(
         data=[AuditLogResponse.model_validate(row) for row in rows],
         meta=PageMeta(total=total, limit=pagination.limit, offset=pagination.offset),
     )
+
+
+def _reponse_job(job, lien_actif: bool = True) -> ExportAuditResponse:
+    """Sérialise un job ; le lien de téléchargement n'existe que tant que le job n'est pas expiré."""
+    lien = f"/api/v1/audit/exports/{job.id}/telechargement" if lien_actif else None
+    return ExportAuditResponse(
+        id=job.id,
+        sujet=job.sujet,
+        dateDebut=job.periode["dateDebut"],
+        dateFin=job.periode["dateFin"],
+        motif=job.motif,
+        statut=export_job.statut_du_job(job),
+        creeAt=job.creeAt,
+        expireAt=job.expireAt,
+        lienTelechargement=lien,
+    )
+
+
+@router.post(
+    "/exports",
+    response_model=ExportAuditResponse,
+    status_code=201,
+    dependencies=[Depends(require_permission(AUDIT_EXPORT))],
+    summary="Demander un export du journal d'audit (BE-173)",
+)
+async def demander_export(
+    payload: ExportAuditCreate,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ExportAuditResponse:
+    """Crée un job d'export (BE-173). Motif obligatoire (422), permission `audit.export` (403),
+    durée de rétention configurée (503). La logique est dans app/audit/export_job.py."""
+    job = await export_job.demander_export(
+        db, organization_id, current_user.id, payload.sujet, payload.dateDebut, payload.dateFin, payload.motif
+    )
+    return _reponse_job(job)
+
+
+@router.get(
+    "/exports/{job_id}",
+    response_model=ExportAuditResponse,
+    dependencies=[Depends(require_permission(AUDIT_EXPORT))],
+    summary="Statut d'un export du journal d'audit (BE-173)",
+)
+async def statut_export(
+    job_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> ExportAuditResponse:
+    """Statut et lien de téléchargement temporaire. 404 hors tenant (CA-5)."""
+    job = await export_job.obtenir_job(db, organization_id, job_id)
+    return _reponse_job(job, lien_actif=not export_job.est_expire(job))
+
+
+@router.get(
+    "/exports/{job_id}/telechargement",
+    dependencies=[Depends(require_permission(AUDIT_EXPORT))],
+    summary="Contenu d'un export du journal d'audit (BE-173, 410 une fois expiré)",
+)
+async def telecharger_export(
+    job_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Événements du job, limités aux champs autorisés (CA-4). 410 une fois expiré (CA-2)."""
+    contenu = await export_job.contenu_export(db, organization_id, job_id)
+    return {"data": contenu}
 
 
 @router.get(

@@ -503,3 +503,24 @@ class Checkout(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open", comment="open, pending, completed, failed, cancelled ou expired.")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, comment="Verrou optimiste (BE-072), incrémenté à chaque transition.")
     createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class CreditNote(UUIDPrimaryKeyMixin, Base):
+    """Avoir (BE-087) : correction d'une facture finalisée, sans toucher à la facture d'origine.
+
+    Un avoir pointe toujours une facture (`invoiceId`, obligatoire). Le montant est en unités
+    mineures, dans la devise de la facture (copiée à l'émission). Le motif est obligatoire et
+    l'approbateur est enregistré dans l'entrée d'audit `billing.credit_note.issue`, pas sur cette
+    ligne (colonnes exactes NON DÉFINI, QE-FAC-04). Pas d'`updatedAt` : un avoir est immuable.
+    Voir app/billing/credit_notes/service.py pour les règles d'émission.
+    """
+
+    __tablename__ = "credit_note"
+    __table_args__ = {"comment": "Avoir émis sur une facture finalisée (BE-087). Append-only ; la facture d'origine n'est pas modifiée."}
+
+    invoiceId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("invoice.id"), nullable=False, index=True)
+    amount: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="Montant de l'avoir en unités mineures, strictement positif.")
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, comment="Devise de la facture d'origine, copiée à l'émission.")
+    reason: Mapped[str] = mapped_column(Text, nullable=False, comment="Motif obligatoire (geste sensible, BE-073).")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="issued", comment="Statut de l'avoir ; `issued` à l'émission.")
+    createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

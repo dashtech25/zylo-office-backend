@@ -35,7 +35,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import record_audit_event
 from app.core.errors import AppError
-from app.identity.models import User
+from app.evenements.outbox import enregistrer_evenement
+from app.identity.evenements_membres import EVENEMENT_ROLE_CHANGED, construire_evenement_membre
+from app.identity.models import OrganizationUser, User
 from app.rbac.guards import assert_target_is_member
 from app.rbac.models import Role, UserRole
 from app.rbac.service import (
@@ -182,6 +184,30 @@ async def replace_member_roles(
             entity_type="UserRole",
             entity_id=role_id,
             summary=f"Attribution du rôle {role.name} à {cible_nom}",
+        )
+
+    if a_attribuer or a_retirer:
+        # BE-106 : `RoleChanged` part dans la même transaction que les attributions et retraits.
+        membership_id = await db.scalar(
+            select(OrganizationUser.id).where(
+                OrganizationUser.organizationId == organization_id, OrganizationUser.userId == target_user_id
+            )
+        )
+        await enregistrer_evenement(
+            db,
+            construire_evenement_membre(
+                EVENEMENT_ROLE_CHANGED,
+                organization_id,
+                actor.id,
+                membership_id,
+                {
+                    "userId": str(target_user_id),
+                    "roleIds": [str(role_id) for role_id in cibles],
+                    "rolesAttribues": [str(role_id) for role_id in a_attribuer],
+                    "rolesRetires": [str(role_id) for role_id in a_retirer],
+                },
+            ),
+            emetteur_tenant=organization_id,
         )
 
     await db.commit()

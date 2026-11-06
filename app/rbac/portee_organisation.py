@@ -47,6 +47,11 @@ POLITIQUE_PORTAIL: dict[str, str] = {
     "portail.invitation.creer": "organization.members.invite",
     # BE-118 : ouverture d'une demande de support (chaîne écrite ici, comme BE-108 et BE-116).
     "portail.support.demander": "support.request.create",
+    # BE-106 : la fiche écrit `members:manage` ; le code utilise les permissions existantes
+    # (voir docs/portail-organisation/membres.md).
+    "portail.membres.lire": "organization.members.read",
+    "portail.membre.changer_role": "rbac.role.manage",
+    "portail.membre.retirer": "organization.members.remove",
 }
 
 

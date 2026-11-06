@@ -152,6 +152,15 @@ class OrganizationInvitationResponse(BaseModel):
     expiresAt: datetime
 
 
+class ChangeMemberRolesRequest(BaseModel):
+    """POST /organizations/{organization_id}/role-changes (BE-106). `membershipId` désigne le
+    membership de l'organisation du chemin (`organization_user.id`) ; `roleIds` est l'ensemble
+    cible des rôles transverses du membre (voir `rbac.affectation_membres.replace_member_roles`)."""
+
+    membershipId: uuid.UUID
+    roleIds: list[uuid.UUID]
+
+
 class CreatePortalInvitationRequest(BaseModel):
     """POST /organizations/{organization_id}/invitations (BE-105). `recipientUserId` désigne
     l'identité invitée, seule habilitée à accepter (QE-POR-24). `roleId` est facultatif et ne

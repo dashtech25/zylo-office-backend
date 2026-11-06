@@ -33,6 +33,7 @@ from app.tenants.router import router as tenants_router
 from app.identity.router import account_router
 from app.identity.router import users_router
 from app.identity.invitations_portail_router import router as portail_invitations_router
+from app.identity.membres_portail_router import router as portail_membres_router
 from app.location.router import router as location_router
 from app.modules.zylo_liquid.router import router as zylo_liquid_router
 from app.modules.zylo_tanker.router import router as zylo_tanker_router
@@ -107,6 +108,7 @@ api_router.include_router(support_demandes_router, prefix="/organizations", tags
 api_router.include_router(billing_current_organization_router, prefix="/organizations", tags=["billing"])
 # BE-105 : invitations du portail, sous /organizations/{organization_id}/invitations.
 api_router.include_router(portail_invitations_router, prefix="/organizations", tags=["organizations"])
+api_router.include_router(portail_membres_router, prefix="/organizations", tags=["organizations"])
 api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(account_router, prefix="/account", tags=["account"])
 api_router.include_router(organizations_modules_router, prefix="/organizations", tags=["modules"])

@@ -33,7 +33,8 @@ MOT_DE_PASSE = "TestPassword123!"
 
 
 def _entetes(utilisateur: dict, organisation_id: str | None = None) -> dict:
-    entetes = {"Authorization": f"Bearer {utilisateur['token']}"}
+    jeton = utilisateur.get("token") or utilisateur["accessToken"]
+    entetes = {"Authorization": f"Bearer {jeton}"}
     if organisation_id is not None:
         entetes["X-Organization-Id"] = organisation_id
     return entetes

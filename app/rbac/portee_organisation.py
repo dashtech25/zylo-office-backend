@@ -52,6 +52,8 @@ POLITIQUE_PORTAIL: dict[str, str] = {
     "portail.membres.lire": "organization.members.read",
     "portail.membre.changer_role": "rbac.role.manage",
     "portail.membre.retirer": "organization.members.remove",
+    # BE-109 : résumé du portail (chaîne écrite ici ; la permission est déclarée dans identity/permissions.py).
+    "portail.resume.lire": "portal.summary.read",
 }
 
 

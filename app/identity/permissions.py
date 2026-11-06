@@ -35,3 +35,8 @@ ORGANIZATION_UPDATE = "organization.update"
 # BE-186 : voir les identifiants légaux confidentiels de l'organisation. Sans ce
 # droit, les champs sont absents de la réponse (et non renvoyés vides).
 ORGANIZATION_LEGAL_READ = "organization.legal.read"
+
+# BE-109 : lire le résumé du portail (GET /organizations/{organization_id}/portal-summary).
+# Écart : la fiche écrit `portal:read` ; le format `domaine.entite.action` est retenu, comme BE-108.
+# Accordée au propriétaire à la création de l'organisation (OWNER_DEFAULT_PERMISSIONS).
+PORTAL_SUMMARY_READ = "portal.summary.read"

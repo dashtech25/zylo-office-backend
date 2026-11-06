@@ -20,6 +20,10 @@ BILLING_INVOICE_READ = "billing.invoice.read"
 # désignée par son identifiant dans le chemin (GET /organizations/{organization_id}/entitlements).
 # Portée organisation ; accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS.
 ORGANIZATION_ENTITLEMENT_READ = "organization.entitlement.read"
+# BE-108 : lecture de l'usage (agrégats et limites) de l'organisation du chemin
+# (GET /organizations/{organization_id}/usage). Écart : la fiche écrit `usage:read` ; le format
+# `domaine.entite.action` est retenu, comme pour BE-107. Accordée au propriétaire par défaut.
+ORGANIZATION_USAGE_READ = "organization.usage.read"
 # BE-046 (QE-MOD-16, recommandation appliquée) : attribuer un siège (allocation) d'un
 # entitlement à un membre, et révoquer ce siège. Deux permissions distinctes : un acteur
 # peut attribuer sans pouvoir révoquer, et inversement. Portée organisation.

@@ -21,6 +21,7 @@ from app.billing.permissions import (
     ORGANIZATION_ENTITLEMENT_ALLOCATE,
     ORGANIZATION_ENTITLEMENT_READ,
     ORGANIZATION_ENTITLEMENT_REVOKE,
+    ORGANIZATION_USAGE_READ,
     SUBSCRIPTION_MANAGE,
     SUBSCRIPTION_READ,
 )
@@ -88,6 +89,7 @@ OWNER_DEFAULT_PERMISSIONS = [
     (ORGANIZATION_ENTITLEMENT_READ, "billing", "Consulter les entitlements de l'organisation désignée par son identifiant (BE-045)."),
     (ORGANIZATION_ENTITLEMENT_ALLOCATE, "billing", "Attribuer un siège d'entitlement à un membre de l'organisation (BE-046)."),
     (ORGANIZATION_ENTITLEMENT_REVOKE, "billing", "Révoquer le siège d'entitlement d'un membre de l'organisation (BE-046)."),
+    (ORGANIZATION_USAGE_READ, "billing", "Consulter l'usage (agrégats et limites) de l'organisation désignée par son identifiant (BE-108)."),
     (BILLING_CONSENT_RECORD, "billing", "Enregistrer un consentement versionné pour un compte payeur (BE-076)."),
     (BILLING_DATA_EXPORT_REQUEST, "billing", "Demander un export des données de facturation d'un compte payeur (BE-098)."),
     (BILLING_HISTORY_READ, "billing", "Consulter l'historique commercial du tenant courant (BE-099)."),

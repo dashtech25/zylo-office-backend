@@ -61,6 +61,8 @@ async def assert_active_membership(db: AsyncSession, user_id: uuid.UUID, organiz
         .where(
             OrganizationUser.organizationId == organization_id,
             OrganizationUser.userId == user_id,
+            # BE-189 : seul un membership actif ouvre une organisation (invited, suspended, revoked refusés).
+            OrganizationUser.status == "active",
             Organization.deletedAt.is_(None),
         )
     )

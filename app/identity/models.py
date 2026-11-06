@@ -120,6 +120,10 @@ class OrganizationUser(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     userId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="active", server_default="active")
+    # BE-189 : verrou de version du membership, +1 à chaque changement d'état (app/identity/membership.py).
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1", comment="Version du membership (BE-189) ; incrémentée à chaque changement d'état."
+    )
 
 
 class Tenant(UUIDPrimaryKeyMixin, TimestampMixin, Base):

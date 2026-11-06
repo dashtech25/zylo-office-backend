@@ -140,7 +140,7 @@ async def test_ca1_selection_sans_membership_actif_renvoie_404(client: AsyncClie
 
     assert res_etranger.status_code == 404
     assert res_suspendu.status_code == 404
-    assert res_etranger.json()["code"] == res_suspendu.json()["code"] == "organization_not_found"
+    assert res_etranger.json()["error"]["code"] == res_suspendu.json()["error"]["code"] == "organization_not_found"
 
 
 async def test_ca1_selection_avec_membership_actif_reussit(client: AsyncClient, organization: dict):
@@ -225,7 +225,7 @@ async def test_ca3_invitation_sans_permission_renvoie_403(client: AsyncClient, o
     res = await client.post("/api/v1/memberships", json={"email": invite["email"]}, headers=_entetes(sans_droit, organisation_id))
 
     assert res.status_code == 403
-    assert res.json()["code"] == "permission_denied"
+    assert res.json()["error"]["code"] == "permission_denied"
     assert await _nombre_memberships(organisation_id, invite["id"]) == 0
 
 

@@ -653,8 +653,9 @@ async def list_organization_members_with_roles(db: AsyncSession, organization_id
     """Pour la page globale Utilisateurs (§14.1) — un utilisateur + ses rôles
     dans CETTE organisation (un même User peut avoir des rôles différents
     selon l'organisation, cf. UserRole scopé)."""
+    # BE-189 : seules les appartenances actives sont des membres (invited, suspended, revoked exclus).
     stmt = select(User).join(OrganizationUser, OrganizationUser.userId == User.id).where(
-        OrganizationUser.organizationId == organization_id
+        OrganizationUser.organizationId == organization_id, OrganizationUser.status == "active"
     ).order_by(User.fullName)
     users = list((await db.execute(stmt)).scalars().all())
 

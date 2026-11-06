@@ -36,7 +36,11 @@ from app.rbac.service import user_has_permission
 # Politique du portail : action -> permission exigée. Vide tant qu'aucune route du
 # portail n'est livrée : toute action est alors refusée par défaut. Chaque tâche
 # qui ajoute une route y inscrit son action et la permission correspondante.
-POLITIQUE_PORTAIL: dict[str, str] = {}
+# BE-108 : `portail.usage.lire` -> `organization.usage.read` (code porté par app/billing/permissions.py ;
+# chaîne écrite ici car rbac ne doit pas importer la facturation).
+POLITIQUE_PORTAIL: dict[str, str] = {
+    "portail.usage.lire": "organization.usage.read",
+}
 
 
 @dataclass(frozen=True)

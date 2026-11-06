@@ -542,6 +542,25 @@ class DataExportRequest(Base):
     fileRef: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Référence du fichier produit ; NULL tant qu'aucun stockage n'est branché (QE-FAC-25).")
 
 
+class UsageSnapshot(Base):
+    """Projection de l'usage d'une organisation publiée par PH-09 (BE-108).
+
+    Lecture seule côté portail : BE-108 ne crée ni ne modifie de ligne. La table reste vide
+    tant que PH-09 (événement `UsageSnapshotPublished`, QE-POR-28) n'est pas livré.
+    `aggregates` et `limits` sont des objets JSON copiés tels quels : aucune clé n'est imposée
+    ici (QE-POR-23). Aucune colonne ne porte d'identité individuelle (CA-2).
+    """
+    __tablename__ = "usage_snapshot"
+    __table_args__ = {"comment": "Projection de l'usage par organisation, publiée par PH-09 (BE-108, lecture seule)."}
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organizationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True, comment="Organisation mesurée (isolation tenant, CA-4).")
+    measuredAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True, comment="Date de la mesure.")
+    granularity: Mapped[str] = mapped_column(String(30), nullable=False, comment="Granularité de la mesure (valeur fournie par PH-09).")
+    aggregates: Mapped[dict] = mapped_column(JSONB, nullable=False, comment="Agrégats d'usage, sans identifiant individuel.")
+    limits: Mapped[dict] = mapped_column(JSONB, nullable=False, comment="Limites applicables à l'organisation à la date de mesure.")
+
+
 class Checkout(Base):
     """Checkout d'achat ouvert depuis un devis `accepted` (BE-081).
 

@@ -25,6 +25,12 @@ Entitlements d'une organisation désignée par son identifiant (BE-045) :
 - Non-membre ou autre tenant : 404 `organization_not_found`, sans aucune donnée.
 - Permission : `organization.entitlement.read` (QE-MOD-16). Membre sans elle : 403.
 - Lecture seule : POST, PATCH et DELETE sur ce chemin répondent 405.
+
+Usage de l'organisation (BE-108) :
+- `GET /organizations/{organization_id}/usage` : dernier snapshot d'usage publié (table
+  `usage_snapshot`, écrite par PH-09). Portée `OrgScope` (BE-101) : le chemin seul fixe
+  l'organisation ; hors appartenance ou identifiant mal formé : 404 ; sans
+  `organization.usage.read` : 403 `permission_denied`. Sans snapshot : 200 avec valeurs vides.
 """
 
 import uuid
@@ -35,11 +41,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.billing import entitlements as calcul_entitlements
 from app.billing import service
-from app.billing.models import Invoice, Subscription
+from app.billing.models import Invoice, Subscription, UsageSnapshot
 from app.billing.permissions import BILLING_INVOICE_READ, ORGANIZATION_ENTITLEMENT_READ
-from app.billing.schemas import EntitlementsOrganisationResponse, InvoiceResponse, OrganizationEntitlementResponse
+from app.billing.schemas import (
+    EntitlementsOrganisationResponse,
+    InvoiceResponse,
+    OrganizationEntitlementResponse,
+    UsageOrganisationResponse,
+)
 from app.core.database import get_db
 from app.rbac.guards import get_current_organization_id
+from app.rbac.portee_organisation import OrgScope, exiger_action
 from app.rbac.service import require_permission
 from app.shared.pagination import PaginationParams, paginate
 from app.shared.schemas import Page
@@ -125,4 +137,40 @@ async def list_organization_entitlements(
     return EntitlementsOrganisationResponse(
         included=[ligne for ligne in lignes if ligne.source == SOURCE_INCLUSE],
         addOns=[ligne for ligne in lignes if ligne.source != SOURCE_INCLUSE],
+    )
+
+
+# Action du portail pour la lecture de l'usage ; sa permission est dans POLITIQUE_PORTAIL (BE-108).
+USAGE_PORTAIL_ACTION = "portail.usage.lire"
+
+
+@router.get(
+    "/{organization_id}/usage",
+    response_model=UsageOrganisationResponse,
+    summary="Lire l'usage (agrégats et limites) de l'organisation (BE-108)",
+)
+async def get_organization_usage(
+    scope: OrgScope = Depends(exiger_action(USAGE_PORTAIL_ACTION)),
+    db: AsyncSession = Depends(get_db),
+) -> UsageOrganisationResponse:
+    """Dernier snapshot d'usage de l'organisation du chemin, ou valeurs vides s'il n'en existe pas.
+
+    La portée et la permission sont vérifiées par `exiger_action` avant le corps de la route.
+    Seules les lignes de `scope.organization_id` sont lues (isolation tenant, CA-4). La réponse
+    ne reprend que date, granularité, agrégats et limites : aucune identité individuelle (CA-2).
+    """
+    stmt = (
+        select(UsageSnapshot)
+        .where(UsageSnapshot.organizationId == scope.organization_id)
+        .order_by(UsageSnapshot.measuredAt.desc())
+        .limit(1)
+    )
+    ligne = (await db.execute(stmt)).scalars().first()
+    if ligne is None:
+        return UsageOrganisationResponse(measuredAt=None, granularity=None, aggregates={}, limits={})
+    return UsageOrganisationResponse(
+        measuredAt=ligne.measuredAt,
+        granularity=ligne.granularity,
+        aggregates=ligne.aggregates,
+        limits=ligne.limits,
     )

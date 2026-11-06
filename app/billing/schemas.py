@@ -92,6 +92,19 @@ class OrganizationEntitlementResponse(BaseModel):
     stateVersion: int
 
 
+class UsageOrganisationResponse(BaseModel):
+    """Réponse de `GET /organizations/{organization_id}/usage` (BE-108).
+
+    Dernier snapshot de l'organisation : date de mesure, granularité, agrégats et limites tels
+    que publiés (sans clé imposée, QE-POR-23). Sans snapshot, les quatre champs valent nul ou vide.
+    Aucun identifiant d'identité individuelle n'est exposé (CA-2).
+    """
+    measuredAt: datetime | None
+    granularity: str | None
+    aggregates: dict
+    limits: dict
+
+
 class EntitlementsOrganisationResponse(BaseModel):
     """Réponse de `GET /organizations/{organization_id}/entitlements` (BE-107).
 

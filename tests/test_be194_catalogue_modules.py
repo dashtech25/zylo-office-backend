@@ -29,6 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.database import AsyncSessionLocal
 from app.identity.models import User
 from app.modules_registry.models import Module, ModuleVersion
+from app.rbac.role_assignments import AdminRoleAssignment
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 REVISION_PRECEDENTE_BE194 = "b189c0de0189"
@@ -36,7 +37,6 @@ URL_MODULES = "/api/v1/modules"
 URL_MODULE = "/api/v1/modules/{code}"
 URL_VERSION = "/api/v1/modules/{code}/versions/{version}"
 URL_ADMIN_MODULES = "/api/v1/admin/modules"
-URL_ACTIVATION = "/api/v1/modules/organizations/{organization_id}/activate"
 COMPATIBLE = {"zylo_office": ">=1.0.0"}
 
 
@@ -101,6 +101,26 @@ async def _id_utilisateur(email: str) -> uuid.UUID:
         return (await db.execute(select(User.id).where(User.email == email))).scalar_one()
 
 
+async def _accorder_autorite_plateforme(user_id: uuid.UUID) -> None:
+    """Affectation active `operateur_plateforme` en portée `platform` : passe la garde des routes admin (BE-121).
+
+    Sans elle, la route admin répond 403 `admin_scope_denied` avant tout contrôle de droit catalogue.
+    """
+    async with AsyncSessionLocal() as db:
+        db.add(
+            AdminRoleAssignment(
+                actorId=user_id,
+                roleCode="operateur_plateforme",
+                scope="platform",
+                grantedBy=user_id,
+                grantedAt=datetime.now(timezone.utc),
+                expiresAt=None,
+                revokedAt=None,
+            )
+        )
+        await db.commit()
+
+
 def _entetes(utilisateur: dict) -> dict:
     return {"Authorization": f"Bearer {utilisateur['accessToken']}"}
 
@@ -159,17 +179,20 @@ async def test_version_publiee_compatible_est_lisible(client: AsyncClient):
 # CA-2 : après un listing, une action sans grant reste refusée 403 (non-inférence de droit).
 
 
-async def test_ca2_listage_du_catalogue_n_accorde_aucun_droit(client: AsyncClient, organization: dict):
+async def test_ca2_listage_du_catalogue_n_accorde_aucun_droit(client: AsyncClient, monkeypatch):
+    """Après listage et lecture publics, le compte sans grant reste refusé sur une action d'écriture."""
     code = _code_unique()
     await _inserer_module(code, versions=(("1.0.0", "published", COMPATIBLE),))
     sans_grant = await _utilisateur_sans_grant(client)
+    monkeypatch.setenv("PLATFORM_MODULE_WRITE_USER_IDS", "")
+    monkeypatch.setenv("PLATFORM_CATALOG_MANAGE_USER_IDS", "")
 
     assert (await client.get(URL_MODULES, headers=_entetes(sans_grant))).status_code == 200
     assert (await client.get(URL_MODULE.format(code=code), headers=_entetes(sans_grant))).status_code == 200
 
     action = await client.post(
-        URL_ACTIVATION.format(organization_id=organization["id"]),
-        json={"moduleCode": code},
+        URL_ADMIN_MODULES,
+        json={"code": _code_unique(), "name": "Sans grant", "description": None},
         headers=_entetes(sans_grant),
     )
     assert action.status_code == 403
@@ -179,6 +202,7 @@ async def test_ca2_listage_du_catalogue_n_accorde_aucun_droit(client: AsyncClien
 
 
 async def test_ca3_ecriture_du_catalogue_sans_droit_renvoie_403(client: AsyncClient, registered_user: dict, monkeypatch):
+    await _accorder_autorite_plateforme(await _id_utilisateur(registered_user["email"]))
     monkeypatch.setenv("PLATFORM_MODULE_WRITE_USER_IDS", "")
     monkeypatch.setenv("PLATFORM_CATALOG_MANAGE_USER_IDS", "")
     res = await client.post(
@@ -193,6 +217,7 @@ async def test_ca3_ecriture_du_catalogue_avec_platform_catalog_manage_reussit(
     client: AsyncClient, registered_user: dict, monkeypatch
 ):
     user_id = await _id_utilisateur(registered_user["email"])
+    await _accorder_autorite_plateforme(user_id)
     monkeypatch.setenv("PLATFORM_MODULE_WRITE_USER_IDS", "")
     monkeypatch.setenv("PLATFORM_CATALOG_MANAGE_USER_IDS", str(user_id))
     res = await client.post(

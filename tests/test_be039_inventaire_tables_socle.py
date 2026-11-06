@@ -1,23 +1,27 @@
-"""Contrôle l'inventaire du socle contre les modèles chargés par l'application."""
+"""Contrôle l'inventaire du socle contre les modèles chargés par l'application.
 
+Le périmètre est lu dans un processus Python neuf (générateur avec ``--noms-tables``),
+et non dans le registre SQLAlchemy de la session pytest : pendant l'exécution des
+tests, d'autres modules peuvent enregistrer des tables qui ne font pas partie du
+montage de l'application. Le document est comparé au rendu du générateur, lancé
+lui aussi dans un processus neuf.
+"""
+
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 import app.main  # noqa: F401 — enregistre les modèles réellement montés par l'application.
 from app.core.database import Base
+from app.core.table_inventory import MODULES_ORM_SOCLE_HORS_APP
 
 
 RACINE_BACKEND = Path(__file__).resolve().parents[1]
 FICHIER_INVENTAIRE = (
     RACINE_BACKEND / "docs/architecture/inventaire-tables-socle.md"
 )
-
-# Ces deux paquets sont des modules métier. Les capacités transversales comme
-# fichiers, alertes ou localisation restent dans l'inventaire, même si leurs
-# noms de table contiennent « zyloLiquid ».
-PAQUETS_METIER_EXCLUS = (
-    "app.modules.zylo_liquid.",
-    "app.modules.zylo_tanker.",
-)
+GENERATEUR = RACINE_BACKEND / "scripts/docs/generer_inventaire_tables_socle.py"
 
 COLONNES_ATTENDUES = (
     "table",
@@ -35,25 +39,26 @@ PORTÉES_NON_DÉFINIES = {
     "—",
 }
 
-
-def _tables_metier_exclues() -> set[str]:
-    """Retourne les tables attribuées aux deux paquets métier exclus."""
-    tables = set()
-    for mapper in Base.registry.mappers:
-        module = mapper.class_.__module__
-        if any(module.startswith(prefix) for prefix in PAQUETS_METIER_EXCLUS):
-            tables.add(mapper.local_table.name)
-    return tables
+# Importe en session les modules hors montage de app.main, pour que les
+# colonnes des tables du périmètre soient disponibles dans Base.metadata.
+for _module in MODULES_ORM_SOCLE_HORS_APP:
+    __import__(_module)
 
 
-def _tables_du_socle() -> dict[str, object]:
-    """Retourne toutes les tables SQLAlchemy hors paquets métier exclus."""
-    tables_metier = _tables_metier_exclues()
-    return {
-        table.name: table
-        for table in Base.metadata.tables.values()
-        if table.name not in tables_metier
-    }
+def _noms_tables_socle() -> set[str]:
+    """Retourne les noms des tables du socle, lus dans un processus neuf.
+
+    Le processus neuf reproduit exactement le périmètre du générateur : application
+    montée plus modules ORM hors montage listés dans ``MODULES_ORM_SOCLE_HORS_APP``.
+    """
+    resultat = subprocess.run(
+        [sys.executable, str(GENERATEUR), "--noms-tables"],
+        cwd=RACINE_BACKEND,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return set(json.loads(resultat.stdout))
 
 
 def _lignes_inventaire() -> dict[str, dict[str, str]]:
@@ -85,21 +90,24 @@ def _lignes_inventaire() -> dict[str, dict[str, str]]:
 
 def test_inventaire_couvre_les_tables_mappées_du_socle() -> None:
     """CA-3 : chaque table mappée du socle apparaît dans le document."""
-    tables_socle = _tables_du_socle()
+    noms_socle = _noms_tables_socle()
     lignes = _lignes_inventaire()
 
-    assert lignes.keys() == tables_socle.keys(), (
-        f"Tables absentes: {sorted(tables_socle.keys() - lignes.keys())}; "
-        f"tables hors périmètre: {sorted(lignes.keys() - tables_socle.keys())}"
+    assert lignes.keys() == noms_socle, (
+        f"Tables absentes: {sorted(noms_socle - lignes.keys())}; "
+        f"tables hors périmètre: {sorted(lignes.keys() - noms_socle)}"
     )
 
 
 def test_document_est_identique_au_rendu_de_generation() -> None:
-    """CA-3 : le document versionné est le rendu canonique du générateur."""
-    from app.core.table_inventory import render_inventory_markdown
-
-    document = FICHIER_INVENTAIRE.read_text(encoding="utf-8")
-    assert document == render_inventory_markdown()
+    """CA-3 : le document versionné est le rendu canonique du générateur (contrôle --check)."""
+    resultat = subprocess.run(
+        [sys.executable, str(GENERATEUR), "--check"],
+        cwd=RACINE_BACKEND,
+        capture_output=True,
+        text=True,
+    )
+    assert resultat.returncode == 0, resultat.stderr.strip()
 
 
 def test_inventaire_renseigne_proprietaire_portee_routes_et_tests() -> None:
@@ -118,7 +126,7 @@ def test_inventaire_renseigne_proprietaire_portee_routes_et_tests() -> None:
 
 def test_tables_avec_tenant_id_ont_une_portee_definie() -> None:
     """CA-2 : les variantes de colonnes tenant imposent une portée définie."""
-    tables_socle = _tables_du_socle()
+    noms_socle = _noms_tables_socle()
     lignes = _lignes_inventaire()
     colonnes_tenant = {
         "tenantid",
@@ -128,8 +136,11 @@ def test_tables_avec_tenant_id_ont_une_portee_definie() -> None:
     }
     sans_portee = [
         nom
-        for nom, table in tables_socle.items()
-        if any(colonne.name.lower() in colonnes_tenant for colonne in table.columns)
+        for nom in sorted(noms_socle)
+        if any(
+            colonne.name.lower() in colonnes_tenant
+            for colonne in Base.metadata.tables[nom].columns
+        )
         and lignes[nom]["portée"].strip().lower() in PORTÉES_NON_DÉFINIES
     ]
 

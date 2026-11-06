@@ -132,7 +132,7 @@ async def test_sans_permission_usage_read_retourne_403(
     reponse = await client.get(_url(organization["id"]), headers=_entete(jeton, organization["id"]))
 
     assert reponse.status_code == 403
-    assert reponse.json()["code"] == "permission_denied"
+    assert reponse.json()["error"]["code"] == "permission_denied"
 
 
 async def test_organisation_hors_portee_retourne_404(

@@ -83,6 +83,7 @@ from app.operator.commands_router import router as commands_router
 from app.operator.notifications_router import router as notifications_admin_router
 from app.operator.finance_commands_router import router as finance_commands_router
 from app.operator.entitlement_commands_router import router as entitlement_commands_router
+from app.operator.tenant_status_router import router as tenant_status_router
 from app.operator.config_security_router import router as config_security_router
 from app.operator.event_replay_router import router as event_replay_router
 from app.operator.payment_diagnostic_router import router as payment_diagnostic_router
@@ -197,6 +198,8 @@ api_router.include_router(commands_router, prefix="/admin", tags=["admin-command
 api_router.include_router(notifications_admin_router, prefix="/admin", tags=["admin-notifications"], dependencies=[Depends(require_admin_scope)])
 api_router.include_router(finance_commands_router, prefix="/admin", tags=["admin-finance"], dependencies=[Depends(require_admin_scope)])
 api_router.include_router(entitlement_commands_router, prefix="/admin", tags=["operator"], dependencies=[Depends(require_admin_scope)])
+# BE-134 : suspension et rétablissement d'un tenant (POST /admin/organizations/{id}/suspension|reinstatement).
+api_router.include_router(tenant_status_router, prefix="/admin", tags=["operator"], dependencies=[Depends(require_admin_scope)])
 api_router.include_router(config_security_router, prefix="/admin", tags=["operator"], dependencies=[Depends(require_admin_scope)])
 # BE-139 : demande de rejeu d'événement à effet métier (POST /admin/events/{id}/replay-commands).
 api_router.include_router(event_replay_router, prefix="/admin", tags=["admin-event-replay"], dependencies=[Depends(require_admin_scope)])

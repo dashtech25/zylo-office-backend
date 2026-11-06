@@ -39,3 +39,7 @@ ORGANIZATION_LEGAL_READ = "organization.legal.read"
 # BE-189 : inviter, changer l'état et révoquer un membership de l'organisation courante
 # (QE-API-27). Refus sans ce droit : 403 `permission_denied`.
 MEMBERSHIP_MANAGE = "membership.manage"
+# BE-109 : lire le résumé du portail (GET /organizations/{organization_id}/portal-summary).
+# Écart : la fiche écrit `portal:read` ; le format `domaine.entite.action` est retenu, comme BE-108.
+# Accordée au propriétaire à la création de l'organisation (OWNER_DEFAULT_PERMISSIONS).
+PORTAL_SUMMARY_READ = "portal.summary.read"

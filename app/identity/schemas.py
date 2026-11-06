@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import AliasChoices, BaseModel, EmailStr, Field, field_validator
 
 from app.auth.politique_mot_de_passe import verifie_mot_de_passe
 
@@ -28,11 +28,29 @@ class CreateOrganizationRequest(BaseModel):
 
 
 class UpdateOrganizationRequest(BaseModel):
-    """PATCH /organizations/{id}. `version` (BE-233) est la version relue
-    précédemment : absente, la mutation n'est pas conditionnée ; obsolète, 409."""
+    """PATCH /organizations/{id}. `expectedVersion` (BE-186, nom de la définition)
+    est la version relue précédemment : absente, la mutation n'est pas
+    conditionnée ; obsolète, 409. `version` (BE-233) reste accepté en alias."""
 
     name: str = Field(min_length=1, max_length=255)
-    version: int | None = Field(default=None, ge=1)
+    expectedVersion: int | None = Field(
+        default=None, ge=1, validation_alias=AliasChoices("expectedVersion", "version")
+    )
+
+
+class OrganizationDetailResponse(BaseModel):
+    """GET /organizations/{id} (BE-186). Les champs légaux ne figurent dans la
+    réponse que si le droit `organization.legal.read` est détenu : la route
+    applique `response_model_exclude_unset`, donc un champ absent n'apparaît pas."""
+
+    id: uuid.UUID
+    name: str
+    slug: str
+    status: str
+    version: int
+    tenantId: uuid.UUID | None = None
+    legalRegistrationNumber: str | None = None
+    legalTaxNumber: str | None = None
 
 
 class OrganizationResponse(BaseModel):

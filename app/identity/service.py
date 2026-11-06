@@ -44,6 +44,8 @@ from app.identity.permissions import (
     ORGANIZATION_READ,
     ORGANIZATION_SETTINGS_UPDATE,
     ORGANIZATION_UPDATE,
+    ORGANIZATION_VERIFICATION_READ,
+    ORGANIZATION_VERIFICATION_SUBMIT,
     PORTAL_SUMMARY_READ,
     USER_MANAGE,
 )
@@ -107,6 +109,8 @@ OWNER_DEFAULT_PERMISSIONS = [
     (ORGANIZATION_ENTITLEMENT_ALLOCATE, "billing", "Attribuer un siège d'entitlement à un membre de l'organisation (BE-046)."),
     (ORGANIZATION_ENTITLEMENT_REVOKE, "billing", "Révoquer le siège d'entitlement d'un membre de l'organisation (BE-046)."),
     (PORTAL_SUMMARY_READ, "portal", "Consulter le résumé du portail, filtré par permission (BE-109)."),
+    (ORGANIZATION_VERIFICATION_READ, "identity", "Lire le statut de vérification de l'organisation (BE-103)."),
+    (ORGANIZATION_VERIFICATION_SUBMIT, "identity", "Déposer une demande de vérification de l'organisation (BE-103)."),
     (ORGANIZATION_USAGE_READ, "billing", "Consulter l'usage (agrégats et limites) de l'organisation désignée par son identifiant (BE-108)."),
     (BILLING_CONSENT_RECORD, "billing", "Enregistrer un consentement versionné pour un compte payeur (BE-076)."),
     (BILLING_DATA_EXPORT_REQUEST, "billing", "Demander un export des données de facturation d'un compte payeur (BE-098)."),

@@ -49,6 +49,13 @@ PORTAL_SUMMARY_READ = "portal.summary.read"
 # Permission globale : elle n'est portée par aucune organisation (le créateur n'en a pas encore).
 ORGANIZATION_CREATE = "identity.organization.create"
 
+# BE-103 : lire le statut de vérification de l'organisation et y déposer une demande
+# (GET et POST /organizations/{organization_id}/verification). La politique exacte est NON DÉFINIE
+# (QE-POR-07) : seul le propriétaire reçoit ces permissions (OWNER_DEFAULT_PERMISSIONS). Aucune
+# permission n'autorise le client à fixer le statut `verified`.
+ORGANIZATION_VERIFICATION_READ = "organization.verification.read"
+ORGANIZATION_VERIFICATION_SUBMIT = "organization.verification.submit"
+
 
 def permissions_globales(utilisateur) -> frozenset[str]:
     """Permissions globales (sans portée organisation) détenues par `utilisateur`.

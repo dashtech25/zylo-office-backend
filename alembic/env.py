@@ -36,6 +36,7 @@ from app.operator import alertes_models as operator_alertes_models  # noqa: F401
 from app.operator import incidents_models as operator_incidents_models  # noqa: F401
 from app.operator import secrets_models as operator_secrets_models  # noqa: F401
 from app.parametres import models as parametres_models  # noqa: F401
+from app.portail.verification import models as portail_verification_models  # noqa: F401  (BE-103)
 from app.rbac import models as rbac_models  # noqa: F401
 from app.release import models as release_models  # noqa: F401
 from app.shared import geo as shared_geo_models  # noqa: F401

@@ -38,6 +38,9 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     )
     # BE-186 : tenant racine de l'organisation (FK vers `tenant`, unique). Renseigné à la création.
     tenantId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("tenant.id"), nullable=True)
+    # BE-102 : créateur de l'organisation (FK vers `user`), sert à la déduplication par créateur.
+    # Nul pour les organisations créées avant BE-102.
+    createdByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=True)
     # BE-186 : identifiants légaux confidentiels, stockés chiffrés (app.core.field_crypto) ;
     # visibles seulement avec `organization.legal.read`. Jamais en clair au repos.
     legalRegistrationNumberChiffre: Mapped[str | None] = mapped_column(Text, nullable=True)

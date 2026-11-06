@@ -1,3 +1,4 @@
+import unicodedata
 import uuid
 
 from fastapi import Depends, Header
@@ -32,6 +33,7 @@ from app.core.errors import AppError
 from app.core.field_crypto import dechiffrer
 from app.core.security import get_current_user
 from app.core.versioning import mutation_versionnee
+from app.identity import permissions as permissions_identite
 from app.identity.models import Organization, OrganizationUser, Tenant, User
 from app.identity.permissions import (
     MEMBERS_INVITE,
@@ -155,32 +157,62 @@ def build_user(
     )
 
 
+def normalise_nom_organisation(nom: str) -> str:
+    """Forme de comparaison d'un nom d'organisation (BE-102, doublon) : accents retirés,
+    casse ignorée, espaces de bord supprimés et espaces internes réduits à un seul.
+    Seule la comparaison utilise cette forme ; le nom enregistré reste celui saisi."""
+    sans_accents = "".join(c for c in unicodedata.normalize("NFKD", nom) if not unicodedata.combining(c))
+    return " ".join(sans_accents.split()).casefold()
+
+
 async def create_organization(db: AsyncSession, owner: User, data: CreateOrganizationRequest) -> Organization:
+    """Crée une organisation et son tenant racine, dans une seule transaction (BE-102).
+
+    Le créateur devient membre (`organization_user`) mais ne reçoit AUCUN rôle : aucun
+    rôle Owner n'est attribué à la création (QE-POR-04). Le rôle propriétaire est affecté
+    ensuite par une action explicite, jamais implicitement par cette fonction.
+
+    Refus : 403 `permission_denied` si le créateur ne détient pas `org:create` (voir
+    `app.identity.permissions.permissions_globales`) ; 409 `organization_name_duplicate`
+    si le créateur a déjà une organisation au même nom normalisé ; 409 `slug_already_used`
+    si le slug est pris. Le nom est comparé après `normalise_nom_organisation`, par créateur
+    (`organization.createdByUserId`). Le corps n'a pas d'autre effet : un champ `owner` est ignoré.
+    """
+    if permissions_identite.ORGANIZATION_CREATE not in permissions_identite.permissions_globales(owner):
+        raise AppError(
+            code="permission_denied",
+            message="Vous n'avez pas le droit de créer une organisation.",
+            status_code=403,
+        )
+
     existing = await db.execute(select(Organization).where(Organization.slug == data.slug))
     if existing.scalar_one_or_none() is not None:
         raise AppError(code="slug_already_used", message="Ce slug d'organisation est déjà utilisé.", status_code=409)
+
+    cle_nom = normalise_nom_organisation(data.name)
+    noms_du_createur = await db.execute(
+        select(Organization.name).where(
+            Organization.createdByUserId == owner.id,
+            Organization.deletedAt.is_(None),
+        )
+    )
+    if any(normalise_nom_organisation(nom) == cle_nom for nom in noms_du_createur.scalars().all()):
+        raise AppError(
+            code="organization_name_duplicate",
+            message="Vous avez déjà une organisation portant ce nom.",
+            status_code=409,
+        )
 
     # BE-186 : toute organisation créée porte son tenant racine (un tenant, une organisation en v1).
     tenant = Tenant(status="active", version=1)
     db.add(tenant)
     await db.flush()
 
-    organization = Organization(name=data.name, slug=data.slug, tenantId=tenant.id)
+    organization = Organization(name=data.name, slug=data.slug, tenantId=tenant.id, createdByUserId=owner.id)
     db.add(organization)
     await db.flush()
 
     db.add(OrganizationUser(organizationId=organization.id, userId=owner.id))
-
-    # Rôle "owner" auto-créé pour le créateur — seul rôle qui existe par défaut,
-    # tout autre rôle est créé explicitement par la suite via l'API rbac.
-    owner_role = Role(organizationId=organization.id, code="owner", name="Propriétaire")
-    db.add(owner_role)
-    await db.flush()
-
-    for code, module_code, description in OWNER_DEFAULT_PERMISSIONS:
-        permission = await get_or_create_permission(db, code, module_code, description)
-        db.add(RolePermission(roleId=owner_role.id, permissionId=permission.id))
-    db.add(UserRole(userId=owner.id, organizationId=organization.id, roleId=owner_role.id))
 
     await db.commit()
     await db.refresh(organization)

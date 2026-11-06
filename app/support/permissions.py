@@ -14,3 +14,8 @@ SUPPORT_WRITE_SENSIBLE = "support.write_sensible"
 MODE_LECTURE = "lecture"
 MODE_ECRITURE = "ecriture"
 MODES = (MODE_LECTURE, MODE_ECRITURE)
+
+# BE-118 : ouvrir une demande de support client (POST /organizations/{organization_id}/support-requests).
+# Écart : la fiche écrit `support:create` ; le format `domaine.entite.action` est retenu, comme
+# `billing.payment_method.manage` (BE-116). Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS.
+SUPPORT_REQUEST_CREATE = "support.request.create"

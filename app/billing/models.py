@@ -561,6 +561,42 @@ class UsageSnapshot(Base):
     limits: Mapped[dict] = mapped_column(JSONB, nullable=False, comment="Limites applicables à l'organisation à la date de mesure.")
 
 
+class PaymentMethodReference(Base):
+    """Référence de token d'un moyen de paiement de l'organisation (BE-116).
+
+    Seule la référence de token fournie par le prestataire est stockée : aucune colonne ne porte
+    de numéro de carte (PAN) ni de CVV (QE-POR-13). L'index partiel `uq_payment_method_reference_selection`
+    garantit qu'une organisation n'a jamais plus d'une méthode sélectionnée ; la sélection d'une
+    méthode désélectionne les autres dans la même transaction.
+    """
+
+    __tablename__ = "payment_method_reference"
+    __table_args__ = (
+        Index(
+            "uq_payment_method_reference_selection",
+            "organizationId",
+            unique=True,
+            postgresql_where=text("selected"),
+        ),
+        {"comment": "Références de token des moyens de paiement par organisation, sans donnée de carte (BE-116)."},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organizationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True,
+        comment="Organisation propriétaire du moyen de paiement (isolation tenant).",
+    )
+    tokenReference: Mapped[str] = mapped_column(
+        String(255), nullable=False,
+        comment="Référence de token fournie par le prestataire de paiement ; jamais un PAN ni un CVV.",
+    )
+    selected: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false",
+        comment="Vrai pour la méthode utilisée par défaut (au plus une par organisation).",
+    )
+    createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class Checkout(Base):
     """Checkout d'achat ouvert depuis un devis `accepted` (BE-081).
 

@@ -67,3 +67,8 @@ BILLING_CASE_OPEN = "billing.case.open"
 # Distincte d'ouverture : retirer l'une ne retire pas l'autre (moindre privilège). Accordée
 # au propriétaire via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
 BILLING_CASE_RESOLVE = "billing.case.resolve"
+# BE-116 : ajouter ou remplacer un moyen de paiement par token, et le sélectionner
+# (POST /organizations/{organization_id}/billing/payment-methods[/{method}/select]). Code au format
+# `domaine.entite.action` ; l'écriture fiche `billing:payment-method:manage` est un écart consigné.
+# Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 permission_denied.
+BILLING_PAYMENT_METHOD_MANAGE = "billing.payment_method.manage"

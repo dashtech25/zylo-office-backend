@@ -40,6 +40,8 @@ from app.rbac.service import user_has_permission
 # chaîne écrite ici car rbac ne doit pas importer la facturation).
 POLITIQUE_PORTAIL: dict[str, str] = {
     "portail.usage.lire": "organization.usage.read",
+    # BE-116 : ajout, remplacement et sélection d'un moyen de paiement (chaîne écrite ici, comme BE-108).
+    "portail.moyen_paiement.gerer": "billing.payment_method.manage",
 }
 
 

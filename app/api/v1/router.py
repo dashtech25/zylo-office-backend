@@ -36,6 +36,7 @@ from app.identity.membership_router import contexts_router, memberships_router
 from app.identity.invitations_portail_router import router as portail_invitations_router
 from app.identity.membres_portail_router import router as portail_membres_router
 from app.portail.resume_router import router as portail_resume_router
+from app.portail.exports.router import router as portail_exports_router
 from app.portail.verification.router import router as portail_verification_router
 from app.location.router import router as location_router
 from app.modules.zylo_liquid.router import router as zylo_liquid_router
@@ -118,6 +119,8 @@ api_router.include_router(portail_invitations_router, prefix="/organizations", t
 api_router.include_router(portail_membres_router, prefix="/organizations", tags=["organizations"])
 # BE-109 : résumé du portail filtré par permission, sous /organizations/{organization_id}/portal-summary.
 api_router.include_router(portail_resume_router, prefix="/organizations", tags=["organizations"])
+# BE-117 : exports de données asynchrones, sous /organizations/{organization_id}/exports.
+api_router.include_router(portail_exports_router, prefix="/organizations", tags=["organizations"])
 # BE-103 : vérification de l'organisation, sous /organizations/{organization_id}/verification.
 api_router.include_router(portail_verification_router, prefix="/organizations", tags=["organizations"])
 api_router.include_router(users_router, prefix="/users", tags=["users"])

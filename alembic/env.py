@@ -18,6 +18,7 @@ from app.audit import models as audit_models  # noqa: F401
 from app.evenements import models as evenements_models  # noqa: F401
 from app.exports import models as exports_models  # noqa: F401
 from app.jobs import models as jobs_models  # noqa: F401  (BE-213)
+from app.portail.exports import models as portail_exports_models  # noqa: F401  (BE-117)
 from app.securite import models as securite_models  # noqa: F401
 from app.auth import models as auth_models  # noqa: F401
 from app.billing import models as billing_models  # noqa: F401

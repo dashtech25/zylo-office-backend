@@ -70,6 +70,7 @@ from app.operator.search_router import router as search_router
 from app.operator.summary_router import router as summary_router
 from app.operator.scope import require_admin_scope
 from app.operator.incidents_router import router as incidents_router
+from app.operator.support_lists_router import router as support_lists_router
 from app.operator.exceptional_access import router as exceptional_access_router
 from app.operator.access import router as operator_access_router
 from app.operator.cases_router import router as cases_router
@@ -170,6 +171,8 @@ api_router.include_router(search_router, prefix="/admin", tags=["admin-search"],
 api_router.include_router(summary_router, prefix="/admin", tags=["admin-summary"], dependencies=[Depends(require_admin_scope)])
 # BE-247 : file et détail des incidents d'exploitation (GET /admin/incidents).
 api_router.include_router(incidents_router, prefix="/admin", tags=["admin-incidents"], dependencies=[Depends(require_admin_scope)])
+# BE-131 : listes filtrées des objets de support par organisation (GET /admin/organizations/{id}/<liste>), lecture seule.
+api_router.include_router(support_lists_router, prefix="/admin", tags=["admin-support-lists"], dependencies=[Depends(require_admin_scope)])
 # BE-138 : accès exceptionnel au contenu client, refusé par défaut (POST /admin/organizations/{id}/exceptional-access).
 api_router.include_router(exceptional_access_router, prefix="/admin", tags=["admin-exceptional-access"], dependencies=[Depends(require_admin_scope)])
 # BE-229 : accès opérateur nominatif, JIT et approbation (POST/DELETE /admin/access-requests).

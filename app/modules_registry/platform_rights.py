@@ -8,6 +8,8 @@ Attribution, en attendant une gouvernance du catalogue (QE-MOD-16) : deux allowl
 listes d'identifiants d'utilisateurs séparées par des virgules.
 
 - `PLATFORM_MODULE_WRITE_USER_IDS` : comptes autorisés à créer fiches et versions ;
+- `PLATFORM_CATALOG_MANAGE_USER_IDS` : comptes autorisés à créer des fiches de module
+  (`platform.catalog.manage`, BE-194) ; s'ajoute à `PLATFORM_MODULE_WRITE_USER_IDS` ;
 - `PLATFORM_MODULE_PUBLISH_USER_IDS` : comptes autorisés à publier une version ;
 - `PLATFORM_RECONCILIATION_RESOLVE_USER_IDS` : comptes autorisés à lire et résoudre les cas de
   réconciliation (BE-052) ;
@@ -26,6 +28,7 @@ import uuid
 
 from app.core.errors import AppError
 from app.modules_registry.permissions import (
+    PLATFORM_CATALOG_MANAGE,
     PLATFORM_MODULE_PUBLISH,
     PLATFORM_MODULE_SUSPEND,
     PLATFORM_MODULE_WRITE,
@@ -34,6 +37,7 @@ from app.modules_registry.permissions import (
 
 _VARIABLE_PAR_DROIT: dict[str, str] = {
     PLATFORM_MODULE_WRITE: "PLATFORM_MODULE_WRITE_USER_IDS",
+    PLATFORM_CATALOG_MANAGE: "PLATFORM_CATALOG_MANAGE_USER_IDS",
     "evenements.read": "PLATFORM_EVENEMENTS_READ_USER_IDS",
     PLATFORM_MODULE_PUBLISH: "PLATFORM_MODULE_PUBLISH_USER_IDS",
     PLATFORM_RECONCILIATION_RESOLVE: "PLATFORM_RECONCILIATION_RESOLVE_USER_IDS",
@@ -63,6 +67,19 @@ def a_droit_plateforme(user_id: uuid.UUID, code: str) -> bool:
 def exiger_droit_plateforme(user_id: uuid.UUID, code: str) -> None:
     """Lève `PERMISSION_DENIED` (403) si le compte ne détient pas le droit plateforme `code`."""
     if not a_droit_plateforme(user_id, code):
+        raise AppError(
+            code="PERMISSION_DENIED",
+            message="Droit plateforme requis pour cette action sur le catalogue de modules.",
+            status_code=403,
+        )
+
+
+def exiger_l_un_des_droits_plateforme(user_id: uuid.UUID, codes: tuple[str, ...]) -> None:
+    """Lève `PERMISSION_DENIED` (403) si le compte ne détient aucun des droits plateforme `codes`.
+
+    Sert quand plusieurs droits ouvrent la même action (ex. écriture du catalogue, BE-194).
+    """
+    if not any(a_droit_plateforme(user_id, code) for code in codes):
         raise AppError(
             code="PERMISSION_DENIED",
             message="Droit plateforme requis pour cette action sur le catalogue de modules.",

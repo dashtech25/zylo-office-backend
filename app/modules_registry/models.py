@@ -21,7 +21,9 @@ ETATS_PUBLICATION_MODULE: tuple[str, ...] = (
 )
 VISIBILITES_MODULE: tuple[str, ...] = ("hidden", "visible", "restricted")
 # États d'une version (BE-042) : draft -> review -> published ; review -> draft (rejet).
-ETATS_PUBLICATION_VERSION: tuple[str, ...] = ("draft", "review", "published")
+# `deprecated` (BE-194) : version publiée mais retirée de l'installation. Elle reste lisible
+# (son erreur 422 est explicite) et n'est jamais proposée à l'installation.
+ETATS_PUBLICATION_VERSION: tuple[str, ...] = ("draft", "review", "published", "deprecated")
 
 
 class Module(UUIDPrimaryKeyMixin, TimestampMixin, Base):

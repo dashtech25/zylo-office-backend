@@ -130,7 +130,7 @@ class ModuleVersionAdminResponse(BaseModel):
     digest: str | None
     provenance: str | None
     licence: str | None
-    compatibility: dict | None
+    compatibility: dict | list | None
     prerequisites: list | None
     stateVersion: int
     publicationState: str
@@ -324,3 +324,30 @@ class DisponibiliteResponse(BaseModel):
     operationId: uuid.UUID
     lastErrorCode: str | None
     explanation: str
+
+
+class VersionModuleCatalogue(BaseModel):
+    """Version d'un module lue dans le catalogue public (BE-194).
+
+    Ne porte que des versions `published` ou `deprecated` (jamais `draft` ni `review`).
+    """
+
+    version: str
+    publicationState: str
+    publishedAt: datetime | None
+    compatibility: dict | None
+    prerequisites: list | None
+
+    model_config = {"from_attributes": True}
+
+
+class FicheModuleInstallable(BaseModel):
+    """Fiche d'un module (BE-194) : identité et seules les versions proposées à l'installation.
+
+    Une version est proposée seulement si elle est `published` et `compatibility` est renseignée.
+    """
+
+    code: str
+    name: str
+    description: str | None
+    versions: list[VersionModuleCatalogue]

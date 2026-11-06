@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.permissions import AUDIT_EXPORT, AUDIT_LOG_VIEW, ORGANIZATION_AUDIT_READ
 from app.exports.permissions import DONNEES_EXPORT_CREER
 from app.audit.service import record_audit_event
+from app.support.permissions import SUPPORT_REQUEST_CREATE
 from app.billing.permissions import (
     BILLING_CASE_OPEN,
     BILLING_CASE_RESOLVE,
@@ -100,6 +101,7 @@ OWNER_DEFAULT_PERMISSIONS = [
     (BILLING_CASE_OPEN, "billing", "Ouvrir un cas de facturation ou d'assistance (BE-096)."),
     (BILLING_CASE_RESOLVE, "billing", "Résoudre un cas de facturation ou d'assistance, geste sensible (BE-096)."),
     (BILLING_PAYMENT_METHOD_MANAGE, "billing", "Ajouter, remplacer et sélectionner un moyen de paiement par token (BE-116)."),
+    (SUPPORT_REQUEST_CREATE, "support", "Ouvrir une demande de support client (BE-118)."),
     (CURRENCY_READ, "shared", "Consulter le référentiel des devises."),
     (CURRENCY_MANAGE, "shared", "Créer/modifier le référentiel des devises."),
     (EXCHANGE_RATE_READ, "shared", "Consulter les taux de change."),

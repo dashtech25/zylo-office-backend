@@ -179,7 +179,33 @@ async def registered_user(client: AsyncClient):
 async def organization(client: AsyncClient, registered_user: dict):
     headers = {"Authorization": f"Bearer {registered_user['accessToken']}"}
     res = await client.post("/api/v1/organizations", json={"name": "Test Org", "slug": f"test-org-{uuid.uuid4().hex[:8]}"}, headers=headers)
-    return res.json()
+    organisation = res.json()
+    # BE-102 (QE-POR-04) : POST /organizations ne donne aucun rôle au créateur. Les tests qui
+    # supposent un propriétaire reçoivent donc le rôle owner ici, explicitement.
+    await _affecte_role_owner(organisation["id"], registered_user["email"])
+    return organisation
+
+
+async def _affecte_role_owner(organization_id: str, email: str) -> None:
+    """Crée le rôle `owner` de l'organisation avec OWNER_DEFAULT_PERMISSIONS et l'affecte à l'utilisateur."""
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.identity.models import User
+    from app.identity.service import OWNER_DEFAULT_PERMISSIONS
+    from app.rbac.models import Role, RolePermission, UserRole
+    from app.rbac.service import get_or_create_permission
+
+    async with AsyncSessionLocal() as db:
+        utilisateur = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        role = Role(organizationId=uuid.UUID(organization_id), code="owner", name="Propriétaire")
+        db.add(role)
+        await db.flush()
+        for code, module_code, description in OWNER_DEFAULT_PERMISSIONS:
+            permission = await get_or_create_permission(db, code, module_code, description)
+            db.add(RolePermission(roleId=role.id, permissionId=permission.id))
+        db.add(UserRole(userId=utilisateur.id, organizationId=role.organizationId, roleId=role.id))
+        await db.commit()
 
 
 @pytest.fixture

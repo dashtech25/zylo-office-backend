@@ -43,3 +43,20 @@ MEMBERSHIP_MANAGE = "membership.manage"
 # Écart : la fiche écrit `portal:read` ; le format `domaine.entite.action` est retenu, comme BE-108.
 # Accordée au propriétaire à la création de l'organisation (OWNER_DEFAULT_PERMISSIONS).
 PORTAL_SUMMARY_READ = "portal.summary.read"
+
+# BE-102 : créer une organisation (POST /api/v1/organizations). La fiche écrit `org:create` ;
+# le format `domaine.entite.action` est retenu, comme pour les autres codes.
+# Permission globale : elle n'est portée par aucune organisation (le créateur n'en a pas encore).
+ORGANIZATION_CREATE = "identity.organization.create"
+
+
+def permissions_globales(utilisateur) -> frozenset[str]:
+    """Permissions globales (sans portée organisation) détenues par `utilisateur`.
+
+    Décision BE-102 : tout compte actif détient `ORGANIZATION_CREATE` (un onboarding exige
+    seulement une identité authentifiée). La garde reste centralisée ici pour pouvoir
+    restreindre ce droit sans toucher au service. Un compte non actif n'atteint pas cette
+    fonction : `get_current_user` le refuse avant (401)."""
+    if getattr(utilisateur, "status", None) == "active":
+        return frozenset({ORGANIZATION_CREATE})
+    return frozenset()

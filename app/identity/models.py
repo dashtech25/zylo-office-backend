@@ -1,9 +1,9 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, synonym
 
 from app.core.database import Base
 from app.shared.models import SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
@@ -112,20 +112,41 @@ class OrganizationUser(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class Tenant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Tenant d'une organisation (BE-100) : un seul tenant par organisation.
+    """Tenant de la plateforme : unique définition de la table `tenant` (BE-100, cycle de vie BE-185).
 
-    La contrainte unique sur `organizationId` garantit qu'une organisation n'a
-    qu'un tenant, la base refusant tout second enregistrement. `status` vaut
-    `active` par défaut. Aucune colonne parente : le modèle est plat (QE-POR-05).
+    Une seule classe porte la table : BE-100 (organisation, invitation) et BE-185
+    (cycle de vie, `app/tenants/`) la réutilisent. Colonnes BE-100 : `organizationId`
+    (unique, un seul tenant par organisation) et `status` (défaut `active`). Colonnes
+    ajoutées par BE-185 : `slug` (identifiant lisible, unique), `version` (verrou de
+    version, +1 à chaque transition) et `closedAt` (renseigné à la fermeture).
+
+    `tenantId` et `state` sont des synonymes de `id` et `status` : le vocabulaire de
+    l'API BE-185 reste celui de la définition, sans seconde colonne. `organizationId`
+    est facultatif, car un tenant précède son organisation racine (QE-API-05). La
+    contrainte `ck_tenant_state` borne `status` aux six états du cycle de vie.
+    Aucune colonne parente : le modèle est plat (QE-POR-05).
     """
 
     __tablename__ = "tenant"
-    __table_args__ = ({"comment": "Tenant d'une organisation (BE-100) : un seul par organisation."},)
+    __table_args__ = (
+        UniqueConstraint("slug", name="uq_tenant_slug"),
+        CheckConstraint(
+            "status IN ('requested', 'provisioning', 'active', 'suspended', 'closing', 'closed')",
+            name="ck_tenant_state",
+        ),
+        {"comment": "Tenant de la plateforme : organisation (BE-100), cycle de vie (BE-185), état et verrou de version."},
+    )
 
-    organizationId: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, unique=True
+    organizationId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=True, unique=True
     )
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="active", server_default="active")
+    slug: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    closedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    tenantId = synonym("id")
+    state = synonym("status")
 
 
 class Invitation(UUIDPrimaryKeyMixin, TimestampMixin, Base):

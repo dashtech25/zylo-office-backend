@@ -1,6 +1,7 @@
 from app.core.database import AsyncSessionLocal
 from app.identity.permissions import (
     MEMBERS_INVITE,
+    MEMBERSHIP_MANAGE,
     ORGANIZATION_LEGAL_READ,
     ORGANIZATION_READ,
     ORGANIZATION_SETTINGS_UPDATE,
@@ -20,4 +21,5 @@ async def seed_known_permissions() -> None:
         await get_or_create_permission(db, ORGANIZATION_READ, "identity", "Lire l'organisation courante (BE-186).")
         await get_or_create_permission(db, ORGANIZATION_UPDATE, "identity", "Modifier l'organisation courante, verrou expectedVersion (BE-186).")
         await get_or_create_permission(db, ORGANIZATION_LEGAL_READ, "identity", "Voir les identifiants légaux confidentiels de l'organisation (BE-186).")
+        await get_or_create_permission(db, MEMBERSHIP_MANAGE, "identity", "Inviter, changer l'état et révoquer un membership de l'organisation (BE-189).")
         await db.commit()

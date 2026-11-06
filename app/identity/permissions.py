@@ -35,3 +35,7 @@ ORGANIZATION_UPDATE = "organization.update"
 # BE-186 : voir les identifiants légaux confidentiels de l'organisation. Sans ce
 # droit, les champs sont absents de la réponse (et non renvoyés vides).
 ORGANIZATION_LEGAL_READ = "organization.legal.read"
+
+# BE-189 : inviter, changer l'état et révoquer un membership de l'organisation courante
+# (QE-API-27). Refus sans ce droit : 403 `permission_denied`.
+MEMBERSHIP_MANAGE = "membership.manage"

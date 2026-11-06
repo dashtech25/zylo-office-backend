@@ -57,6 +57,10 @@ POLITIQUE_PORTAIL: dict[str, str] = {
     # BE-103 : statut et dépôt de la demande de vérification (chaînes écrites ici, comme BE-109).
     "portail.verification.lire": "organization.verification.read",
     "portail.verification.deposer": "organization.verification.submit",
+    # BE-117 : demande, statut et téléchargement d'un export de données (chaîne écrite ici, comme BE-116).
+    "portail.export.demander": "data.export",
+    "portail.export.lire": "data.export",
+    "portail.export.telecharger": "data.export",
 }
 
 

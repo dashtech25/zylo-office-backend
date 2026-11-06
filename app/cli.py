@@ -49,6 +49,7 @@ from app.support.seed import seed_known_permissions as seed_support_permissions
 from app.notifications.seed import seed_known_permissions as seed_notifications_permissions
 from app.operations.seed import seed_known_permissions as seed_operations_permissions
 from app.exports.seed import seed_known_permissions as seed_exports_permissions
+from app.portail.exports.seed import seed_known_permissions as seed_portail_exports_permissions
 from app.jobs.seed import seed_known_permissions as seed_jobs_permissions
 from app.sortie_tenant.seed import seed_known_permissions as seed_sortie_tenant_permissions
 from app.integrations.seed import seed_known_permissions as seed_integrations_permissions
@@ -69,6 +70,7 @@ async def execute_seeds() -> None:
     await seed_notifications_permissions()
     await seed_operations_permissions()
     await seed_exports_permissions()
+    await seed_portail_exports_permissions()
     await seed_jobs_permissions()
     await seed_sortie_tenant_permissions()
     await seed_integrations_permissions()

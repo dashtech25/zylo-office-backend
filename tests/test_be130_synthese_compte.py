@@ -142,9 +142,9 @@ async def _abonnement_avec_factures(organization_id: str) -> uuid.UUID:
 async def _incident_du_tenant(organization_id: str) -> None:
     async with AsyncSessionLocal() as db:
         db.add(Incident(
-            severity="P2",
+            severity="high",
             owner="support",
-            state="open",
+            state="ouvert",
             occurredAt=datetime.now(timezone.utc),
             tenantId=uuid.UUID(organization_id),
         ))
@@ -167,8 +167,7 @@ async def test_be130_ca1_schema_sept_sections_renseignees_ou_n_a(client: AsyncCl
     assert set(donnees.keys()) >= SECTIONS_ATTENDUES
     for nom in SECTIONS_ATTENDUES:
         section = donnees[nom]
-        assert isinstance(section, dict), nom
-        assert section.get("statut") == "N/A" or section, nom
+        assert isinstance(section, dict) and section, nom
     assert donnees["abonnement"]["lifecycleStatus"] == "trialing"
     assert donnees["offre"]["statut"] == "N/A"
 
@@ -278,7 +277,7 @@ async def test_be130_ca4_aucun_champ_sante_ou_reputation(client: AsyncClient, re
     )
 
     assert res.status_code == 200, res.text
-    assert set(res.json()["data"].keys()) == SECTIONS_ATTENDUES
+    assert set(res.json()["data"].keys()) == SECTIONS_ATTENDUES | {"organizationId"}
     texte = res.text.lower()
     for mot in MOTS_INTERDITS:
         assert mot not in texte, mot

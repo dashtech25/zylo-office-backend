@@ -54,6 +54,9 @@ POLITIQUE_PORTAIL: dict[str, str] = {
     "portail.membre.retirer": "organization.members.remove",
     # BE-109 : résumé du portail (chaîne écrite ici ; la permission est déclarée dans identity/permissions.py).
     "portail.resume.lire": "portal.summary.read",
+    # BE-103 : statut et dépôt de la demande de vérification (chaînes écrites ici, comme BE-109).
+    "portail.verification.lire": "organization.verification.read",
+    "portail.verification.deposer": "organization.verification.submit",
 }
 
 

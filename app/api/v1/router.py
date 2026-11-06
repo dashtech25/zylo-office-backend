@@ -67,6 +67,7 @@ from app.release.flags_router import router as flags_router
 from app.billing.entitlement_events_router import router as billing_entitlement_events_router
 from app.operator.admin_audit_router import router as admin_audit_router
 from app.operator.search_router import router as search_router
+from app.operator.summary_router import router as summary_router
 from app.operator.scope import require_admin_scope
 from app.operator.incidents_router import router as incidents_router
 from app.operator.exceptional_access import router as exceptional_access_router
@@ -165,6 +166,8 @@ api_router.include_router(operator_admin_router, prefix="/admin", tags=["operato
 api_router.include_router(admin_audit_router, prefix="/admin", tags=["admin-audit"], dependencies=[Depends(require_admin_scope)])
 # BE-129 : recherche d'organisation pour la console de support (GET /admin/search), lecture seule.
 api_router.include_router(search_router, prefix="/admin", tags=["admin-search"], dependencies=[Depends(require_admin_scope)])
+# BE-130 : synthèse des états d'un compte client (GET /admin/organizations/{id}/summary), lecture seule.
+api_router.include_router(summary_router, prefix="/admin", tags=["admin-summary"], dependencies=[Depends(require_admin_scope)])
 # BE-247 : file et détail des incidents d'exploitation (GET /admin/incidents).
 api_router.include_router(incidents_router, prefix="/admin", tags=["admin-incidents"], dependencies=[Depends(require_admin_scope)])
 # BE-138 : accès exceptionnel au contenu client, refusé par défaut (POST /admin/organizations/{id}/exceptional-access).

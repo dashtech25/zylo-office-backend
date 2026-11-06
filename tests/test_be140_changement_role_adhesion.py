@@ -40,10 +40,16 @@ TYPE_CLASSE_ROLE = "role.adhesion"
 ACTION_AUDIT_CHANGEMENT = "admin.membership.role_changed"
 DUREE_PREVIEW_TEST = 600
 CHEMIN_COMMANDES = "/api/v1/admin/commands"
+ROLE_OPERATEUR_PLATEFORME = "operateur_plateforme"
+EN_TETE_PORTEE = "X-Admin-Scope"
 
 
-def _entetes(utilisateur: dict) -> dict:
-    return {"Authorization": f"Bearer {utilisateur['accessToken']}"}
+def _entetes(utilisateur: dict, organisation_id: str) -> dict:
+    """En-têtes d'un opérateur agissant sur le tenant `organisation_id` (portée tenant explicite)."""
+    return {
+        "Authorization": f"Bearer {utilisateur['accessToken']}",
+        EN_TETE_PORTEE: f"tenant:{organisation_id}",
+    }
 
 
 async def _nouvel_utilisateur(client: AsyncClient, nom: str = "BE-140") -> dict:
@@ -72,11 +78,23 @@ async def _accorder(actor_id: str, role_code: str, scope: str) -> None:
         await db.commit()
 
 
+async def _operateur(actor_id: str) -> None:
+    """Autorité plateforme minimale : sans elle, `require_admin_scope` refuse avant le droit métier."""
+    await _accorder(actor_id, ROLE_OPERATEUR_PLATEFORME, "platform")
+
+
+async def _rattacher(organisation_id: str, utilisateur_id: str) -> None:
+    """Rend l'utilisateur membre actif de l'organisation (sans rôle transverse)."""
+    async with AsyncSessionLocal() as db:
+        db.add(OrganizationUser(organizationId=uuid.UUID(organisation_id), userId=uuid.UUID(utilisateur_id)))
+        await db.commit()
+
+
 async def _organisation(client: AsyncClient, proprietaire: dict, nom: str) -> str:
     reponse = await client.post(
         "/api/v1/organizations",
         json={"name": nom, "slug": f"tenant-be140-{uuid.uuid4().hex[:8]}"},
-        headers=_entetes(proprietaire),
+        headers={"Authorization": f"Bearer {proprietaire['accessToken']}"},
     )
     assert reponse.status_code in (200, 201), reponse.text
     return reponse.json()["id"]
@@ -141,18 +159,18 @@ def _chemin(organisation_id: str, utilisateur_id: str) -> str:
 
 
 async def _intention(client: AsyncClient, gestionnaire: dict, organisation_id: str, cible: str, role_ids: list[str]) -> dict:
-    reponse = await client.post(_chemin(organisation_id, cible), json=_corps(role_ids), headers=_entetes(gestionnaire))
+    reponse = await client.post(_chemin(organisation_id, cible), json=_corps(role_ids), headers=_entetes(gestionnaire, organisation_id))
     assert reponse.status_code == 201, reponse.text
     return reponse.json()
 
 
-async def _preview_et_confirmation(client: AsyncClient, gestionnaire: dict, command_id: str) -> str:
-    preview = await client.post(f"{CHEMIN_COMMANDES}/{command_id}/preview", headers=_entetes(gestionnaire))
+async def _preview_et_confirmation(client: AsyncClient, gestionnaire: dict, organisation_id: str, command_id: str) -> str:
+    preview = await client.post(f"{CHEMIN_COMMANDES}/{command_id}/preview", headers=_entetes(gestionnaire, organisation_id))
     assert preview.status_code == 201, preview.text
     confirmation = await client.post(
         f"{CHEMIN_COMMANDES}/{command_id}/confirm",
         json={"previewId": preview.json()["previewId"]},
-        headers=_entetes(gestionnaire),
+        headers=_entetes(gestionnaire, organisation_id),
     )
     assert confirmation.status_code == 200, confirmation.text
     return preview.json()["previewId"]
@@ -163,11 +181,13 @@ async def test_ca1_changement_de_role_par_agent_l1_403(client: AsyncClient):
     agent = await _nouvel_utilisateur(client, "agent L1 BE-140")
     gestionnaire = await _nouvel_utilisateur(client)
     organisation_id = await _organisation(client, gestionnaire, "Tenant CA-1 BE-140")
+    await _operateur(agent["id"])
+    await _rattacher(organisation_id, agent["id"])
     await _accorder(agent["id"], ROLE_L1, f"tenant:{organisation_id}")
     cible = await _membre(organisation_id)
     role = await _role(organisation_id, "ca1")
 
-    reponse = await client.post(_chemin(organisation_id, cible), json=_corps([str(role)]), headers=_entetes(agent))
+    reponse = await client.post(_chemin(organisation_id, cible), json=_corps([str(role)]), headers=_entetes(agent, organisation_id))
 
     assert reponse.status_code == 403, reponse.text
 
@@ -177,11 +197,12 @@ async def test_ca2_membre_du_tenant_b_depuis_affectation_tenant_a_403(client: As
     gestionnaire = await _nouvel_utilisateur(client)
     tenant_a = await _organisation(client, gestionnaire, "Tenant A CA-2 BE-140")
     tenant_b = await _organisation(client, gestionnaire, "Tenant B CA-2 BE-140")
+    await _operateur(gestionnaire["id"])
     await _accorder(gestionnaire["id"], ROLE_GESTION, f"tenant:{tenant_a}")
     cible = await _membre(tenant_b)
     role = await _role(tenant_b, "ca2")
 
-    reponse = await client.post(_chemin(tenant_b, cible), json=_corps([str(role)]), headers=_entetes(gestionnaire))
+    reponse = await client.post(_chemin(tenant_b, cible), json=_corps([str(role)]), headers=_entetes(gestionnaire, tenant_b))
 
     assert reponse.status_code == 403, reponse.text
 
@@ -197,11 +218,12 @@ async def test_ca3_execution_sans_approbation_distincte_409(client: AsyncClient,
     monkeypatch.setattr(settings, "ADMIN_PREVIEW_TTL_SECONDS", DUREE_PREVIEW_TEST)
     gestionnaire = await _nouvel_utilisateur(client)
     organisation_id = await _organisation(client, gestionnaire, "Tenant CA-3 BE-140")
+    await _operateur(gestionnaire["id"])
     await _accorder(gestionnaire["id"], ROLE_GESTION, f"tenant:{organisation_id}")
     cible = await _membre(organisation_id)
     role = await _role(organisation_id, "ca3")
     intention = await _intention(client, gestionnaire, organisation_id, cible, [str(role)])
-    preview_id = await _preview_et_confirmation(client, gestionnaire, intention["commandId"])
+    preview_id = await _preview_et_confirmation(client, gestionnaire, organisation_id, intention["commandId"])
 
     async with AsyncSessionLocal() as db:
         try:
@@ -226,18 +248,21 @@ async def test_ca4_changement_approuve_ecrit_audit_avant_et_apres(client: AsyncC
     gestionnaire = await _nouvel_utilisateur(client)
     approbateur = await _nouvel_utilisateur(client, "approbateur BE-140")
     organisation_id = await _organisation(client, gestionnaire, "Tenant CA-4 BE-140")
+    await _operateur(gestionnaire["id"])
     await _accorder(gestionnaire["id"], ROLE_GESTION, f"tenant:{organisation_id}")
+    await _operateur(approbateur["id"])
+    await _rattacher(organisation_id, approbateur["id"])
     await _accorder(approbateur["id"], ROLE_APPROBATEUR, f"tenant:{organisation_id}")
     ancien = await _role(organisation_id, "ca4-ancien")
     nouveau = await _role(organisation_id, "ca4-nouveau")
     cible = await _membre(organisation_id, [ancien])
     intention = await _intention(client, gestionnaire, organisation_id, cible, [str(nouveau)])
     command_id = intention["commandId"]
-    preview_id = await _preview_et_confirmation(client, gestionnaire, command_id)
+    preview_id = await _preview_et_confirmation(client, gestionnaire, organisation_id, command_id)
     approbation = await client.post(
         f"{CHEMIN_COMMANDES}/{command_id}/approve",
         json={"reasonTicket": "INC-140-APPROBATION"},
-        headers=_entetes(approbateur),
+        headers=_entetes(approbateur, organisation_id),
     )
     assert approbation.status_code == 200, approbation.text
 
@@ -269,13 +294,14 @@ async def test_nominal_intention_puis_rejeu_identique_200(client: AsyncClient):
     """Création de l'intention de changement de rôle (201), puis rejeu de la même clé (200)."""
     gestionnaire = await _nouvel_utilisateur(client)
     organisation_id = await _organisation(client, gestionnaire, "Tenant nominal BE-140")
+    await _operateur(gestionnaire["id"])
     await _accorder(gestionnaire["id"], ROLE_GESTION, f"tenant:{organisation_id}")
     cible = await _membre(organisation_id)
     role = await _role(organisation_id, "nominal")
     corps = _corps([str(role)])
 
-    premier = await client.post(_chemin(organisation_id, cible), json=corps, headers=_entetes(gestionnaire))
-    rejeu = await client.post(_chemin(organisation_id, cible), json=corps, headers=_entetes(gestionnaire))
+    premier = await client.post(_chemin(organisation_id, cible), json=corps, headers=_entetes(gestionnaire, organisation_id))
+    rejeu = await client.post(_chemin(organisation_id, cible), json=corps, headers=_entetes(gestionnaire, organisation_id))
 
     assert premier.status_code == 201, premier.text
     assert premier.json()["commandType"] == TYPE_CLASSE_ROLE
@@ -291,11 +317,12 @@ async def test_membre_absent_de_l_organisation_404(client: AsyncClient):
     """Un utilisateur qui n'est pas membre de l'organisation ne reçoit aucune intention."""
     gestionnaire = await _nouvel_utilisateur(client)
     organisation_id = await _organisation(client, gestionnaire, "Tenant membre absent BE-140")
+    await _operateur(gestionnaire["id"])
     await _accorder(gestionnaire["id"], ROLE_GESTION, f"tenant:{organisation_id}")
     role = await _role(organisation_id, "absent")
 
     reponse = await client.post(
-        _chemin(organisation_id, str(uuid.uuid4())), json=_corps([str(role)]), headers=_entetes(gestionnaire),
+        _chemin(organisation_id, str(uuid.uuid4())), json=_corps([str(role)]), headers=_entetes(gestionnaire, organisation_id),
     )
 
     assert reponse.status_code == 404, reponse.text
@@ -307,12 +334,13 @@ async def test_role_d_une_autre_organisation_404(client: AsyncClient):
     gestionnaire = await _nouvel_utilisateur(client)
     organisation_id = await _organisation(client, gestionnaire, "Tenant rôle BE-140")
     autre = await _organisation(client, gestionnaire, "Autre tenant rôle BE-140")
+    await _operateur(gestionnaire["id"])
     await _accorder(gestionnaire["id"], ROLE_GESTION, f"tenant:{organisation_id}")
     cible = await _membre(organisation_id)
     role_etranger = await _role(autre, "etranger")
 
     reponse = await client.post(
-        _chemin(organisation_id, cible), json=_corps([str(role_etranger)]), headers=_entetes(gestionnaire),
+        _chemin(organisation_id, cible), json=_corps([str(role_etranger)]), headers=_entetes(gestionnaire, organisation_id),
     )
 
     assert reponse.status_code == 404, reponse.text

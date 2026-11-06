@@ -243,7 +243,9 @@ async def test_be106_ca5_changement_de_role_ecrit_role_changed_et_audit(client: 
     assert await _nombre_audit(org) > audit_avant
     evenements = await _evenements(org, "RoleChanged")
     assert len(evenements) == 1
-    assert evenements[0].payload["userId"] == membre["id"]
+    # La colonne `payload` de l'outbox porte l'enveloppe complète : les données métier sont sous `payload`.
+    assert evenements[0].payload["payload"]["userId"] == membre["id"]
+    assert evenements[0].payload["subject"]["type"] == "membership"
 
 
 async def test_be106_retrait_d_un_membre_emet_removed_et_audit(client: AsyncClient):

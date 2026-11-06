@@ -132,3 +132,24 @@ class OrganizationInvitationResponse(BaseModel):
     roleId: uuid.UUID | None
     status: str
     expiresAt: datetime
+
+
+class CreatePortalInvitationRequest(BaseModel):
+    """POST /organizations/{organization_id}/invitations (BE-105). `recipientUserId` désigne
+    l'identité invitée, seule habilitée à accepter (QE-POR-24). `roleId` est facultatif et ne
+    peut pas être le rôle Owner (QE-POR-04)."""
+
+    recipientUserId: uuid.UUID
+    roleId: uuid.UUID | None = None
+
+
+class PortalInvitationResponse(BaseModel):
+    """Invitation du portail d'organisation (BE-105), telle qu'exposée par l'API."""
+
+    id: uuid.UUID
+    organizationId: uuid.UUID
+    recipientUserId: uuid.UUID
+    roleId: uuid.UUID | None
+    status: str
+    expiresAt: datetime
+    createdByUserId: uuid.UUID

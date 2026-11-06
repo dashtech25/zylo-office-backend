@@ -17,8 +17,8 @@ Règles :
 - le rôle propriétaire est protégé : seul un propriétaire peut retirer un
   propriétaire (403 `owner_removal_forbidden`), et une organisation garde au
   moins un propriétaire actif (409 `last_owner`) ;
-- chaque retrait écrit exactement une entrée d'audit (BE-007) dans la même
-  transaction que la suppression.
+- chaque retrait écrit exactement une entrée d'audit (BE-007) et un événement
+  `Removed` (BE-106, outbox) dans la même transaction que la suppression.
 
 Hors périmètre (décision à reprendre si besoin) : les grants individuels
 (`user_permission_grant`) de l'utilisateur dans l'organisation ne sont pas
@@ -33,6 +33,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import record_audit_event
 from app.core.errors import AppError
+from app.evenements.outbox import enregistrer_evenement
+from app.identity.evenements_membres import EVENEMENT_REMOVED, construire_evenement_membre
 from app.identity.invitations import _autres_proprietaires_actifs, _est_proprietaire, _membre
 from app.identity.models import OrganizationUser, User
 from app.rbac.models import UserRole
@@ -101,5 +103,13 @@ async def remove_member(db: AsyncSession, organization_id: uuid.UUID, actor: Use
         entity_type="OrganizationUser",
         entity_id=membership_id,
         summary=f"Retrait du membre {target.email} de l'organisation",
+    )
+    # BE-106 : `Removed` part dans la même transaction que la suppression (BE-150 / BE-234).
+    await enregistrer_evenement(
+        db,
+        construire_evenement_membre(
+            EVENEMENT_REMOVED, organization_id, actor.id, membership_id, {"userId": str(target.id)}
+        ),
+        emetteur_tenant=organization_id,
     )
     await db.commit()

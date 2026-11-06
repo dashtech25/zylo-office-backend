@@ -53,6 +53,7 @@ from app.rbac.acces_effectif_router import router as acces_effectif_router
 from app.rbac.module_router import router as rbac_module_router
 from app.notifications.router import router as notifications_router
 from app.rbac.router import router as rbac_router
+from app.rbac.roles_api import router as roles_api_router
 from app.rbac.roles_lecture import router as roles_lecture_router
 from app.audit.router import organization_audit_router
 from app.support.router import router as support_router
@@ -132,6 +133,7 @@ api_router.include_router(tenants_router)
 api_router.include_router(liens_router, tags=["integrations"])
 # BE-016 : lecture des rôles de l organisation courante (lecture seule).
 api_router.include_router(roles_lecture_router, prefix="/organizations", tags=["rbac"])
+api_router.include_router(roles_api_router, prefix="/roles", tags=["rbac"])
 api_router.include_router(billing_payment_methods_router, prefix="/organizations", tags=["billing"])
 api_router.include_router(grants_membres_router, prefix="/organizations", tags=["rbac"])
 api_router.include_router(rbac_module_router, prefix="/rbac", tags=["rbac"])

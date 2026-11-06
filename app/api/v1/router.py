@@ -46,6 +46,7 @@ from app.evenements.admin_router import router as evenements_admin_router
 from app.modules_registry.reconciliation_router import router as reconciliation_admin_router
 from app.modules_registry.catalog_router import router as catalog_router
 from app.modules_registry.router import router as modules_router
+from app.modules_registry.lecture_modules import router as lecture_modules_router
 from app.integrations.router import lettres_mortes_router
 from app.integrations.liens_router import router as liens_router
 from app.integrations.webhooks import router as webhooks_entrants_router
@@ -122,6 +123,8 @@ api_router.include_router(memberships_router, prefix="/memberships", tags=["memb
 api_router.include_router(account_router, prefix="/account", tags=["account"])
 api_router.include_router(organizations_modules_router, prefix="/organizations", tags=["modules"])
 api_router.include_router(modules_router, prefix="/modules", tags=["modules"])
+# BE-194 : fiche et version d'un module par code (lecture publique, sans droit).
+api_router.include_router(lecture_modules_router, prefix="/modules", tags=["modules"])
 api_router.include_router(modules_admin_router, prefix="/admin", tags=["admin-modules"], dependencies=[Depends(require_admin_scope)])
 api_router.include_router(evenements_admin_router, prefix="/admin", tags=["admin-evenements"], dependencies=[Depends(require_admin_scope)])
 api_router.include_router(reconciliation_admin_router, prefix="/admin", tags=["admin-reconciliation"], dependencies=[Depends(require_admin_scope)])

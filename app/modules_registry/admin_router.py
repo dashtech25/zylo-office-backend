@@ -27,8 +27,12 @@ from app.core.security import get_current_user
 from app.identity.models import User
 from app.modules_registry import catalogue_publication as service
 from app.modules_registry import compatibilite_service
-from app.modules_registry.platform_rights import a_droit_plateforme, exiger_droit_plateforme
-from app.modules_registry.permissions import PLATFORM_MODULE_PUBLISH, PLATFORM_MODULE_WRITE
+from app.modules_registry.platform_rights import (
+    a_droit_plateforme,
+    exiger_droit_plateforme,
+    exiger_l_un_des_droits_plateforme,
+)
+from app.modules_registry.permissions import PLATFORM_CATALOG_MANAGE, PLATFORM_MODULE_PUBLISH, PLATFORM_MODULE_WRITE
 from app.modules_registry.schemas import (
     CreerModuleRequest,
     CreerVersionRequest,
@@ -51,9 +55,9 @@ async def creer_module(
 ) -> ModuleAdminResponse:
     """Crée la fiche d'un module en brouillon (`draft`) depuis la console plateforme.
 
-    Droit : permission plateforme d'écriture du module (`exiger_droit_plateforme`). Réponses : 201 à la création, 401 sans session, 403 sans droit plateforme, 422 donnée invalide.
+    Droit : `platform.module.write` ou `platform.catalog.manage` (BE-194, `exiger_l_un_des_droits_plateforme`). Réponses : 201 à la création, 401 sans session, 403 sans droit plateforme, 422 donnée invalide.
     """
-    exiger_droit_plateforme(utilisateur.id, PLATFORM_MODULE_WRITE)
+    exiger_l_un_des_droits_plateforme(utilisateur.id, (PLATFORM_MODULE_WRITE, PLATFORM_CATALOG_MANAGE))
     module = await service.creer_module(db, code=corps.code, name=corps.name, description=corps.description)
     await db.commit()
     return ModuleAdminResponse.model_validate(module)

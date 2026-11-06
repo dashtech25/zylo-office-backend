@@ -37,14 +37,14 @@ async def lister_modules_catalogue(db: AsyncSession, pagination: PaginationParam
     return await paginate(db, stmt, pagination, CatalogueModuleResponse)
 
 
-async def lire_fiche_catalogue(db: AsyncSession, slug: str) -> FicheModuleCatalogue:
-    """Fiche publique d'un module identifié par son `slug` (`module.code`).
+async def charger_module_visible(db: AsyncSession, code: str) -> Module:
+    """Module publié et visible identifié par son `code` ; contrôle public partagé (BE-043, BE-194).
 
     Lève `MODULE_NOT_FOUND` (404) pour un module absent, masqué ou non publié, et
     `MODULE_AUDIENCE_RESTRICTED` (403) pour un module publié mais restreint. Voir la docstring du
     module pour l'ordre des contrôles.
     """
-    module = (await db.execute(select(Module).where(Module.code == slug))).scalar_one_or_none()
+    module = (await db.execute(select(Module).where(Module.code == code))).scalar_one_or_none()
     if module is None or module.publicationState != "published" or module.visibility == "hidden":
         raise AppError(code="MODULE_NOT_FOUND", message="Module introuvable.", status_code=404)
     if module.visibility == "restricted":
@@ -55,6 +55,15 @@ async def lire_fiche_catalogue(db: AsyncSession, slug: str) -> FicheModuleCatalo
         )
     if module.visibility != "visible":
         raise AppError(code="MODULE_NOT_FOUND", message="Module introuvable.", status_code=404)
+    return module
+
+
+async def lire_fiche_catalogue(db: AsyncSession, slug: str) -> FicheModuleCatalogue:
+    """Fiche publique d'un module identifié par son `slug` (`module.code`).
+
+    Contrôles de visibilité : voir `charger_module_visible`.
+    """
+    module = await charger_module_visible(db, slug)
 
     versions = (
         await db.execute(

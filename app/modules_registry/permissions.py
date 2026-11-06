@@ -5,6 +5,9 @@ MODULE_MANAGE = "modules.module.manage"
 # qui exige une organisation. Leur attribution est décrite dans `platform_rights.py`.
 PLATFORM_MODULE_WRITE = "platform.module.write"
 PLATFORM_MODULE_PUBLISH = "platform.module.publish"
+# Écriture du catalogue (BE-194, QE-API-27) : crée les fiches de module. Accepté en plus de
+# `platform.module.write` (les deux donnent la même écriture) ; attribution dans `platform_rights.py`.
+PLATFORM_CATALOG_MANAGE = "platform.catalog.manage"
 
 # Résolution et lecture des cas de réconciliation d'états incertains (BE-052, QE-MOD-07/16 : code
 # recommandé, attribution par allowlist d'environnement décrite dans `platform_rights.py`).

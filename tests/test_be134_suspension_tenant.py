@@ -37,13 +37,18 @@ from app.operator.guard import EXECUTEURS, executer_commande
 MOT_DE_PASSE = "TestPassword123!"
 ROLE_GESTION = "securite_incident_commander"
 ROLE_L1 = "agent_support_l1"
+ROLE_PLATEFORME = "operateur_plateforme"
 CLASSE = "tenant.suspension"
 DUREE_PREVIEW_TEST = 600
 CHEMIN_ADMIN = "/api/v1/admin"
 
 
-def _entetes(utilisateur: dict) -> dict:
-    return {"Authorization": f"Bearer {utilisateur['accessToken']}"}
+def _entetes(utilisateur: dict, portee_tenant: str | None = None) -> dict:
+    """En-têtes d'un appel. `portee_tenant` pose `X-Admin-Scope: tenant:<id>` (sinon : plateforme)."""
+    entetes = {"Authorization": f"Bearer {utilisateur['accessToken']}"}
+    if portee_tenant is not None:
+        entetes["X-Admin-Scope"] = f"tenant:{portee_tenant}"
+    return entetes
 
 
 async def _nouvel_utilisateur(client: AsyncClient) -> dict:
@@ -52,7 +57,11 @@ async def _nouvel_utilisateur(client: AsyncClient) -> dict:
     login = await client.post("/api/v1/auth/login", json={"email": email, "password": MOT_DE_PASSE})
     jetons = login.json()
     me = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {jetons['accessToken']}"})
-    return {"id": me.json()["id"], "accessToken": jetons["accessToken"]}
+    utilisateur = {"id": me.json()["id"], "accessToken": jetons["accessToken"]}
+    # Toute route admin exige une autorité plateforme (CA-4 de BE-123), quelle que soit la portée :
+    # chaque compte de test la reçoit, pour que seul le contrôle de rôle visé décide du 403.
+    await _accorder(utilisateur["id"], ROLE_PLATEFORME, "platform")
+    return utilisateur
 
 
 async def _accorder(actor_id: str, role_code: str, scope: str) -> None:
@@ -116,7 +125,7 @@ async def test_ca1_agent_l1_demandant_la_suspension_403(client: AsyncClient):
     agent = await _nouvel_utilisateur(client)
     await _accorder(agent["id"], ROLE_L1, f"tenant:{organisation_id}")
 
-    reponse = await client.post(_chemin(organisation_id, "suspension"), json=_corps(), headers=_entetes(agent))
+    reponse = await client.post(_chemin(organisation_id, "suspension"), json=_corps(), headers=_entetes(agent, organisation_id))
 
     assert reponse.status_code == 403, reponse.text
 
@@ -130,7 +139,7 @@ async def test_ca2_suspension_sans_approbation_distincte_409(client: AsyncClient
     gestionnaire = await _nouvel_utilisateur(client)
     organisation_id = await _organisation(client, gestionnaire, "Tenant CA-2 BE-134")
     await _accorder(gestionnaire["id"], ROLE_GESTION, f"tenant:{organisation_id}")
-    intention = await client.post(_chemin(organisation_id, "suspension"), json=_corps(), headers=_entetes(gestionnaire))
+    intention = await client.post(_chemin(organisation_id, "suspension"), json=_corps(), headers=_entetes(gestionnaire, organisation_id))
     assert intention.status_code == 201, intention.text
     command_id = intention.json()["commandId"]
     preview = await client.post(f"{CHEMIN_ADMIN}/commands/{command_id}/preview", headers=_entetes(gestionnaire))
@@ -170,7 +179,7 @@ async def test_ca3_suspension_tenant_hors_portee_403(client: AsyncClient):
     tenant_b = await _organisation(client, gestionnaire, "Tenant B CA-3 BE-134")
     await _accorder(gestionnaire["id"], ROLE_GESTION, f"tenant:{tenant_a}")
 
-    reponse = await client.post(_chemin(tenant_b, "suspension"), json=_corps(), headers=_entetes(gestionnaire))
+    reponse = await client.post(_chemin(tenant_b, "suspension"), json=_corps(), headers=_entetes(gestionnaire, tenant_a))
 
     assert reponse.status_code == 403, reponse.text
 
@@ -181,7 +190,7 @@ async def test_ca4_preview_expose_connexion_operations_api_exports_facturation(c
     gestionnaire = await _nouvel_utilisateur(client)
     organisation_id = await _organisation(client, gestionnaire, "Tenant CA-4 BE-134")
     await _accorder(gestionnaire["id"], ROLE_GESTION, f"tenant:{organisation_id}")
-    intention = await client.post(_chemin(organisation_id, "suspension"), json=_corps(), headers=_entetes(gestionnaire))
+    intention = await client.post(_chemin(organisation_id, "suspension"), json=_corps(), headers=_entetes(gestionnaire, organisation_id))
     assert intention.status_code == 201, intention.text
 
     preview = await client.post(
@@ -205,8 +214,8 @@ async def test_ca5_rejeu_de_la_meme_cle_ne_suspend_pas_deux_fois(client: AsyncCl
     await _accorder(gestionnaire["id"], ROLE_GESTION, f"tenant:{organisation_id}")
     corps = _corps()
 
-    premier = await client.post(_chemin(organisation_id, "suspension"), json=corps, headers=_entetes(gestionnaire))
-    rejeu = await client.post(_chemin(organisation_id, "suspension"), json=corps, headers=_entetes(gestionnaire))
+    premier = await client.post(_chemin(organisation_id, "suspension"), json=corps, headers=_entetes(gestionnaire, organisation_id))
+    rejeu = await client.post(_chemin(organisation_id, "suspension"), json=corps, headers=_entetes(gestionnaire, organisation_id))
 
     assert premier.status_code == 201, premier.text
     assert rejeu.status_code == 200, rejeu.text
@@ -219,25 +228,25 @@ async def test_ca5_rejeu_de_la_meme_cle_ne_suspend_pas_deux_fois(client: AsyncCl
     assert nombre == 1
 
 
-async def test_rétablissement_sans_tenant_suspendu_409(client: AsyncClient):
+async def test_retablissement_sans_tenant_suspendu_409(client: AsyncClient):
     """Rétablissement : préconditions non remplies (le tenant n'est pas suspendu) : 409."""
     gestionnaire = await _nouvel_utilisateur(client)
     organisation_id = await _organisation(client, gestionnaire, "Tenant rétablissement KO BE-134")
     await _accorder(gestionnaire["id"], ROLE_GESTION, f"tenant:{organisation_id}")
 
-    reponse = await client.post(_chemin(organisation_id, "reinstatement"), json=_corps(), headers=_entetes(gestionnaire))
+    reponse = await client.post(_chemin(organisation_id, "reinstatement"), json=_corps(), headers=_entetes(gestionnaire, organisation_id))
 
     assert reponse.status_code == 409, reponse.text
 
 
-async def test_rétablissement_avec_tenant_suspendu_201(client: AsyncClient):
+async def test_retablissement_avec_tenant_suspendu_201(client: AsyncClient):
     """Rétablissement nominal : tenant suspendu, intention créée avec l'opération `reinstatement`."""
     gestionnaire = await _nouvel_utilisateur(client)
     organisation_id = await _organisation(client, gestionnaire, "Tenant rétablissement OK BE-134")
     await _accorder(gestionnaire["id"], ROLE_GESTION, f"tenant:{organisation_id}")
     await _tenant_suspendu(organisation_id, "suspended")
 
-    reponse = await client.post(_chemin(organisation_id, "reinstatement"), json=_corps(), headers=_entetes(gestionnaire))
+    reponse = await client.post(_chemin(organisation_id, "reinstatement"), json=_corps(), headers=_entetes(gestionnaire, organisation_id))
 
     assert reponse.status_code == 201, reponse.text
     assert reponse.json()["commandType"] == CLASSE

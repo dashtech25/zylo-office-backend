@@ -38,10 +38,13 @@ from app.rbac.service import user_has_permission
 # qui ajoute une route y inscrit son action et la permission correspondante.
 # BE-108 : `portail.usage.lire` -> `organization.usage.read` (code porté par app/billing/permissions.py ;
 # chaîne écrite ici car rbac ne doit pas importer la facturation).
+# BE-105 : `portail.invitation.creer` -> `organization.members.invite` (permission d'invitation
+# déjà seedée, identity/permissions.py ; la fiche écrit `members:manage`, voir docs/portail-organisation/invitations.md).
 POLITIQUE_PORTAIL: dict[str, str] = {
     "portail.usage.lire": "organization.usage.read",
     # BE-116 : ajout, remplacement et sélection d'un moyen de paiement (chaîne écrite ici, comme BE-108).
     "portail.moyen_paiement.gerer": "billing.payment_method.manage",
+    "portail.invitation.creer": "organization.members.invite",
 }
 
 

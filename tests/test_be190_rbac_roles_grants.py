@@ -145,7 +145,7 @@ async def test_be190_ca1_permission_absente_renvoie_403_sans_ecriture(client: As
         headers=_entetes(lecteur, org),
     )
     assert res.status_code == 403, res.text
-    assert res.json()["code"] == "permission_denied"
+    assert res.json()["error"]["code"] == "permission_denied"
 
 
 async def test_be190_ca2_role_d_un_autre_tenant_renvoie_404(client: AsyncClient):
@@ -227,12 +227,11 @@ async def test_be190_ca5_attribution_et_revocation_ecrivent_un_audit(client: Asy
     attribution_id = res.json()["id"]
     avant_revocation = await _nombre_audit(org, ACTION_REVOCATION)
     revoque = await client.delete(
-        f"/api/v1/organizations/current/user-roles/{attribution_id}",
+        f"/api/v1/rbac/organizations/{org}/user-roles/{attribution_id}",
         headers=_entetes(proprietaire, org),
     )
-    assert revoque.status_code in (204, 404), revoque.text
-    if revoque.status_code == 204:
-        assert await _nombre_audit(org, ACTION_REVOCATION) == avant_revocation + 1
+    assert revoque.status_code == 204, revoque.text
+    assert await _nombre_audit(org, ACTION_REVOCATION) == avant_revocation + 1
 
 
 async def test_be190_ca6_appel_direct_sans_grant_renvoie_403(client: AsyncClient):

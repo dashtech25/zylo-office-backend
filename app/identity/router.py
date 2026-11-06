@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.schemas import UserResponse
@@ -309,15 +309,31 @@ async def get_organization(
     return await service.get_organization_detail(db, organization_id, legal_visible)
 
 
+# BE-104 : seuls ces champs du corps de PATCH /organizations/{organization_id} sont acceptés.
+# `name` est le seul champ modifiable du modèle (QE-POR-18) ; `version` est l'alias de `expectedVersion`.
+CHAMPS_PROFIL_ORGANISATION = frozenset({"name", "expectedVersion", "version"})
+
+
 @router.patch("/{organization_id}", response_model=OrganizationResponse)
 async def update_organization(
     organization_id: str,
     data: UpdateOrganizationRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _: None = Depends(require_permission(ORGANIZATION_UPDATE)),
 ) -> Organization:
-    """Modifie le nom de l'organisation (BE-186 : droit `organization.update`, verrou `expectedVersion`)."""
+    """Modifie le profil de l'organisation (BE-104, PATCH /organizations/{organization_id}).
+
+    Droit `organization.update` (BE-186) et portée contrôlés avant le corps : un refus
+    sans droit donne 403, une organisation hors portée 404. Tout champ du corps absent
+    de `CHAMPS_PROFIL_ORGANISATION` donne 400 avant toute écriture : le schéma Pydantic
+    ignore les champs inconnus, donc la liste est vérifiée ici, sur le JSON brut.
+    Le verrou `expectedVersion` (409) et l'audit du champ `name` sont faits par le service.
+    """
+    corps = await request.json()
+    if isinstance(corps, dict) and set(corps) - CHAMPS_PROFIL_ORGANISATION:
+        raise AppError(code="field_not_allowed", message="Champ non modifiable sur le profil de l'organisation.", status_code=400)
     return await service.update_organization(db, organization_id, current_user.id, data)
 
 

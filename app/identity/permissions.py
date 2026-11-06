@@ -26,3 +26,12 @@ MEMBERS_REMOVE = "organization.members.remove"
 # exige ce code. Recommandation QE-SOC-06 : format `ressource.action`. Accordée
 # au propriétaire à la création de l'organisation (OWNER_DEFAULT_PERMISSIONS).
 ORGANIZATION_SETTINGS_UPDATE = "organization.settings.update"
+
+# BE-186 : lire l'organisation (GET /api/v1/organizations/{organization_id}) et la
+# modifier (PATCH, verrou `expectedVersion`). Portée tenant : une organisation
+# d'un autre tenant répond 404 avant tout contrôle de droit (rbac/guards.py).
+ORGANIZATION_READ = "organization.read"
+ORGANIZATION_UPDATE = "organization.update"
+# BE-186 : voir les identifiants légaux confidentiels de l'organisation. Sans ce
+# droit, les champs sont absents de la réponse (et non renvoyés vides).
+ORGANIZATION_LEGAL_READ = "organization.legal.read"

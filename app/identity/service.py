@@ -28,18 +28,27 @@ from app.billing.permissions import (
 )
 from app.core.database import get_db
 from app.core.errors import AppError
+from app.core.field_crypto import dechiffrer
 from app.core.security import get_current_user
 from app.core.versioning import mutation_versionnee
-from app.identity.models import Organization, OrganizationUser, User
+from app.identity.models import Organization, OrganizationUser, Tenant, User
 from app.identity.permissions import (
     MEMBERS_INVITE,
     MEMBERS_READ,
     MEMBERS_REMOVE,
+    ORGANIZATION_LEGAL_READ,
     ORGANIZATION_MANAGE,
+    ORGANIZATION_READ,
     ORGANIZATION_SETTINGS_UPDATE,
+    ORGANIZATION_UPDATE,
     USER_MANAGE,
 )
-from app.identity.schemas import CreateOrganizationRequest, UpdateOrganizationRequest, UpdateUserProfileRequest
+from app.identity.schemas import (
+    CreateOrganizationRequest,
+    OrganizationDetailResponse,
+    UpdateOrganizationRequest,
+    UpdateUserProfileRequest,
+)
 from app.modules_registry.permissions import (
     MODULE_MANAGE,
     ORGANIZATION_MODULE_ACTIVATE,
@@ -71,6 +80,9 @@ OWNER_DEFAULT_PERMISSIONS = [
     (MEMBERS_READ, "identity", "Lister les membres de l'organisation courante."),
     (MEMBERS_REMOVE, "identity", "Retirer un membre de l'organisation (le rôle propriétaire reste réservé aux propriétaires)."),
     (ORGANIZATION_SETTINGS_UPDATE, "identity", "Modifier les réglages de l'organisation courante (nom)."),
+    (ORGANIZATION_READ, "identity", "Lire l'organisation courante (BE-186)."),
+    (ORGANIZATION_UPDATE, "identity", "Modifier l'organisation courante, verrou expectedVersion (BE-186)."),
+    (ORGANIZATION_LEGAL_READ, "identity", "Voir les identifiants légaux confidentiels de l'organisation (BE-186)."),
     (MODULE_MANAGE, "modules_registry", "Activer/désactiver les modules pour l'organisation."),
     (ORGANIZATION_MODULE_READ, "modules_registry", "Lire les permissions déclarées par les modules de l'organisation (BE-055)."),
     (ORGANIZATION_MODULE_INSTALL, "modules_registry", "Installer techniquement un module pour l'organisation (BE-047)."),
@@ -144,7 +156,12 @@ async def create_organization(db: AsyncSession, owner: User, data: CreateOrganiz
     if existing.scalar_one_or_none() is not None:
         raise AppError(code="slug_already_used", message="Ce slug d'organisation est déjà utilisé.", status_code=409)
 
-    organization = Organization(name=data.name, slug=data.slug)
+    # BE-186 : toute organisation créée porte son tenant racine (un tenant, une organisation en v1).
+    tenant = Tenant(status="active", version=1)
+    db.add(tenant)
+    await db.flush()
+
+    organization = Organization(name=data.name, slug=data.slug, tenantId=tenant.id)
     db.add(organization)
     await db.flush()
 
@@ -225,7 +242,7 @@ async def update_organization(
         db,
         Organization,
         organization.id,
-        data.version,
+        data.expectedVersion,
         {"name": data.name},
         code_introuvable="organization_not_found",
     )
@@ -242,6 +259,36 @@ async def update_organization(
     await db.commit()
     await db.refresh(organization)
     return organization
+
+
+async def get_organization_detail(
+    db: AsyncSession, organization_id: str, legal_visible: bool
+) -> OrganizationDetailResponse:
+    """Lecture de l'organisation courante (BE-186, CA-1 et CA-5).
+
+    Le contrôle d'appartenance et le droit `organization.read` sont faits par la
+    route (rbac/guards.py : 404 hors tenant, 403 sans droit). Ici, les
+    identifiants légaux ne sont déchiffrés et renseignés que si `legal_visible`
+    (droit `organization.legal.read`) ; sinon les champs restent absents de la
+    réponse (`response_model_exclude_unset`), et jamais renvoyés vides.
+    """
+    organization = await db.get(Organization, uuid.UUID(organization_id))
+    if organization is None or organization.deletedAt is not None:
+        raise organisation_introuvable()
+    champs = {
+        "id": organization.id,
+        "name": organization.name,
+        "slug": organization.slug,
+        "status": organization.status,
+        "version": organization.version,
+        "tenantId": organization.tenantId,
+    }
+    if legal_visible:
+        champs["legalRegistrationNumber"] = (
+            dechiffrer(organization.legalRegistrationNumberChiffre) if organization.legalRegistrationNumberChiffre else None
+        )
+        champs["legalTaxNumber"] = dechiffrer(organization.legalTaxNumberChiffre) if organization.legalTaxNumberChiffre else None
+    return OrganizationDetailResponse(**champs)
 
 
 async def _is_owner_of_target_user_organization(db: AsyncSession, actor_user_id: uuid.UUID, target_user_id: uuid.UUID) -> bool:

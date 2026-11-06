@@ -16,14 +16,18 @@ from app.identity.permissions import (
     MEMBERS_INVITE,
     MEMBERS_READ,
     MEMBERS_REMOVE,
+    ORGANIZATION_LEGAL_READ,
     ORGANIZATION_MANAGE,
+    ORGANIZATION_READ,
     ORGANIZATION_SETTINGS_UPDATE,
+    ORGANIZATION_UPDATE,
     USER_MANAGE,
 )
 from app.identity.schemas import (
     CreatedUserResponse,
     CreateOrganizationInvitationRequest,
     CreateOrganizationRequest,
+    OrganizationDetailResponse,
     OrganizationInvitationResponse,
     CreateUserRequest,
     OrganizationResponse,
@@ -37,7 +41,7 @@ from app.rbac import affectation_membres
 from app.rbac.guards import get_current_organization_id
 from app.rbac.permissions import ROLE_MANAGE
 from app.rbac.schemas import OrganizationMemberResponse, ReplaceMemberRolesRequest
-from app.rbac.service import require_permission
+from app.rbac.service import require_permission, user_has_permission
 
 router = APIRouter()
 
@@ -287,14 +291,33 @@ async def create_organization(
     return await service.create_organization(db, current_user, data)
 
 
+@router.get(
+    "/{organization_id}",
+    response_model=OrganizationDetailResponse,
+    response_model_exclude_unset=True,
+    summary="Lire l'organisation (BE-186) : 404 hors tenant, 403 sans organization.read",
+)
+async def get_organization(
+    organization_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_permission(ORGANIZATION_READ)),
+) -> OrganizationDetailResponse:
+    """Organisation d'un tenant (BE-186). La route porte `organization.read` ;
+    les identifiants légaux exigent en plus `organization.legal.read`."""
+    legal_visible = await user_has_permission(db, current_user.id, uuid.UUID(organization_id), ORGANIZATION_LEGAL_READ)
+    return await service.get_organization_detail(db, organization_id, legal_visible)
+
+
 @router.patch("/{organization_id}", response_model=OrganizationResponse)
 async def update_organization(
     organization_id: str,
     data: UpdateOrganizationRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(require_permission(ORGANIZATION_MANAGE)),
+    _: None = Depends(require_permission(ORGANIZATION_UPDATE)),
 ) -> Organization:
+    """Modifie le nom de l'organisation (BE-186 : droit `organization.update`, verrou `expectedVersion`)."""
     return await service.update_organization(db, organization_id, current_user.id, data)
 
 

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, synonym
 
@@ -22,7 +22,12 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     """
 
     __tablename__ = "organization"
-    __table_args__ = {"comment": "Organisation cliente de Zylo Office — tenant racine du système multi-organisation."}
+    __table_args__ = (
+        # BE-186 CA-1 : un tenant ne porte qu'une organisation en v1 (NULL reste permis
+        # pour les organisations créées avant la migration, sans tenant rattaché).
+        UniqueConstraint("tenantId", name="uq_organization_tenantId"),
+        {"comment": "Organisation cliente de Zylo Office — tenant racine du système multi-organisation."},
+    )
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
@@ -31,6 +36,12 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     version: Mapped[int] = mapped_column(
         nullable=False, server_default="1", comment="Version de l'agrégat (BE-233) ; incrémentée à chaque mutation, verrou de conflit."
     )
+    # BE-186 : tenant racine de l'organisation (FK vers `tenant`, unique). Renseigné à la création.
+    tenantId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("tenant.id"), nullable=True)
+    # BE-186 : identifiants légaux confidentiels, stockés chiffrés (app.core.field_crypto) ;
+    # visibles seulement avec `organization.legal.read`. Jamais en clair au repos.
+    legalRegistrationNumberChiffre: Mapped[str | None] = mapped_column(Text, nullable=True)
+    legalTaxNumberChiffre: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):

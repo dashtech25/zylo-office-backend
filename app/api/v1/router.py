@@ -29,6 +29,7 @@ from app.billing.reconciliation.router import router as billing_reconciliation_r
 from app.files.router import router as files_router
 from app.identity.router import router as organizations_router
 from app.integrations.router import router as connecteurs_router
+from app.integrations.configuration_router import router as configuration_integrations_router
 from app.tenants.router import router as tenants_router
 from app.identity.router import account_router
 from app.identity.router import users_router
@@ -273,3 +274,6 @@ api_router.include_router(storage_router, prefix="/storage", tags=["storage"])
 api_router.include_router(lettres_mortes_router, prefix="/integrations", tags=["integrations"])
 # BE-163 : webhook entrant d'un connecteur, sans authentification utilisateur (signature).
 api_router.include_router(webhooks_entrants_router, prefix="/integrations", tags=["integrations"])
+# BE-210 : configuration d'intégration et rotation/révocation de credential. Monté après les
+# lettres mortes : `/{integration_id}` ne doit pas capturer `/integrations/lettres-mortes`.
+api_router.include_router(configuration_integrations_router, prefix="/integrations", tags=["integrations"])

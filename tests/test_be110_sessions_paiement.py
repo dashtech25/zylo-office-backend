@@ -37,6 +37,7 @@ from app.billing.payers import creer_payeur
 from app.billing.pricing.resolution import definir_regle_prix
 from app.core.database import AsyncSessionLocal, engine
 from app.identity.models import OrganizationUser
+from tests.conftest import _affecte_role_owner
 
 MOT_DE_PASSE = "TestPassword123!"
 SCENARIO = "achat"
@@ -131,7 +132,10 @@ async def _organisation_etrangere(client: AsyncClient) -> tuple[str, dict]:
         "/api/v1/organizations", json={"name": "Org B BE-110", "slug": f"be110-b-{uuid.uuid4().hex[:8]}"},
         headers={"Authorization": f"Bearer {token}"},
     )
-    return token, res.json()
+    organisation = res.json()
+    # Comme la fixture `organization` : POST /organizations ne donne aucun rôle au créateur (QE-POR-04).
+    await _affecte_role_owner(organisation["id"], autre.json()["email"])
+    return token, organisation
 
 
 async def _compter(organization_id: uuid.UUID) -> tuple[int, int]:

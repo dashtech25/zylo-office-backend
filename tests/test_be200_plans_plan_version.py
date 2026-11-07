@@ -193,20 +193,21 @@ async def test_ca4_montant_sans_devise_refuse_422(client: AsyncClient, monkeypat
 # CA-5 : aucun montant dans les contrats d'interface tant que la valeur n'est pas validée (QE-API-24).
 
 
-async def test_ca5_aucun_montant_dans_les_reponses_et_aucune_valeur_par_defaut(client: AsyncClient):
-    res = await client.get("/openapi.json")
-    assert res.status_code == 200
-    openapi = res.json()
+def test_ca5_aucun_montant_dans_les_reponses_et_aucune_valeur_par_defaut():
+    """Le document OpenAPI est lu directement : `/openapi.json` n'est monté qu'en développement (app/main.py)."""
+    from app.main import app as application
+
+    openapi = application.openapi()
     chemins = [
         openapi["paths"][URL_PLANS]["get"],
-        openapi["paths"][URL_PLAN_VERSION]["get"],
+        openapi["paths"]["/api/v1/plans/{plan_code}/versions/{version}"]["get"],
     ]
     for operation in chemins:
         reponse = operation["responses"]["200"]["content"]["application/json"]["schema"]
         texte = str(reponse)
         assert "amountMinor" not in texte and "priceAmount" not in texte, operation
 
-    corps = openapi["paths"][URL_ADMIN_VERSIONS]["post"]["requestBody"]["content"]["application/json"]["schema"]
+    corps = openapi["paths"]["/api/v1/admin/plans/{plan_code}/versions"]["post"]["requestBody"]["content"]["application/json"]["schema"]
     proprietes = _schema_resolu(openapi, corps)["properties"]
     assert "amountMinor" in proprietes
     assert "default" not in proprietes["amountMinor"]

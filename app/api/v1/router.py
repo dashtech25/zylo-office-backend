@@ -62,6 +62,7 @@ from app.rbac.grants_membres import router as grants_membres_router
 from app.rbac.acces_effectif_router import router as acces_effectif_router
 from app.rbac.module_router import router as rbac_module_router
 from app.notifications.router import router as notifications_router
+from app.notifications.router_preferences import router as notification_preferences_router
 from app.rbac.router import router as rbac_router
 from app.rbac.roles_api import router as roles_api_router
 from app.rbac.roles_lecture import router as roles_lecture_router
@@ -171,6 +172,7 @@ api_router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
 api_router.include_router(sortie_tenant_router, prefix="/organizations", tags=["sortie-tenant"])
 api_router.include_router(organization_audit_router, prefix="/organizations", tags=["audit"])
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
+api_router.include_router(notification_preferences_router, prefix="/notification-preferences", tags=["notifications"])
 api_router.include_router(billing_router, prefix="/billing", tags=["billing"])
 # BE-099 : historique commercial du tenant courant (GET /api/v1/billing/history).
 api_router.include_router(billing_history_router, prefix="/billing", tags=["billing"])

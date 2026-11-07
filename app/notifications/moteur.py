@@ -82,14 +82,19 @@ async def _resoudre_audience(db: AsyncSession, tenant_id: uuid.UUID, audience: s
             field_errors={"audience": ["référence inconnue"]},
         )
     lignes = await db.execute(
-        select(User.id, User.status, User.deletedAt)
+        select(User.id, User.status, User.deletedAt, OrganizationUser.status)
         .join(OrganizationUser, OrganizationUser.userId == User.id)
         .where(OrganizationUser.organizationId == tenant_id)
         .order_by(User.id)
     )
+    # BE-212 (CA-4) : un membre suspendu dans le tenant n'est pas éligible, même si son
+    # compte global est actif. L'envoi est limité aux membres actifs de ce tenant.
     return [
-        _Destinataire(utilisateur_id=identifiant, eligible=statut == "active" and supprime_le is None)
-        for identifiant, statut, supprime_le in lignes.all()
+        _Destinataire(
+            utilisateur_id=identifiant,
+            eligible=statut == "active" and supprime_le is None and statut_membre == "active",
+        )
+        for identifiant, statut, supprime_le, statut_membre in lignes.all()
     ]
 
 

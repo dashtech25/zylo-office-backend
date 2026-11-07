@@ -72,3 +72,9 @@ BILLING_CASE_RESOLVE = "billing.case.resolve"
 # `domaine.entite.action` ; l'écriture fiche `billing:payment-method:manage` est un écart consigné.
 # Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 permission_denied.
 BILLING_PAYMENT_METHOD_MANAGE = "billing.payment_method.manage"
+
+# BE-202 (QE-API-27) : rôle d'exploitation de la facturation. Exigé pour créer un devis, ouvrir un
+# checkout et enregistrer un consentement (POST /api/v1/quotes, /checkouts, /consents). Revalidé à
+# chaque commande : ni l'autorité du payeur ni celle d'un délégué ne le remplacent. Accordée au
+# propriétaire via OWNER_DEFAULT_PERMISSIONS ; sans elle : 403.
+BILLING_OPERATE = "billing.operate"

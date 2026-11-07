@@ -48,6 +48,7 @@ from app.modules_registry.audit_router import router as module_audit_router
 from app.modules_registry.router import organizations_modules_router
 from app.modules_registry.admin_router import router as modules_admin_router
 from app.evenements.admin_router import router as evenements_admin_router
+from app.contrats.router import router as contrats_router
 from app.modules_registry.reconciliation_router import router as reconciliation_admin_router
 from app.modules_registry.catalog_router import router as catalog_router
 from app.modules_registry.router import router as modules_router
@@ -143,6 +144,7 @@ api_router.include_router(reconciliation_admin_router, prefix="/admin", tags=["a
 api_router.include_router(catalog_router, prefix="/catalog", tags=["catalog"])
 # BE-200 : plans et versions de plan (GET /plans, POST /admin/plans/{plan_code}/versions).
 api_router.include_router(plans_router, tags=["plans"])
+api_router.include_router(contrats_router, tags=["contracts"])
 api_router.include_router(plans_admin_router, prefix="/admin", tags=["admin-plans"], dependencies=[Depends(require_admin_scope)])
 api_router.include_router(module_audit_router, prefix="/organizations", tags=["modules"])
 # BE-236 : opérations asynchrones consultables, `GET /operations/{operation_id}`.

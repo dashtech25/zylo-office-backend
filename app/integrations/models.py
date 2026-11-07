@@ -254,3 +254,78 @@ class WebhookRecu(UUIDPrimaryKeyMixin, Base):
     payloadMinimal: Mapped[dict] = mapped_column(JSONB, nullable=False)
     recuAt: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     statut: Mapped[str] = mapped_column(String(16), nullable=False, server_default=STATUT_WEBHOOK_RECU)
+
+
+ETAT_INTEGRATION_CONFIGUREE = "configured"
+ETAT_INTEGRATION_ACTIVE = "active"
+ETAT_INTEGRATION_DEGRADEE = "degraded"
+ETAT_INTEGRATION_REVOQUEE = "revoked"
+
+
+class Integration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Configuration d'une intégration externe d'un tenant, sans valeur de secret (BE-210).
+
+    Table `integration`. Une ligne par couple (`provider`, `purpose`) et par organisation
+    (unicité `uq_integration_organisation_fournisseur_usage`).
+
+    - `state` : `configured`, `active`, `degraded` ou `revoked` (CHECK en base) ; une
+      intégration révoquée ne résout plus aucune référence ;
+    - `credentialRef` : référence de la version courante du secret, dans le coffre ; la
+      valeur n'est jamais une colonne de cette table ;
+    - `scopes` : liste JSON des portées demandées, sans secret.
+
+    Écart assumé avec la définition, tranché sans attendre : le rattachement au tenant
+    s'appelle `organizationId` (convention BE-007 / BE-160), et la clé primaire est `id`.
+    """
+
+    __tablename__ = "integration"
+    __table_args__ = (
+        CheckConstraint(
+            f"state IN ('{ETAT_INTEGRATION_CONFIGUREE}', '{ETAT_INTEGRATION_ACTIVE}', "
+            f"'{ETAT_INTEGRATION_DEGRADEE}', '{ETAT_INTEGRATION_REVOQUEE}')",
+            name="ck_integration_state",
+        ),
+        CheckConstraint("configSchemaVersion >= 1", name="ck_integration_config_schema_version_positive"),
+        CheckConstraint("length(btrim(provider)) > 0", name="ck_integration_provider_non_vide"),
+        CheckConstraint("length(btrim(purpose)) > 0", name="ck_integration_purpose_non_vide"),
+        UniqueConstraint(
+            "organizationId", "provider", "purpose", name="uq_integration_organisation_fournisseur_usage"
+        ),
+        {"comment": "Configuration d'intégration par tenant, référence de credential sans valeur (BE-210)."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(64), nullable=False)
+    scopes: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    configSchemaVersion: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, server_default=ETAT_INTEGRATION_CONFIGUREE)
+    credentialRef: Mapped[str] = mapped_column(String(255), nullable=False)
+
+
+class IntegrationCredential(UUIDPrimaryKeyMixin, Base):
+    """Une version du secret d'une intégration, par sa seule référence (BE-210).
+
+    Table `integration_credential`. Chaque rotation ajoute une version ; toutes restent
+    résolubles jusqu'à la révocation de l'intégration (CA-4). `referenceSecret` désigne
+    l'entrée du coffre, sans la valeur.
+    """
+
+    __tablename__ = "integration_credential"
+    __table_args__ = (
+        CheckConstraint('"version" >= 1', name="ck_integration_credential_version_positive"),
+        CheckConstraint("length(btrim(\"referenceSecret\")) > 0", name="ck_integration_credential_reference_non_vide"),
+        UniqueConstraint("integrationId", "version", name="uq_integration_credential_version"),
+        {"comment": "Versions de credential d'intégration : références au coffre, jamais de valeur (BE-210)."},
+    )
+
+    integrationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("integration.id"), nullable=False, index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    referenceSecret: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    createdAt: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

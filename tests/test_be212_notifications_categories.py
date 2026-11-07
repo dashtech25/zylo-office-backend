@@ -163,9 +163,14 @@ async def test_be212_ca3_categorie_inconnue_renvoie_422_sans_ecriture(client, re
     assert lecture.json() == []
 
 
-async def test_be212_ca4_audience_limitee_aux_membres_actifs_du_tenant(organization):
-    """L'audience d'un tenant exclut les membres suspendus et ceux d'un autre tenant."""
+async def test_be212_ca4_audience_limitee_aux_membres_actifs_du_tenant(registered_user, organization):
+    """L'audience d'un tenant exclut les membres suspendus et ceux d'un autre tenant.
+
+    Le propriétaire créé par la fixture `organization` est membre actif : il figure donc
+    parmi les éligibles, à côté du membre actif ajouté par le test.
+    """
     tenant = uuid.UUID(organization["id"])
+    proprietaire = await _id_par_email(registered_user["email"])
     actif = await _utilisateur(organization["id"], statut_membre="active")
     suspendu = await _utilisateur(organization["id"], statut_membre="suspended")
     hors_tenant = await _utilisateur(None)
@@ -175,9 +180,14 @@ async def test_be212_ca4_audience_limitee_aux_membres_actifs_du_tenant(organizat
 
     eligibles = {destinataire.utilisateur_id for destinataire in destinataires if destinataire.eligible}
     presents = {destinataire.utilisateur_id for destinataire in destinataires}
-    assert eligibles == {actif}
+    assert eligibles == {proprietaire, actif}
     assert suspendu in presents and suspendu not in eligibles
     assert hors_tenant not in presents
+
+
+async def _id_par_email(email: str) -> uuid.UUID:
+    async with AsyncSessionLocal() as db:
+        return await db.scalar(select(User.id).where(User.email == email))
 
 
 async def test_be212_ca5_echec_repris_jusqu_a_la_limite_puis_passe_en_echec(organization):

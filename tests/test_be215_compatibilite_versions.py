@@ -31,11 +31,20 @@ from app.contrats.service import (
     modifier_schema_version,
     versions_acceptees,
 )
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, engine
 from app.core.errors import AppError
 from app.identity.models import User
 
 VARIABLE_DROIT = "PLATFORM_CATALOG_MANAGE_USER_IDS"
+
+
+@pytest.fixture(autouse=True)
+async def _pool_propre_a_chaque_test():
+    """Chaque test a sa propre boucle asyncio : le pool de connexions est vidé avant et après,
+    sinon une connexion attachée à une boucle fermée est réutilisée par le test suivant."""
+    await engine.dispose()
+    yield
+    await engine.dispose()
 
 
 def _nom_unique() -> str:

@@ -86,3 +86,20 @@ class LivraisonResponse(BaseModel):
     creeAt: datetime
 
     model_config = {"from_attributes": True}
+
+
+class PreferenceCategorieRequest(BaseModel):
+    """Corps de `PUT /api/v1/notification-preferences` (BE-212) : une catégorie et le choix
+    de l'utilisateur courant. `enabled: false` vaut désinscription de la catégorie."""
+
+    category: str = Field(min_length=1, max_length=80)
+    enabled: bool
+
+
+class PreferenceCategorieResponse(BaseModel):
+    """Préférence de l'utilisateur courant pour une catégorie (BE-212). Aucun secret ni
+    donnée d'un autre utilisateur n'y figure."""
+
+    category: str
+    enabled: bool
+    updatedAt: datetime

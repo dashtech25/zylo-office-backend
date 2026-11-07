@@ -144,3 +144,36 @@ async def verifier_envoi_autorise(db: AsyncSession, *, utilisateur_id: uuid.UUID
             "Envoi supprimé par le consentement.",
             status_code=403,
         )
+
+
+async def definir_preference_categorie(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    acteur_id: uuid.UUID,
+    categorie: str,
+    enabled: bool,
+) -> PreferenceNotification:
+    """Enregistre le consentement de l'utilisateur courant pour une catégorie (BE-212).
+
+    Entrée de `PUT /api/v1/notification-preferences` : la catégorie vient du corps de
+    la requête. Une catégorie absente de `categorie_notification` lève `422`
+    SCHEMA_INVALID avant toute écriture (la liste est configurable sans changement de
+    code, QE-API-21). Le reste suit `modifier_preference` : l'utilisateur ne modifie que
+    sa propre préférence.
+    """
+    if await db.get(CategorieNotification, categorie) is None:
+        raise AppError(
+            "SCHEMA_INVALID",
+            "Catégorie de notification inconnue.",
+            status_code=422,
+            field_errors={"category": ["catégorie inconnue"]},
+        )
+    return await modifier_preference(
+        db,
+        organization_id=organization_id,
+        acteur_id=acteur_id,
+        utilisateur_id=acteur_id,
+        categorie_code=categorie,
+        consentement=enabled,
+    )

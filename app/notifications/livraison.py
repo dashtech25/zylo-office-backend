@@ -38,6 +38,10 @@ RESULTAT_ENVOYEE = "envoyee"
 RESULTAT_ECHEC = "echec"
 STATUT_SUPPRIMEE = "supprimee"
 
+# Nombre maximal de tentatives d'envoi par canal (BE-212, CA-5), tranché par QE-API-16 :
+# 5 tentatives, puis la notification passe en `echec`.
+LIMITE_TENTATIVES_ENVOI = 5
+
 
 async def livrer_notification(
     db: AsyncSession,
@@ -99,3 +103,37 @@ async def livrer_notification(
     notification.statut = resultat
     await db.commit()
     return ligne
+
+
+async def livrer_avec_reprise(
+    db: AsyncSession,
+    *,
+    notification: Notification,
+    canal: str,
+    envoi: Callable[[Notification], None],
+    limite: int = LIMITE_TENTATIVES_ENVOI,
+) -> NotificationDelivery:
+    """Reprend l'envoi sur `canal` jusqu'à `limite` tentatives au total (BE-212, CA-5).
+
+    Chaque tentative passe par `livrer_notification` : elle est tracée dans
+    `notification_delivery` avec son numéro. La reprise s'arrête au premier envoi réussi.
+    Si toutes les tentatives échouent, la notification reste en `echec` (état « failed »
+    de la définition). Les tentatives déjà tracées pour ce canal comptent dans la limite,
+    donc un second appel n'ajoute pas de tentatives au-delà de `limite`.
+
+    Retour : la dernière ligne `NotificationDelivery` écrite. Une notification `supprimee`
+    ou un consentement retiré lève les mêmes erreurs que `livrer_notification`, sans reprise.
+    """
+    deja = await db.scalar(
+        select(func.count())
+        .select_from(NotificationDelivery)
+        .where(NotificationDelivery.notificationId == notification.id, NotificationDelivery.canal == canal)
+    )
+    restantes = max(limite - (deja or 0), 1)
+    derniere: NotificationDelivery | None = None
+    for _ in range(restantes):
+        derniere = await livrer_notification(db, notification=notification, canal=canal, envoi=envoi)
+        if derniere.resultat == RESULTAT_ENVOYEE:
+            break
+    assert derniere is not None  # restantes >= 1 : au moins une tentative
+    return derniere

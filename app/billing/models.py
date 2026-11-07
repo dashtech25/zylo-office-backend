@@ -542,6 +542,32 @@ class Quote(Base):
     expiresAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Fin de validité ; NULL tant que QE-FAC-21 n'est pas tranchée.")
     createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     pricingSnapshotJson: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="Prix, devise et taxe figés à la résolution (BE-078) ; NULL avant `priced`.")
+    # BE-202 : bénéficiaire (personne), distinct du payeur et du tenant ; NULL = le tenant lui-même.
+    beneficiaryId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, comment="Bénéficiaire du devis, distinct du payeur et du tenant (BE-202) ; NULL si c'est le tenant.")
+    # BE-202 : devis d'essai ; l'ouverture du checkout exige alors un consentement d'essai (CA-2).
+    isTrial: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false", comment="Devis d'essai : le checkout exige un consentement d'essai explicite (BE-202).")
+
+
+class Consent(Base):
+    """Consentement explicite d'un payeur, pris par la route BE-202 (`POST /api/v1/consents`).
+
+    Table `consent` de la fiche BE-202 (colonnes `consentId`, `payerId`, `kind`, `recordedAt`).
+    Distincte de `consent_record` (BE-076, consentement versionné avec texte et périmètre) :
+    ici, seule compte la présence d'une ligne `kind = 'trial'` pour le payeur, qui lève
+    l'exigence de consentement d'essai d'un checkout (CA-2). Une ligne n'est jamais modifiée.
+    """
+    __tablename__ = "consent"
+    __table_args__ = {"comment": "Consentement explicite d'un payeur (BE-202). Append-only."}
+
+    consentId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    payerId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("billing_payer.id"), nullable=False, index=True, comment="Compte payeur qui consent.")
+    kind: Mapped[str] = mapped_column(String(30), nullable=False, comment="Nature du consentement ; `trial` pour l'essai (BE-202).")
+    recordedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="Heure d'enregistrement serveur.")
+
+    @property
+    def id(self) -> uuid.UUID:
+        """Alias de `consentId` : le socle d'idempotence (BE-072) identifie un résultat par `id`."""
+        return self.consentId
 
 
 class DataExportRequest(Base):

@@ -20,6 +20,7 @@ from app.billing.cases.router import router as billing_cases_router
 from app.billing.trials.router import router as billing_trials_router
 from app.billing.plan_changes.router import router as billing_plan_changes_router
 
+from app.billing.commerce.router import router as billing_commerce_router
 from app.billing.quotes.router import router as billing_quotes_router
 from app.billing.checkouts.router import router as billing_checkouts_router
 from app.billing.payment_attempts.router import router as billing_payment_attempts_router
@@ -186,6 +187,8 @@ api_router.include_router(billing_plan_changes_router, prefix="/billing", tags=[
 # BE-077 : devis (POST /billing/quotes, GET /billing/quotes/{quoteId}, POST .../accept).
 api_router.include_router(billing_quotes_router, prefix="/billing", tags=["billing"])
 api_router.include_router(billing_checkouts_router, prefix="/billing", tags=["billing"])
+# BE-202 : devis, checkout et consentement à la racine (POST /api/v1/quotes, /checkouts, /consents).
+api_router.include_router(billing_commerce_router, tags=["billing"])
 api_router.include_router(billing_payment_attempts_router, prefix="/billing", tags=["billing"])
 # BE-093 : remboursement avec approbation (POST /billing/payments/{paymentId}/refunds).
 api_router.include_router(billing_refunds_router, prefix="/billing", tags=["billing"])

@@ -15,11 +15,13 @@ app/billing/service.py::current_subscription) : aucune requête globale.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, Index, UniqueConstraint, func, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, Index, UniqueConstraint, event, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm.attributes import get_history
 
 from app.core.database import Base
+from app.core.errors import AppError
 from app.shared.models import TimestampMixin, UUIDPrimaryKeyMixin
 
 
@@ -167,6 +169,28 @@ class PlanVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     entitlementCodes: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     effectiveAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+# BE-200 (CA-1) : une version de plan publiée est immuable. Seul `status` peut changer
+# (passage de `active` à `archived` quand une version plus récente la remplace, voir
+# app/billing/service.py::publish_plan_version). Toute autre modification d'une version
+# existante est refusée 409 à la mise à jour, pour que l'immutabilité ne dépende pas de
+# l'appelant : une correction de prix passe par une nouvelle version.
+_CHAMPS_FIGES_PLAN_VERSION = (
+    "planId", "version", "amountMinor", "currency", "periodDays", "entitlementCodes", "effectiveAt",
+)
+
+
+@event.listens_for(PlanVersion, "before_update")
+def _interdire_modification_version_publiee(mapper, connection, cible: PlanVersion) -> None:
+    """Refuse 409 `PLAN_VERSION_PUBLISHED` toute modification des champs figés d'une version de plan."""
+    for champ in _CHAMPS_FIGES_PLAN_VERSION:
+        if get_history(cible, champ).has_changes():
+            raise AppError(
+                code="PLAN_VERSION_PUBLISHED",
+                message="Une version de plan publiée ne se modifie pas : créer une nouvelle version.",
+                status_code=409,
+            )
 
 
 class Capability(UUIDPrimaryKeyMixin, TimestampMixin, Base):

@@ -48,6 +48,7 @@ from app.modules_registry.reconciliation_router import router as reconciliation_
 from app.modules_registry.catalog_router import router as catalog_router
 from app.modules_registry.router import router as modules_router
 from app.modules_registry.lecture_modules import router as lecture_modules_router
+from app.billing.plans_api import admin_router as plans_admin_router, router as plans_router
 from app.integrations.router import lettres_mortes_router
 from app.integrations.liens_router import router as liens_router
 from app.integrations.webhooks import router as webhooks_entrants_router
@@ -134,6 +135,9 @@ api_router.include_router(evenements_admin_router, prefix="/admin", tags=["admin
 api_router.include_router(reconciliation_admin_router, prefix="/admin", tags=["admin-reconciliation"], dependencies=[Depends(require_admin_scope)])
 # BE-043 : catalogue public (publié + visible), sans authentification.
 api_router.include_router(catalog_router, prefix="/catalog", tags=["catalog"])
+# BE-200 : plans et versions de plan (GET /plans, POST /admin/plans/{plan_code}/versions).
+api_router.include_router(plans_router, tags=["plans"])
+api_router.include_router(plans_admin_router, prefix="/admin", tags=["admin-plans"], dependencies=[Depends(require_admin_scope)])
 api_router.include_router(module_audit_router, prefix="/organizations", tags=["modules"])
 # BE-236 : opérations asynchrones consultables, `GET /operations/{operation_id}`.
 api_router.include_router(operations_router, prefix="/operations", tags=["operations"])

@@ -329,3 +329,78 @@ class IntegrationCredential(UUIDPrimaryKeyMixin, Base):
     createdAt: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+ETAT_ENDPOINT_ACTIF = "active"
+ETAT_ENDPOINT_REVOQUE = "revoked"
+STATUT_LIVRAISON_EN_ATTENTE = "pending"
+STATUT_LIVRAISON_ECHOUEE = "failed"
+STATUT_LIVRAISON_LIVREE = "delivered"
+STATUT_LIVRAISON_DLQ = "dlq"
+
+
+class WebhookEndpoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Destination d'un webhook sortant, appartenant à un tenant (BE-211).
+
+    Table `webhook_endpoint`. Le secret de signature n'est jamais une colonne : `secretRef`
+    désigne la version courante dans le coffre des webhooks sortants. Pendant une rotation,
+    `secretPrecedentRef` garde l'ancienne version jusqu'à `overlapJusquA` (CA-4).
+
+    Écarts assumés, tranchés sans attendre : le rattachement s'appelle `organizationId` (convention
+    BE-007 / BE-210) et la clé primaire `id`. Les deux colonnes de rotation sont ajoutées à la
+    définition, qui ne prévoit pas de chevauchement.
+    """
+
+    __tablename__ = "webhook_endpoint"
+    __table_args__ = (
+        CheckConstraint(
+            f"state IN ('{ETAT_ENDPOINT_ACTIF}', '{ETAT_ENDPOINT_REVOQUE}')",
+            name="ck_webhook_endpoint_state",
+        ),
+        CheckConstraint("length(btrim(url)) > 0", name="ck_webhook_endpoint_url_non_vide"),
+        {"comment": "Endpoints de webhook sortant par tenant, référence de secret sans valeur (BE-211)."},
+    )
+
+    organizationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True
+    )
+    url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    secretRef: Mapped[str] = mapped_column(String(255), nullable=False)
+    secretPrecedentRef: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    overlapJusquA: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, server_default=ETAT_ENDPOINT_ACTIF)
+
+
+class WebhookDelivery(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Une livraison d'un événement vers un endpoint, avec ses tentatives (BE-211).
+
+    Table `webhook_delivery`. Une seule livraison par couple (endpoint, événement) : la contrainte
+    `uq_webhook_delivery_endpoint_event` rend le dispatcher idempotent. États : `pending` (jamais
+    tentée), `failed` (échec, relance planifiée à `nextAttemptAt`), `delivered`, `dlq` (échecs au
+    maximum ; plus aucune tentative automatique).
+
+    `organizationId` est recopié de l'endpoint pour filtrer le tenant sans jointure (CA-3).
+    """
+
+    __tablename__ = "webhook_delivery"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN ('{STATUT_LIVRAISON_EN_ATTENTE}', '{STATUT_LIVRAISON_ECHOUEE}', "
+            f"'{STATUT_LIVRAISON_LIVREE}', '{STATUT_LIVRAISON_DLQ}')",
+            name="ck_webhook_delivery_status",
+        ),
+        CheckConstraint("attempts >= 0", name="ck_webhook_delivery_attempts_positive"),
+        UniqueConstraint("endpointId", "eventId", name="uq_webhook_delivery_endpoint_event"),
+        {"comment": "Livraisons de webhook sortant, tentatives et DLQ par endpoint (BE-211)."},
+    )
+
+    endpointId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("webhook_endpoint.id"), nullable=False, index=True
+    )
+    organizationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True
+    )
+    eventId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default=STATUT_LIVRAISON_EN_ATTENTE)
+    nextAttemptAt: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)

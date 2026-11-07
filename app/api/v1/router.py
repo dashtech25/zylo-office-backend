@@ -30,6 +30,7 @@ from app.files.router import router as files_router
 from app.identity.router import router as organizations_router
 from app.integrations.router import router as connecteurs_router
 from app.integrations.configuration_router import router as configuration_integrations_router
+from app.integrations.webhooks_sortants_router import router as webhooks_sortants_router
 from app.tenants.router import router as tenants_router
 from app.identity.router import account_router
 from app.identity.router import users_router
@@ -281,3 +282,6 @@ api_router.include_router(webhooks_entrants_router, prefix="/integrations", tags
 # BE-210 : configuration d'intégration et rotation/révocation de credential. Monté après les
 # lettres mortes : `/{integration_id}` ne doit pas capturer `/integrations/lettres-mortes`.
 api_router.include_router(configuration_integrations_router, prefix="/integrations", tags=["integrations"])
+# BE-211 : webhook sortant (endpoints, rotation de secret, statut de livraison). Chemins complets dans le
+# routeur, sans préfixe, car `/webhook-endpoints` et `/webhook-deliveries` ne sont pas sous `/integrations`.
+api_router.include_router(webhooks_sortants_router, tags=["integrations"])

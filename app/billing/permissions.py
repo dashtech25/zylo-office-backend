@@ -78,3 +78,8 @@ BILLING_PAYMENT_METHOD_MANAGE = "billing.payment_method.manage"
 # chaque commande : ni l'autorité du payeur ni celle d'un délégué ne le remplacent. Accordée au
 # propriétaire via OWNER_DEFAULT_PERMISSIONS ; sans elle : 403.
 BILLING_OPERATE = "billing.operate"
+
+# BE-110 : démarrer un achat par session de paiement (POST /organizations/{id}/checkout-sessions).
+# Écart : la fiche écrit `billing:purchase` ; le format `domaine.entite.action` est retenu. Accordée
+# au propriétaire via OWNER_DEFAULT_PERMISSIONS (app/identity/service.py). Sans elle : 403.
+BILLING_CHECKOUT_PURCHASE = "billing.checkout.purchase"

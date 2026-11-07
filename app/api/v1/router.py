@@ -6,6 +6,7 @@ from app.auth.router import router as auth_router
 from app.billing.router import current_organization_router as billing_current_organization_router
 from app.billing.lecture_router import router as billing_lecture_router
 from app.billing.payment_methods.router import router as billing_payment_methods_router
+from app.billing.checkout_sessions.router import router as billing_checkout_sessions_router
 from app.billing.invoices_router import router as billing_invoices_router
 from app.billing.allocation_router import router as billing_allocation_router
 from app.billing.consent_router import router as billing_consent_router
@@ -158,6 +159,7 @@ api_router.include_router(liens_router, tags=["integrations"])
 api_router.include_router(roles_lecture_router, prefix="/organizations", tags=["rbac"])
 api_router.include_router(roles_api_router, prefix="/roles", tags=["rbac"])
 api_router.include_router(billing_payment_methods_router, prefix="/organizations", tags=["billing"])
+api_router.include_router(billing_checkout_sessions_router, prefix="/organizations", tags=["billing"])
 api_router.include_router(grants_membres_router, prefix="/organizations", tags=["rbac"])
 api_router.include_router(rbac_module_router, prefix="/rbac", tags=["rbac"])
 api_router.include_router(acces_effectif_router, tags=["rbac"])

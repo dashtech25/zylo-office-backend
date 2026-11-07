@@ -13,6 +13,7 @@ from app.support.permissions import SUPPORT_REQUEST_CREATE
 from app.billing.permissions import (
     BILLING_CASE_OPEN,
     BILLING_CASE_RESOLVE,
+    BILLING_CHECKOUT_PURCHASE,
     BILLING_CONSENT_RECORD,
     BILLING_OPERATE,
     BILLING_DATA_EXPORT_REQUEST,
@@ -125,6 +126,7 @@ OWNER_DEFAULT_PERMISSIONS = [
     (BILLING_CASE_OPEN, "billing", "Ouvrir un cas de facturation ou d'assistance (BE-096)."),
     (BILLING_CASE_RESOLVE, "billing", "Résoudre un cas de facturation ou d'assistance, geste sensible (BE-096)."),
     (BILLING_PAYMENT_METHOD_MANAGE, "billing", "Ajouter, remplacer et sélectionner un moyen de paiement par token (BE-116)."),
+    (BILLING_CHECKOUT_PURCHASE, "billing", "Démarrer un achat par session de paiement (BE-110)."),
     (SUPPORT_REQUEST_CREATE, "support", "Ouvrir une demande de support client (BE-118)."),
     (CURRENCY_READ, "shared", "Consulter le référentiel des devises."),
     (CURRENCY_MANAGE, "shared", "Créer/modifier le référentiel des devises."),

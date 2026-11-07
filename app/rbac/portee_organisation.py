@@ -44,6 +44,9 @@ POLITIQUE_PORTAIL: dict[str, str] = {
     "portail.usage.lire": "organization.usage.read",
     # BE-116 : ajout, remplacement et sélection d'un moyen de paiement (chaîne écrite ici, comme BE-108).
     "portail.moyen_paiement.gerer": "billing.payment_method.manage",
+    # BE-110 : création et lecture d'une session de paiement (chaînes écrites ici, comme BE-116).
+    "portail.session_paiement.creer": "billing.checkout.purchase",
+    "portail.session_paiement.lire": "billing.subscription.read",
     "portail.invitation.creer": "organization.members.invite",
     # BE-118 : ouverture d'une demande de support (chaîne écrite ici, comme BE-108 et BE-116).
     "portail.support.demander": "support.request.create",

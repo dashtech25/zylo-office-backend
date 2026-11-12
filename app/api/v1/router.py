@@ -43,6 +43,7 @@ from app.modules.zylo_tanker.router import router as zylo_tanker_router
 from app.modules_registry.audit_router import router as module_audit_router
 from app.modules_registry.router import organizations_modules_router
 from app.modules_registry.admin_router import router as modules_admin_router
+from app.modules_registry.manifeste_router import router as manifeste_publication_router
 from app.evenements.admin_router import router as evenements_admin_router
 from app.modules_registry.reconciliation_router import router as reconciliation_admin_router
 from app.modules_registry.catalog_router import router as catalog_router
@@ -130,6 +131,8 @@ api_router.include_router(modules_router, prefix="/modules", tags=["modules"])
 # BE-194 : fiche et version d'un module par code (lecture publique, sans droit).
 api_router.include_router(lecture_modules_router, prefix="/modules", tags=["modules"])
 api_router.include_router(modules_admin_router, prefix="/admin", tags=["admin-modules"], dependencies=[Depends(require_admin_scope)])
+# BE-195 : publication du manifeste d'un module par code (POST /admin/modules/by-code/{code}/versions).
+api_router.include_router(manifeste_publication_router, prefix="/admin", tags=["admin-modules"], dependencies=[Depends(require_admin_scope)])
 api_router.include_router(evenements_admin_router, prefix="/admin", tags=["admin-evenements"], dependencies=[Depends(require_admin_scope)])
 api_router.include_router(reconciliation_admin_router, prefix="/admin", tags=["admin-reconciliation"], dependencies=[Depends(require_admin_scope)])
 # BE-043 : catalogue public (publié + visible), sans authentification.

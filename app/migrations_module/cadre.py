@@ -95,16 +95,23 @@ async def dry_run(migration_id: uuid.UUID, tenant_id: str) -> dict:
     # Pour l'instant, utilise une heuristique : cherche le nombre d'éléments
     # que la migration de test attend
     try:
-        # Appelle expand qui peut initialiser l'état
+        # Appelle expand qui peut initialiser l'état (dry-run: reverter aussi)
         async with AsyncSessionLocal() as db:
-            async with db.begin():
+            try:
+                await db.begin()
                 expand = migration["expand"]
                 if expand:
                     await expand(db, None)
+                await db.rollback()
+            except Exception:
+                await db.rollback()
+                raise
 
-        # Essaie d'exécuter les éléments dans une transaction non engagée
+        # Essaie d'exécuter les éléments dans une transaction non engagée (SANS COMMIT)
         async with AsyncSessionLocal() as db:
-            async with db.begin():
+            try:
+                # Ouvre une transaction sans l'engager
+                await db.begin()
                 migrate = migration["migrate"]
                 if migrate:
                     # Boucle pour tous les éléments possibles (arrête au premier None ou erreur)
@@ -125,6 +132,13 @@ async def dry_run(migration_id: uuid.UUID, tenant_id: str) -> dict:
                 contract = migration["contract"]
                 if contract:
                     await contract(db, None)
+
+                # IMPORTANT : rollback explicite pour dry-run (pas de commit)
+                await db.rollback()
+            except Exception:
+                # En cas d'erreur, reverter aussi
+                await db.rollback()
+                raise
 
         return {"state": "success", "checkpoint": 0}
     except RuntimeError as exc:

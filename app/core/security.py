@@ -183,3 +183,11 @@ async def get_current_user_pour_changement_mot_de_passe(
     """Réservée à GET /auth/me et POST /auth/change-password : seuls endpoints
     accessibles tant que `mustChangePassword` est vrai. Ne pas l'utiliser ailleurs."""
     return await _utilisateur_actif_du_jeton(request, credentials, db)
+
+
+async def get_current_user_id(
+    current_user: User = Depends(get_current_user),
+) -> str:
+    """Extrait l'ID de l'utilisateur authentifié. Dépendance pour les routes
+    qui ont besoin de l'ID mais pas de l'objet User complet."""
+    return str(current_user.id)

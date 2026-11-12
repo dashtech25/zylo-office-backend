@@ -9,7 +9,7 @@ from app.core.security import get_current_user_id
 from app.migrations_module import service
 from app.migrations_module.schemas import MigrationRunRequest, MigrationRunResponse
 
-router = APIRouter(prefix="/api/v1/admin/migrations", tags=["migrations"])
+router = APIRouter(prefix="/migrations", tags=["migrations"])
 
 
 @router.post("/{migration_id}/dry-run", response_model=MigrationRunResponse)

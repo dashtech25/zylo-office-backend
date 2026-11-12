@@ -143,7 +143,9 @@ api_router.include_router(modules_admin_router, prefix="/admin", tags=["admin-mo
 api_router.include_router(evenements_admin_router, prefix="/admin", tags=["admin-evenements"], dependencies=[Depends(require_admin_scope)])
 api_router.include_router(reconciliation_admin_router, prefix="/admin", tags=["admin-reconciliation"], dependencies=[Depends(require_admin_scope)])
 # BE-198 : migrations de module (dry-run, run, resume, rollback).
-api_router.include_router(migrations_router, tags=["migrations"], dependencies=[Depends(require_admin_scope)])
+# Pas de require_admin_scope : l'authentification seule (JWT valide) est requise, et le droit
+# platform.maintenance.run est vérifié par allowlist dans le service.
+api_router.include_router(migrations_router, prefix="/admin", tags=["migrations"])
 # BE-043 : catalogue public (publié + visible), sans authentification.
 api_router.include_router(catalog_router, prefix="/catalog", tags=["catalog"])
 # BE-200 : plans et versions de plan (GET /plans, POST /admin/plans/{plan_code}/versions).

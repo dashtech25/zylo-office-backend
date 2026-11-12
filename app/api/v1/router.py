@@ -58,6 +58,7 @@ from app.modules_registry.router import router as modules_router
 from app.modules_registry.lecture_modules import router as lecture_modules_router
 from app.billing.plans_api import admin_router as plans_admin_router, router as plans_router
 from app.integrations.router import lettres_mortes_router
+from app.retention.router import router as retention_router
 from app.integrations.liens_router import router as liens_router
 from app.integrations.webhooks import router as webhooks_entrants_router
 from app.rbac.grants_membres import router as grants_membres_router
@@ -148,6 +149,8 @@ api_router.include_router(modules_admin_router, prefix="/admin", tags=["admin-mo
 api_router.include_router(manifeste_publication_router, prefix="/admin", tags=["admin-modules"], dependencies=[Depends(require_admin_scope)])
 api_router.include_router(evenements_admin_router, prefix="/admin", tags=["admin-evenements"], dependencies=[Depends(require_admin_scope)])
 api_router.include_router(reconciliation_admin_router, prefix="/admin", tags=["admin-reconciliation"], dependencies=[Depends(require_admin_scope)])
+# BE-214 : rétention, sauvegarde et purge (POST /admin/retention/purges).
+api_router.include_router(retention_router, tags=["retention"])
 # BE-198 : migrations de module (dry-run, run, resume, rollback).
 # Pas de require_admin_scope : l'authentification seule (JWT valide) est requise, et le droit
 # platform.maintenance.run est vérifié par allowlist dans le service.

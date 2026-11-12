@@ -90,7 +90,7 @@ BILLING_ERRORS: dict[BillingErrorCode, BillingErrorSpec] = {
     ),
     BillingErrorCode.INVALID_TRANSITION: BillingErrorSpec(
         code=BillingErrorCode.INVALID_TRANSITION,
-        http_status=409,
+        http_status=422,
         outcome="rejected",
         message="Cette transition d'état n'est pas permise pour l'objet courant.",
         description="La machine d'état de l'objet ne permet pas ce passage depuis son état actuel.",

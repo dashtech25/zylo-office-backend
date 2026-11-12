@@ -14,6 +14,7 @@ from app.billing.exports.router import router as billing_exports_router
 from app.billing.history.router import router as billing_history_router
 from app.billing.router import router as billing_router
 from app.billing.subscriptions.router import router as billing_subscriptions_router
+from app.billing.subscriptions.lifecycle_router import router as billing_subscriptions_lifecycle_router
 from app.billing.cancellation.router import router as billing_cancellation_router
 from app.billing.reactivation.router import router as billing_reactivation_router
 from app.billing.close.router import router as billing_close_router
@@ -196,6 +197,8 @@ api_router.include_router(billing_quotes_router, prefix="/billing", tags=["billi
 api_router.include_router(billing_checkouts_router, prefix="/billing", tags=["billing"])
 # BE-202 : devis, checkout et consentement à la racine (POST /api/v1/quotes, /checkouts, /consents).
 api_router.include_router(billing_commerce_router, tags=["billing"])
+# BE-203 : cycle de vie Subscription à la racine (POST /api/v1/subscriptions/{id}/confirm, cancel, etc).
+api_router.include_router(billing_subscriptions_lifecycle_router, tags=["billing"])
 api_router.include_router(billing_payment_attempts_router, prefix="/billing", tags=["billing"])
 # BE-093 : remboursement avec approbation (POST /billing/payments/{paymentId}/refunds).
 api_router.include_router(billing_refunds_router, prefix="/billing", tags=["billing"])

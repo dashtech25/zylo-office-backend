@@ -19,8 +19,7 @@ from app.billing.models import SubscriptionEntitlement
 from app.billing.permissions import ENTITLEMENT_MANAGE
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.identity.models import User
-from app.identity.service import require_organization_member
+from app.identity.models import OrganizationUser, User
 from app.rbac.guards import get_current_organization_id
 from app.rbac.service import require_permission
 
@@ -106,6 +105,7 @@ async def create_entitlement(
         action="entitlement.granted",
         entity_type="entitlement",
         entity_id=entitlement.id,
+        summary=f"Octroi de l'entitlement {data.entitlementCode} à l'abonnement {data.subscriptionId}",
     )
 
     await db.commit()
@@ -136,8 +136,8 @@ async def revoke_entitlement(
     if not entitlement:
         return {"status": "error", "message": "Entitlement not found"}
 
-    # Mettre à jour le statut à "revoked"
-    entitlement.status = "revoked"
+    # Mettre à jour le statut à "blocked" (révocable)
+    entitlement.status = "blocked"
     await db.flush()
 
     # CA-6 : enregistrer dans l'audit
@@ -148,6 +148,7 @@ async def revoke_entitlement(
         action="entitlement.revoked",
         entity_type="entitlement",
         entity_id=entitlement_id,
+        summary=f"Révocation de l'entitlement {entitlement.entitlementCode}",
     )
 
     await db.commit()
@@ -157,24 +158,23 @@ async def revoke_entitlement(
 @router.get(
     "/access/decisions",
     response_model=AccessDecision,
-    dependencies=[Depends(require_organization_member)],
 )
 async def get_access_decision(
     capability: str = Query(..., description="Capability code to check access for"),
-    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ) -> AccessDecision:
     """Retourne la décision d'accès et sa provenance pour une capacité donnée.
 
     CA-2 : la décision renvoie la décision et sa provenance
-    CA-3 : après révocation, le cache obsolète n'accorde plus l'accès
+    CA-3 : après révocation, un cache obsolète n'accorde plus l'accès
     CA-4 : isolation : une décision pour le tenant B ne reflète pas un entitlement du tenant A
     """
     # Chercher un entitlement actif et valide pour cette capacité dans l'organisation courante
     entitlement = await db.scalar(
         select(SubscriptionEntitlement).where(
             and_(
-                SubscriptionEntitlement.organizationId == organization_id,
+                SubscriptionEntitlement.organizationId == org_id,
                 SubscriptionEntitlement.entitlementCode == capability,
                 SubscriptionEntitlement.status == "active",
                 # Vérifier les dates de validité

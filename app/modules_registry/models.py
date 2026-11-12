@@ -87,6 +87,11 @@ class ModuleVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     licence: Mapped[str | None] = mapped_column(String(100), nullable=True)
     compatibility: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     prerequisites: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Manifeste validé de la version (BE-195) : identifiant, release, contrats, dépendances,
+    # schéma de configuration, permissions demandées, routes, migrations, compatibilité.
+    manifest: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True, comment="Manifeste de module validé à la publication (BE-195)."
+    )
     stateVersion: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     publicationState: Mapped[str] = mapped_column(
         Enum(*ETATS_PUBLICATION_VERSION, name="module_version_publication_state", native_enum=True),

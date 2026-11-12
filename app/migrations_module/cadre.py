@@ -216,7 +216,7 @@ async def run(migration_id: uuid.UUID, tenant_id: str) -> dict:
                         if migrate:
                             await migrate(element_db, element)
 
-                        # Met à jour le checkpoint
+                        # Met à jour le checkpoint APRÈS migrate réussi
                         await element_db.execute(
                             text(
                                 'UPDATE migration_run SET "checkpoint" = :ckpt, '
@@ -224,7 +224,7 @@ async def run(migration_id: uuid.UUID, tenant_id: str) -> dict:
                             ),
                             {"ckpt": element, "id": migration_id},
                         )
-                    await element_db.commit()
+                    # La transaction est auto-committée quand on quitte le contexte manager
 
             except RuntimeError as exc:
                 if "Verrou perdu" in str(exc) or "Bail expiré" in str(exc):

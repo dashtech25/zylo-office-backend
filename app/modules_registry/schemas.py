@@ -351,3 +351,24 @@ class FicheModuleInstallable(BaseModel):
     name: str
     description: str | None
     versions: list[VersionModuleCatalogue]
+
+
+class ActivateModuleRequestBE196(BaseModel):
+    """Corps de `POST /organizations/{id}/modules/{code}/activate` (BE-196).
+
+    `expectedVersion` est la version lu avant la demande (contrôle de conflit). `operationId`
+    est un UUID fourni par l'appelant (idempotence par rejeu).
+    """
+    expectedVersion: int
+    operationId: uuid.UUID
+
+
+class ActivateModuleResponseBE196(BaseModel):
+    """Réponse de `POST /organizations/{id}/modules/{code}/activate` (BE-196).
+
+    `state` est l'état du cycle de vie (active, failed). `version` est la version d'état après transition.
+    """
+    state: str
+    version: int
+
+    model_config = {"from_attributes": True}

@@ -100,6 +100,8 @@ class ModuleVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class OrganizationModule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Activation d'un module pour une organisation (table `organizationModule`) : une ligne par couple organisation et module, avec son statut.
+
+    Champs du modèle BE-022 (`status`, `activatedAt`, `deactivatedAt`) et de BE-196 (`state`, `version`, `operationId`).
     """
     __tablename__ = "organizationModule"
     __table_args__ = (
@@ -114,6 +116,16 @@ class OrganizationModule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="inactive")  # active | inactive | trial
     activatedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deactivatedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # BE-196 : état et version du cycle de vie de l'activation (cycle avec provisionnement, idempotence)
+    state: Mapped[str | None] = mapped_column(
+        String(50), nullable=True, comment="État du cycle de vie (active, failed)."
+    )
+    version: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="Version de l'état pour détecter les conflit"
+    )
+    operationId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, comment="Identifiant de la dernière opération d'activation (BE-196)."
+    )
 
 
 # Origines d'une transition (BE-041, matrice-etats-modules-et-droits.md section 2) : qui a

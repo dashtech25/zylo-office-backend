@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.billing.permissions import BILLING_DOCUMENTS_READ, BILLING_OPERATE
+from app.billing import invoices_be204
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.identity.models import User
@@ -90,8 +91,18 @@ async def list_invoices(
     """
     await _require_permission(db, user, organization_id, BILLING_DOCUMENTS_READ)
 
-    # TODO: Implémenter la logique de liste paginée
-    return InvoicesListResponse(data=[], cursor=None, limit=limit)
+    invoices, next_cursor = await invoices_be204.list_invoices(
+        db=db,
+        organization_id=organization_id,
+        cursor=cursor,
+        limit=limit,
+    )
+
+    return InvoicesListResponse(
+        data=[InvoiceResponse.model_validate(inv) for inv in invoices],
+        cursor=next_cursor,
+        limit=limit,
+    )
 
 
 @router.get("/{invoice_id}")
@@ -108,12 +119,13 @@ async def get_invoice(
     """
     await _require_permission(db, user, organization_id, BILLING_DOCUMENTS_READ)
 
-    # TODO: Implémenter la logique de lecture
-    raise AppError(
-        code="invoice_not_found",
-        message="Facture introuvable.",
-        status_code=404,
+    invoice = await invoices_be204.get_invoice(
+        db=db,
+        organization_id=organization_id,
+        invoice_id=invoice_id,
     )
+
+    return InvoiceResponse.model_validate(invoice)
 
 
 @router.post("/{invoice_id}/finalize")
@@ -132,12 +144,17 @@ async def finalize_invoice(
     """
     await _require_permission(db, user, organization_id, BILLING_OPERATE)
 
-    # TODO: Implémenter la logique de finalisation
-    raise AppError(
-        code="invoice_not_found",
-        message="Facture introuvable.",
-        status_code=404,
+    invoice = await invoices_be204.finalize_invoice(
+        db=db,
+        organization_id=organization_id,
+        user_id=user.id,
+        invoice_id=invoice_id,
+        reason=data.reason,
     )
+
+    await db.commit()
+
+    return InvoiceResponse.model_validate(invoice)
 
 
 @router.post("/{invoice_id}/void")
@@ -155,9 +172,14 @@ async def void_invoice(
     """
     await _require_permission(db, user, organization_id, BILLING_OPERATE)
 
-    # TODO: Implémenter la logique d'annulation
-    raise AppError(
-        code="invoice_not_found",
-        message="Facture introuvable.",
-        status_code=404,
+    invoice = await invoices_be204.void_invoice(
+        db=db,
+        organization_id=organization_id,
+        user_id=user.id,
+        invoice_id=invoice_id,
+        reason=data.reason,
     )
+
+    await db.commit()
+
+    return InvoiceResponse.model_validate(invoice)

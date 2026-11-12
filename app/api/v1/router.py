@@ -85,6 +85,7 @@ from app.operator.health import internal_router as internal_health_router
 from app.evenements.dlq_router import router as dead_letters_router
 from app.release.flags_router import router as flags_router
 from app.billing.entitlement_events_router import router as billing_entitlement_events_router
+from app.billing.entitlements_router import router as billing_entitlements_router
 from app.operator.admin_audit_router import router as admin_audit_router
 from app.operator.search_router import router as search_router
 from app.operator.summary_router import router as summary_router
@@ -197,6 +198,8 @@ api_router.include_router(billing_plan_changes_router, prefix="/billing", tags=[
 # BE-077 : devis (POST /billing/quotes, GET /billing/quotes/{quoteId}, POST .../accept).
 api_router.include_router(billing_quotes_router, prefix="/billing", tags=["billing"])
 api_router.include_router(billing_checkouts_router, prefix="/billing", tags=["billing"])
+# BE-201 : entitlements et décision d'accès (POST /api/v1/entitlements, /entitlements/{entitlementId}/revoke, GET /api/v1/access/decisions).
+api_router.include_router(billing_entitlements_router, tags=["billing"])
 # BE-202 : devis, checkout et consentement à la racine (POST /api/v1/quotes, /checkouts, /consents).
 api_router.include_router(billing_commerce_router, tags=["billing"])
 api_router.include_router(billing_payment_attempts_router, prefix="/billing", tags=["billing"])

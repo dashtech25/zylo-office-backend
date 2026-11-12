@@ -107,23 +107,11 @@ async def dry_run(migration_id: uuid.UUID, tenant_id: str) -> dict:
                 await db.rollback()
                 raise
 
-        # Essaie d'exécuter les éléments dans une transaction non engagée (SANS COMMIT)
+        # Dry-run n'exécute que verify et contract (pas migrate)
+        # CA-1 : dry-run n'écrit aucune donnée métier, donc pas d'appel à migrate
         async with AsyncSessionLocal() as db:
             try:
-                # Ouvre une transaction sans l'engager
                 await db.begin()
-                migrate = migration["migrate"]
-                if migrate:
-                    # Boucle pour tous les éléments possibles (arrête au premier None ou erreur)
-                    element = 1
-                    while True:
-                        try:
-                            await migrate(db, element)
-                            element += 1
-                        except (ValueError, StopIteration):
-                            break
-                        if element > 1000:  # Garde-fou
-                            break
 
                 verify = migration["verify"]
                 if verify:
@@ -133,7 +121,7 @@ async def dry_run(migration_id: uuid.UUID, tenant_id: str) -> dict:
                 if contract:
                     await contract(db, None)
 
-                # IMPORTANT : rollback explicite pour dry-run (pas de commit)
+                # Rollback explicite pour dry-run (pas de commit)
                 await db.rollback()
             except Exception:
                 # En cas d'erreur, reverter aussi

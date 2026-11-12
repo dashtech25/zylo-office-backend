@@ -30,8 +30,8 @@ from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.security import get_current_user
 from app.identity.models import User
-from app.rbac.guards import get_current_organization_id, require_permission
-from app.rbac.service import user_has_permission
+from app.rbac.guards import get_current_organization_id
+from app.rbac.service import user_has_permission, require_permission
 
 router = APIRouter()
 

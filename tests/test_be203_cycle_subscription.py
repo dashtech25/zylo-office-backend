@@ -267,21 +267,20 @@ async def test_ca7_successful_transition_writes_outbox_and_audit(client, registe
     tenant_id = uuid.UUID(organization["id"])
     abonnement_id = await _creer_abonnement(tenant_id, status="pending")
 
-    # Compter les entrées outbox avant
-    async with AsyncSessionLocal() as db:
-        from sqlalchemy import func
-
-        outbox_before = await db.scalar(
-            select(func.count()).select_from(db.query(db.connection().dialect.type_descriptor).statement)
-        )
-
+    # Appeler la route pour confirmer l'abonnement
     reponse = await client.post(
         f"/api/v1/subscriptions/{abonnement_id}/confirm",
         json={"idempotencyKey": str(uuid.uuid4())},
         headers=_entete(registered_user["accessToken"], organization["id"]),
     )
 
-    if reponse.status_code == 200:
-        # Vérifier qu'une entrée outbox a été créée
-        # (simplification : juste vérifier que la requête a réussi)
-        assert reponse.status_code == 200
+    # Vérifier que la transition a réussi (200 OK)
+    assert reponse.status_code == 200, reponse.text
+
+    # Attendre que les événements soient traités
+    import asyncio
+    await asyncio.sleep(0.1)
+
+    # Vérifier que le statut a changé en relisant en base
+    statut = await _lire_statut(abonnement_id)
+    assert statut in ["trialing", "active"], f"Statut après confirm doit être trialing ou active, reçu: {statut}"

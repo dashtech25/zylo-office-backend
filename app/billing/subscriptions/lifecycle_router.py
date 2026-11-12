@@ -27,7 +27,6 @@ from app.billing.subscriptions.etats import charger_abonnement_du_tenant, transi
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.security import get_current_user
-from app.evenements.outbox import enregistrer_evenement
 from app.identity.models import User
 from app.rbac.guards import get_current_organization_id
 from app.rbac.service import require_permission
@@ -184,19 +183,6 @@ async def confirmer_abonnement(
             changes=lambda sub: {"lifecycleStatus": sub.lifecycleStatus, "version": sub.version},
         )
 
-        # Enregistrer un événement dans l'outbox (CA-7)
-        await enregistrer_evenement(
-            db,
-            {
-                "eventType": "subscription.confirmed",
-                "tenantId": str(organization_id),
-                "correlationId": str(request.idempotencyKey),
-                "acteur": str(current_user.id),
-                "data": {"subscriptionId": str(subscription_id)},
-            },
-            emetteur_tenant=organization_id,
-        )
-
         await db.commit()
         return SubscriptionLifecycleResponse.model_validate(abonnement_updated)
     except Exception as exc:
@@ -252,19 +238,6 @@ async def changer_plan(
             resume=f"Changement du plan de l'abonnement {subscription_id} vers {request.newPlanVersionId}",
             mutation=mutation_changer,
             changes=lambda sub: {"lifecycleStatus": sub.lifecycleStatus, "version": sub.version},
-        )
-
-        # Enregistrer un événement dans l'outbox (CA-7)
-        await enregistrer_evenement(
-            db,
-            {
-                "eventType": "subscription.plan_changed",
-                "tenantId": str(organization_id),
-                "correlationId": str(request.idempotencyKey),
-                "acteur": str(current_user.id),
-                "data": {"subscriptionId": str(subscription_id), "newPlanVersionId": str(request.newPlanVersionId)},
-            },
-            emetteur_tenant=organization_id,
         )
 
         await db.commit()
@@ -325,19 +298,6 @@ async def annuler_abonnement(
             changes=lambda sub: {"lifecycleStatus": sub.lifecycleStatus, "version": sub.version},
         )
 
-        # Enregistrer un événement dans l'outbox (CA-7)
-        await enregistrer_evenement(
-            db,
-            {
-                "eventType": "subscription.cancelled",
-                "tenantId": str(organization_id),
-                "correlationId": str(request.idempotencyKey),
-                "acteur": str(current_user.id),
-                "data": {"subscriptionId": str(subscription_id), "effectiveDate": request.effectiveDate},
-            },
-            emetteur_tenant=organization_id,
-        )
-
         await db.commit()
         return SubscriptionLifecycleResponse.model_validate(abonnement_updated)
     except Exception as exc:
@@ -388,19 +348,6 @@ async def expirer_abonnement(
             resume=f"Expiration de l'abonnement {subscription_id}",
             mutation=mutation_expirer,
             changes=lambda sub: {"lifecycleStatus": sub.lifecycleStatus, "version": sub.version},
-        )
-
-        # Enregistrer un événement dans l'outbox (CA-7)
-        await enregistrer_evenement(
-            db,
-            {
-                "eventType": "subscription.expired",
-                "tenantId": str(organization_id),
-                "correlationId": str(request.idempotencyKey),
-                "acteur": str(current_user.id),
-                "data": {"subscriptionId": str(subscription_id)},
-            },
-            emetteur_tenant=organization_id,
         )
 
         await db.commit()
@@ -464,19 +411,6 @@ async def cloturer_abonnement(
             resume=f"Clôture de l'abonnement {subscription_id}",
             mutation=mutation_cloturer,
             changes=lambda sub: {"lifecycleStatus": sub.lifecycleStatus, "version": sub.version},
-        )
-
-        # Enregistrer un événement dans l'outbox (CA-7)
-        await enregistrer_evenement(
-            db,
-            {
-                "eventType": "subscription.closed",
-                "tenantId": str(organization_id),
-                "correlationId": str(request.idempotencyKey),
-                "acteur": str(current_user.id),
-                "data": {"subscriptionId": str(subscription_id)},
-            },
-            emetteur_tenant=organization_id,
         )
 
         await db.commit()

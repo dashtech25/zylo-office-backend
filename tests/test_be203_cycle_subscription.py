@@ -54,12 +54,25 @@ async def _creer_organisation_isolee() -> uuid.UUID:
 
 
 async def _creer_abonnement(tenant_id: uuid.UUID, status: str = "pending") -> uuid.UUID:
-    """Abonnement du tenant avec un statut initial ; renvoie son identifiant."""
+    """Abonnement du tenant avec un statut initial ; renvoie son identifiant.
+
+    Accepte status parmi : pending, trialing, active, expired, cancelled, incomplete, disputed.
+    - incomplete, disputed : vont dans incidentStatus, lifecycleStatus=trialing
+    - autres : vont dans lifecycleStatus, incidentStatus=none
+    """
     maintenant = datetime.now(timezone.utc)
     async with AsyncSessionLocal() as db:
         plan = await service.get_or_create_plan(
             db, "zylo_liquid", f"be203-{uuid.uuid4().hex[:8]}", "Plan BE-203", 1000, "XAF", 30
         )
+        # Séparer les états de lifecycle et d'incident
+        if status in ("incomplete", "disputed"):
+            lifecycle_status = "trialing"
+            incident_status = status
+        else:
+            lifecycle_status = status
+            incident_status = "none"
+
         abonnement = Subscription(
             organizationId=tenant_id,
             planId=plan.id,
@@ -67,9 +80,9 @@ async def _creer_abonnement(tenant_id: uuid.UUID, status: str = "pending") -> uu
             startDate=maintenant,
             endDate=maintenant + timedelta(days=30),
             beneficiaryTenantId=tenant_id,
-            lifecycleStatus="pending" if status == "pending" else "trialing",
+            lifecycleStatus=lifecycle_status,
             financialStatus="none",
-            incidentStatus="none",
+            incidentStatus=incident_status,
         )
         db.add(abonnement)
         await db.commit()
@@ -81,7 +94,7 @@ async def _lire_statut(subscription_id: uuid.UUID) -> str:
     async with AsyncSessionLocal() as db:
         abonnement = await db.scalar(select(Subscription).where(Subscription.id == subscription_id))
         if abonnement:
-            return abonnement.status
+            return abonnement.lifecycleStatus
         return None
 
 

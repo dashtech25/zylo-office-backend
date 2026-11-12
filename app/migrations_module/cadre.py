@@ -39,6 +39,9 @@ def enregistre_migration(migration_id: uuid.UUID, etapes: dict) -> None:
             'migrate': coroutine(db, element),
             'verify': coroutine(db, element),
             'contract': coroutine(db, element),
+            'nombre': nombre total d'éléments à migrer (optionnel). Le cadre ne connaît
+                pas la taille d'une migration par lui-même : sans cette valeur, il
+                retombe sur une borne par défaut (voir `run`).
         }
     """
     _MIGRATIONS_REGISTRY[migration_id] = {
@@ -46,6 +49,7 @@ def enregistre_migration(migration_id: uuid.UUID, etapes: dict) -> None:
         "migrate": etapes.get("migrate"),
         "verify": etapes.get("verify"),
         "contract": etapes.get("contract"),
+        "nombre": etapes.get("nombre"),
     }
 
 
@@ -179,8 +183,9 @@ async def run(migration_id: uuid.UUID, tenant_id: str) -> dict:
         # Acquiert le verrou
         await db.execute(
             text(
-                'UPDATE migration_run SET "lockOwner" = :owner, "leaseExpiresAt" = now() + interval \'1 hour\', '
-                '"state" = :state, "startedAt" = now() WHERE "migrationId" = :id'
+                'UPDATE migration_run SET "lockOwner" = :owner, '
+                '"leaseExpiresAt" = (now() AT TIME ZONE \'UTC\') + interval \'1 hour\', '
+                '"state" = :state, "startedAt" = (now() AT TIME ZONE \'UTC\') WHERE "migrationId" = :id'
             ),
             {"owner": MIGRATION_PROCESS_NAME, "state": "running", "id": migration_id},
         )
@@ -190,7 +195,9 @@ async def run(migration_id: uuid.UUID, tenant_id: str) -> dict:
     try:
         migrate = migration["migrate"]
         element = checkpoint + 1
-        max_elements = 100
+        # Borne de la boucle : le nombre d'éléments déclaré à l'enregistrement, sinon
+        # une borne par défaut (migration qui ne déclare pas sa taille).
+        max_elements = migration.get("nombre") or 100
 
         while element <= max_elements:
             # Exécute l'élément dans une transaction
@@ -220,7 +227,7 @@ async def run(migration_id: uuid.UUID, tenant_id: str) -> dict:
                         await element_db.execute(
                             text(
                                 'UPDATE migration_run SET "checkpoint" = :ckpt, '
-                                '"leaseExpiresAt" = now() + interval \'1 hour\' WHERE "migrationId" = :id'
+                                '"leaseExpiresAt" = (now() AT TIME ZONE \'UTC\') + interval \'1 hour\' WHERE "migrationId" = :id'
                             ),
                             {"ckpt": element, "id": migration_id},
                         )

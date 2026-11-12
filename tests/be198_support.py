@@ -115,6 +115,10 @@ class MigrationDeTest:
             "migrate": self._migrate,
             "verify": self._verify,
             "contract": self._contract,
+            # Le cadre doit savoir où arrêter la boucle d'éléments : la migration de test
+            # n'a pas de fin naturelle (elle ne compte jamais ses propres éléments), donc
+            # `nombre` est transmis explicitement au cadre (voir cadre.py::run).
+            "nombre": self.nombre,
         }
 
 

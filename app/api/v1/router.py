@@ -111,6 +111,7 @@ from app.rbac.role_assignments_router import router as role_assignments_router
 from app.parametres.routes import router as parametres_router
 from app.parametres.approbation_routes import router as approbations_router
 from app.operations.router import router as operations_router
+from app.migrations_module.router import router as migrations_router
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
@@ -146,6 +147,10 @@ api_router.include_router(modules_admin_router, prefix="/admin", tags=["admin-mo
 api_router.include_router(manifeste_publication_router, prefix="/admin", tags=["admin-modules"], dependencies=[Depends(require_admin_scope)])
 api_router.include_router(evenements_admin_router, prefix="/admin", tags=["admin-evenements"], dependencies=[Depends(require_admin_scope)])
 api_router.include_router(reconciliation_admin_router, prefix="/admin", tags=["admin-reconciliation"], dependencies=[Depends(require_admin_scope)])
+# BE-198 : migrations de module (dry-run, run, resume, rollback).
+# Pas de require_admin_scope : l'authentification seule (JWT valide) est requise, et le droit
+# platform.maintenance.run est vérifié par allowlist dans le service.
+api_router.include_router(migrations_router, prefix="/admin", tags=["migrations"])
 # BE-043 : catalogue public (publié + visible), sans authentification.
 api_router.include_router(catalog_router, prefix="/catalog", tags=["catalog"])
 # BE-200 : plans et versions de plan (GET /plans, POST /admin/plans/{plan_code}/versions).

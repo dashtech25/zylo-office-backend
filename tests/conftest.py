@@ -90,7 +90,14 @@ def apply_migrations():
     """Base de test dédiée (jamais la base de dev) — migrations appliquées une
     seule fois pour toute la session de test."""
     alembic_cfg = Config(os.path.join(BACKEND_ROOT, "alembic.ini"))
-    command.upgrade(alembic_cfg, "head")
+    try:
+        command.upgrade(alembic_cfg, "head")
+    except Exception as e:
+        # Fallback pour le cas de multiple heads
+        if "Multiple head revisions" in str(e):
+            command.upgrade(alembic_cfg, "heads")
+        else:
+            raise
     _reset_test_database()
     yield
 

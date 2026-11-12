@@ -151,16 +151,16 @@ async def _activer(client: AsyncClient, token: str, organisation_id: uuid.UUID, 
     )
 
 
-async def _ligne(organisation_id: uuid.UUID, module_id: uuid.UUID) -> dict | None:
-    """Ligne `organization_module` du couple (organisation, module), ou None si absente."""
+async def _ligne(organisation_id: uuid.UUID, module_code: str) -> dict | None:
+    """Ligne `organization_module` du couple (organisation, code du module), ou None si absente."""
     async with AsyncSessionLocal() as db:
         ligne = (
             await db.execute(
                 text(
-                    'SELECT "state", "version", "operationId" FROM organization_module '
-                    'WHERE "organizationId" = :organisation AND "moduleId" = :module'
+                    'SELECT "state", "version", "operationId" FROM "organizationModule" '
+                    'WHERE "organizationId" = :organisation AND "moduleCode" = :moduleCode'
                 ),
-                {"organisation": organisation_id, "module": module_id},
+                {"organisation": organisation_id, "moduleCode": module_code},
             )
         ).mappings().first()
         return dict(ligne) if ligne is not None else None
@@ -208,7 +208,7 @@ async def test_ca1_deux_activations_ne_provisionnent_qu_une_fois(client, registe
     assert seconde.json()["state"] == "active"
 
     assert len(appels) == 1, "le provisionnement doit n'avoir lieu qu'une seule fois"
-    assert await _ligne(organisation_id, module_id) is not None
+    assert await _ligne(organisation_id, code) is not None
 
 
 async def test_ca2_entitlement_absent_bloque_activation_422(client, registered_user, organization):
@@ -222,7 +222,7 @@ async def test_ca2_entitlement_absent_bloque_activation_422(client, registered_u
 
     assert reponse.status_code == 422, reponse.text
     assert appels == []
-    ligne = await _ligne(organisation_id, module_id)
+    ligne = await _ligne(organisation_id, code)
     assert ligne is None or ligne["state"] != "active"
 
 
@@ -240,7 +240,7 @@ async def test_ca3_permission_module_manage_absente_renvoie_403(client, register
 
     assert reponse.status_code == 403, reponse.text
     assert appels == []
-    ligne = await _ligne(organisation_id, module_id)
+    ligne = await _ligne(organisation_id, code)
     assert ligne is None or ligne["state"] != "active"
 
 
@@ -255,7 +255,7 @@ async def test_ca4_echec_de_hook_laisse_failed_recuperable_et_rejouable(client, 
 
     echec = await _activer(client, token, organisation_id, code, expected_version=0)
     assert echec.json().get("state") == "failed", echec.text
-    ligne_echec = await _ligne(organisation_id, module_id)
+    ligne_echec = await _ligne(organisation_id, code)
     assert ligne_echec is not None and ligne_echec["state"] == "failed"
 
     reprise = await _activer(client, token, organisation_id, code, expected_version=echec.json()["version"])
@@ -285,14 +285,14 @@ async def test_ca5_activation_isolee_par_organisation(client, registered_user, o
 
     activation_a = await _activer(client, registered_user["accessToken"], organisation_a, code, expected_version=0)
     assert activation_a.json()["state"] == "active", activation_a.text
-    assert await _ligne(organisation_b, module_id) is None
-    ligne_a = await _ligne(organisation_a, module_id)
+    assert await _ligne(organisation_b, code) is None
+    ligne_a = await _ligne(organisation_a, code)
 
     activation_b = await _activer(client, autre["token"], organisation_b, code, expected_version=0)
     assert activation_b.json()["state"] == "active", activation_b.text
 
     assert [str(x) for x in appels] == [str(organisation_a), str(organisation_b)]
-    assert await _ligne(organisation_a, module_id) == ligne_a, "la ligne de l'organisation A ne doit pas bouger"
+    assert await _ligne(organisation_a, code) == ligne_a, "la ligne de l'organisation A ne doit pas bouger"
 
 
 async def test_ca6_chaque_activation_ecrit_audit_et_outbox(client, registered_user, organization):

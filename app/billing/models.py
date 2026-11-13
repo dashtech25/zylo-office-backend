@@ -964,3 +964,28 @@ class BillingCase(UUIDPrimaryKeyMixin, Base):
     openedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="Heure d'ouverture du cas.")
     resolutionReason: Mapped[str | None] = mapped_column(Text, nullable=True, comment="Motif de résolution, NULL tant que le cas n'est pas résolu.")
     resolvedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Heure de résolution, NULL tant que le cas n'est pas résolu.")
+
+
+class PSPWebhookReceipt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Reçu de webhook PSP pour déduplication et anti-rejeu (BE-209).
+
+    Responsabilités :
+    - Déduplication des événements fournisseur
+    - Vérification de la signature
+    - Anti-rejeu par fenêtre temporelle
+    - Quarantaine pour tenant inconnu
+    """
+    __tablename__ = "psp_webhook_receipt"
+    __table_args__ = (
+        UniqueConstraint("provider", "providerEventId", name="uq_psp_webhook_provider_event"),
+        {"comment": "Reçu de webhook PSP pour déduplication et vérification de signature"},
+    )
+
+    provider: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    providerEventId: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    signatureVerified: Mapped[bool] = mapped_column(nullable=False, default=False)
+    payloadHash: Mapped[str] = mapped_column(String(256), nullable=False)
+    receivedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    processedStatus: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="pending"
+    )  # pending, processing, processed, quarantined, failed

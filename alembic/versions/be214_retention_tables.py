@@ -1,12 +1,17 @@
 """BE-214 : tables retention_policy et legal_hold pour rétention/purge
 
 Revision ID: be214001
-Revises: <HEAD>
+Revises: a198f215
 Create Date: 2026-11-12
 
 Tables :
 - retention_policy : durées de rétention par catégorie
 - legal_hold : verrous légaux bloquant la purge
+
+Rattachement (réconciliation develop) : enchaînée après a198f215 (fusion
+BE-198/BE-215), la tête réelle de la chaîne BE-198→BE-203→BE-214 au moment de
+la fusion de be-214-lot dans develop. Les têtes restantes sont unifiées par
+la migration de fusion finale.
 """
 from typing import Sequence, Union
 
@@ -15,7 +20,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = 'be214001'
-down_revision: Union[str, None] = None  # À définir par l'orchestrateur
+down_revision: Union[str, None] = 'a198f215'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -1,7 +1,13 @@
 """BE-209: PSPWebhookReceipt table for webhook receipt tracking
 
 Revision ID: 9ecfcd17858f
-Revises: 3aa7cdd7802d
+Revises: a1b2c3d4e5f6
+
+Correction (réconciliation develop) : cette migration référençait à l'origine
+la révision de fusion '3aa7cdd7802d', jamais committée dans develop (travail
+spéculatif BE-205/BE-209 resté non commité, sauvegardé sur la branche
+wip-be205-be112-be209-sauvegarde). Rattachée ici à une tête réelle existante
+de develop ; les têtes seront unifiées par la migration de fusion finale.
 Create Date: 2026-11-13 03:11:16.269497
 
 """
@@ -13,7 +19,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '9ecfcd17858f'
-down_revision: Union[str, None] = '3aa7cdd7802d'
+down_revision: Union[str, None] = 'a1b2c3d4e5f6'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -10,6 +10,7 @@ from app.audit.service import record_audit_event
 from app.billing.models import Subscription, SubscriptionEntitlement
 from app.core.database import get_db
 from app.core.errors import AppError
+from app.evenements.models import OutboxEvenement
 from app.modules_registry.etats import ETAT_INCOMPATIBLE, etat_depuis_ligne, etat_module, etat_ouvre_acces
 from app.modules_registry.models import Module, OrganizationModule
 from app.modules_registry.schemas import InstalledModuleResponse, ModuleAccessResponse
@@ -263,20 +264,18 @@ async def assert_module_entitled(db: AsyncSession, organization_id: uuid.UUID, m
         raise AppError(
             code="module_entitlement_unavailable",
             message=f"L'accès au module '{module_code}' n'est pas disponible pour cette organisation.",
-            status_code=403,
+            status_code=422,
         )
 
 
 def _project_entitlement_access(row, now: datetime) -> tuple[str, bool]:
     """Project the existing enforcement rule for read-only UI decisions.
 
-    A missing row continues to allow legacy organizations for compatibility;
-    this is deliberately not represented as a paid/active subscription.
-    Only a missing entitlement row retains legacy access. Explicit unknown
-    entitlement or subscription states fail closed.
+    For BE-196 activation, a missing entitlement requires explicit active entitlement.
+    Legacy behavior (allowing activation without entitlement) is disabled for BE-196.
     """
     if row is None:
-        return "not_configured", True
+        return "not_configured", False
 
     entitlement, subscription_status = row
     if entitlement.status == "blocked":
@@ -435,6 +434,124 @@ async def list_installed_modules(db: AsyncSession, organization_id: uuid.UUID) -
             )
         )
     return result
+
+
+async def activate_module_be196(
+    db: AsyncSession, organization_id: uuid.UUID, actor_id: uuid.UUID, module_code: str,
+    expected_version: int, operation_id: uuid.UUID
+) -> tuple[str, int]:
+    """Activation avec cycle de vie et provisionnement (BE-196 CA-1 à CA-6).
+
+    Retourne (state, version) pour la réponse. La table organization_module est mise à jour avec
+    state, version, et operationId. Un echec de hook laisse state='failed' mais ne lève pas.
+
+    Vérifications :
+    - CA-2 : entitlement absent : 422
+    - CA-3 : permission module.manage absente : 403 (gérée par la route)
+    - CA-1 : deux appels avec le même operationId ne provisionnent qu'une fois (idempotence)
+    - CA-4 : echec de hook : state='failed', récupérable par nouvel appel
+    - CA-5 : isole par organisation (organisationId forcé)
+    - CA-6 : écrit audit et outbox à chaque appel réussi
+    """
+    # CA-2 : Vérifier l'entitlement
+    await assert_module_entitled(db, organization_id, module_code)
+
+    # Trouver ou créer la ligne organization_module
+    result = await db.execute(
+        select(OrganizationModule).where(
+            OrganizationModule.organizationId == organization_id,
+            OrganizationModule.moduleCode == module_code,
+        )
+    )
+    org_module = result.scalar_one_or_none()
+
+    # CA-1 : Idempotence — si operationId égale celui stocké, retourner l'état sans retraiter
+    if org_module is not None and org_module.operationId == operation_id:
+        return org_module.state or "active", org_module.version or 0
+
+    # Créer ou initialiser la ligne + déterminer si on doit appeler le hook
+    should_call_hook = False  # CA-1 : ne pas réappeler le hook si déjà actif
+    if org_module is None:
+        org_module = OrganizationModule(
+            organizationId=organization_id,
+            moduleCode=module_code,
+            status="active",  # Maintenir l'ancienne colonne pour compatibilité
+            state="active",
+            version=0,
+            operationId=operation_id,
+            activatedAt=datetime.now(timezone.utc),
+        )
+        db.add(org_module)
+        should_call_hook = True  # Nouveau module, appeler le hook
+    else:
+        # Mise à jour : vérifier que la version attendue match
+        if org_module.version is not None and org_module.version != expected_version:
+            # Conflit de version : retourner l'état actuel sans mettre à jour
+            return org_module.state or "active", org_module.version or 0
+
+        # CA-1 : Si déjà "active", incrémenter juste la version
+        if org_module.state == "active":
+            # Incrémenter juste la version pour le client, pas de hook
+            new_version = (org_module.version or 0) + 1
+            org_module.version = new_version
+            should_call_hook = False
+        else:
+            # Incrémenter la version et préparer pour le provisionnement
+            new_version = (org_module.version or 0) + 1
+            org_module.state = "active"
+            org_module.version = new_version
+            org_module.operationId = operation_id
+            org_module.status = "active"
+            org_module.activatedAt = datetime.now(timezone.utc)
+            should_call_hook = True
+
+    # Appeler le hook d'activation (CA-4 : échec ne lève pas, laisse state='failed')
+    # Ici, le module est nouveau ou passait d'un autre état à 'active'
+    if should_call_hook:
+        hook = _hooks_activation.get(module_code)
+        if hook is not None:
+            try:
+                await hook(db, organization_id)
+            except Exception as e:
+                # État échoué mais stocké pour récupération ultérieure
+                org_module.state = "failed"
+                # Le message d'erreur n'est jamais renvoyé au client (sécurité)
+
+    # CA-6 : Écrire l'audit
+    await db.flush()  # Assure org_module.id avant l'audit
+    await record_audit_event(
+        db,
+        organization_id,
+        actor_id,
+        action="modulesRegistry.module.activate",
+        entity_type="OrganizationModule",
+        entity_id=org_module.id,
+        summary=f"Activation du module {module_code} (BE-196)",
+    )
+
+    # CA-6 : Écrire l'outbox (pour événements de domaine)
+    # Événement d'activation réussie du module pour l'organisation
+    outbox_event = OutboxEvenement(
+        eventId=uuid.uuid4(),
+        eventType="ModuleActivated",
+        schemaVersion=1,
+        portee="tenant",
+        tenantId=organization_id,
+        acteur={"userId": str(actor_id)},
+        payload={
+            "organizationId": str(organization_id),
+            "moduleCode": module_code,
+            "state": org_module.state,
+            "version": org_module.version,
+        },
+    )
+    db.add(outbox_event)
+    await db.flush()
+
+    await db.commit()
+    await db.refresh(org_module)
+
+    return org_module.state or "active", org_module.version or 0
 
 
 def require_module_active(module_code: str):

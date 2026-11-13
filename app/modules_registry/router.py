@@ -25,6 +25,8 @@ from app.modules_registry.permissions import (
 )
 from app.modules_registry.schemas import (
     ActivateModuleRequest,
+    ActivateModuleRequestBE196,
+    ActivateModuleResponseBE196,
     DisponibiliteRequest,
     ReactivationRequest,
     SuspensionRequest,
@@ -439,6 +441,31 @@ async def reprendre_module(
     await db.commit()
     await db.refresh(ligne)
     return _reponse_disponibilite(ligne)
+
+
+@organizations_modules_router.post(
+    "/{organization_id}/modules/{module_code}/activate",
+    response_model=ActivateModuleResponseBE196,
+    summary="Activer un module avec cycle de vie et provisionnement (BE-196)",
+    dependencies=[Depends(require_permission(MODULE_MANAGE))],
+)
+async def activate_module_be196(
+    organization_id: uuid.UUID,
+    module_code: str,
+    data: ActivateModuleRequestBE196,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ActivateModuleResponseBE196:
+    """Activate un module pour une organisation avec cycle de vie et provisionnement (BE-196).
+
+    Exige la permission `modules.module.manage` sur l'organisation (403 sinon).
+    Vérifications : entitlement absent (422), module incompatible (409).
+    Retourne l'état et la version du cycle de vie.
+    """
+    state, version = await service.activate_module_be196(
+        db, organization_id, current_user.id, module_code, data.expectedVersion, data.operationId
+    )
+    return ActivateModuleResponseBE196(state=state, version=version)
 
 
 @organizations_modules_router.put(

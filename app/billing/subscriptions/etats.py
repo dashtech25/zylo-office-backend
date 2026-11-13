@@ -96,9 +96,10 @@ async def transition_etat(
 
     Ordre des contrôles :
     1. abonnement hors du tenant ou inexistant : `subscription_not_found` (404) ;
-    2. axe inconnu, ou transition absente de la table de l'axe : `INVALID_TRANSITION` (409).
+    2. axe inconnu, ou transition absente de la table de l'axe : `INVALID_TRANSITION` (422).
 
-    Incrémente `version` et valide le tout par un commit. Aucune autre colonne n'est écrite.
+    Incrémente `version`. Aucune autre colonne n'est écrite. Le commit est du ressort
+    de l'appelant (mutation sensible via executer_mutation_sensible ou transaction explicite).
     """
     abonnement = await charger_abonnement_du_tenant(db, subscription_id, tenant_id, verrou=True)
     if abonnement is None:
@@ -113,6 +114,5 @@ async def transition_etat(
 
     setattr(abonnement, colonne, cible)
     abonnement.version += 1
-    await db.commit()
-    await db.refresh(abonnement)
+    await db.flush()
     return abonnement

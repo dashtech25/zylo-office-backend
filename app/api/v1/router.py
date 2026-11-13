@@ -15,6 +15,7 @@ from app.billing.exports.router import router as billing_exports_router
 from app.billing.history.router import router as billing_history_router
 from app.billing.router import router as billing_router
 from app.billing.subscriptions.router import router as billing_subscriptions_router
+from app.billing.subscriptions.lifecycle_router import router as billing_subscriptions_lifecycle_router
 from app.billing.cancellation.router import router as billing_cancellation_router
 from app.billing.reactivation.router import router as billing_reactivation_router
 from app.billing.close.router import router as billing_close_router
@@ -58,6 +59,7 @@ from app.modules_registry.router import router as modules_router
 from app.modules_registry.lecture_modules import router as lecture_modules_router
 from app.billing.plans_api import admin_router as plans_admin_router, router as plans_router
 from app.integrations.router import lettres_mortes_router
+from app.retention.router import router as retention_router
 from app.integrations.liens_router import router as liens_router
 from app.integrations.webhooks import router as webhooks_entrants_router
 from app.rbac.grants_membres import router as grants_membres_router
@@ -86,6 +88,7 @@ from app.operator.health import internal_router as internal_health_router
 from app.evenements.dlq_router import router as dead_letters_router
 from app.release.flags_router import router as flags_router
 from app.billing.entitlement_events_router import router as billing_entitlement_events_router
+from app.billing.entitlements_router import router as billing_entitlements_router
 from app.operator.admin_audit_router import router as admin_audit_router
 from app.operator.search_router import router as search_router
 from app.operator.summary_router import router as summary_router
@@ -111,6 +114,7 @@ from app.rbac.role_assignments_router import router as role_assignments_router
 from app.parametres.routes import router as parametres_router
 from app.parametres.approbation_routes import router as approbations_router
 from app.operations.router import router as operations_router
+from app.migrations_module.router import router as migrations_router
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
@@ -146,6 +150,12 @@ api_router.include_router(modules_admin_router, prefix="/admin", tags=["admin-mo
 api_router.include_router(manifeste_publication_router, prefix="/admin", tags=["admin-modules"], dependencies=[Depends(require_admin_scope)])
 api_router.include_router(evenements_admin_router, prefix="/admin", tags=["admin-evenements"], dependencies=[Depends(require_admin_scope)])
 api_router.include_router(reconciliation_admin_router, prefix="/admin", tags=["admin-reconciliation"], dependencies=[Depends(require_admin_scope)])
+# BE-214 : rétention, sauvegarde et purge (POST /admin/retention/purges).
+api_router.include_router(retention_router, tags=["retention"])
+# BE-198 : migrations de module (dry-run, run, resume, rollback).
+# Pas de require_admin_scope : l'authentification seule (JWT valide) est requise, et le droit
+# platform.maintenance.run est vérifié par allowlist dans le service.
+api_router.include_router(migrations_router, prefix="/admin", tags=["migrations"])
 # BE-043 : catalogue public (publié + visible), sans authentification.
 api_router.include_router(catalog_router, prefix="/catalog", tags=["catalog"])
 # BE-200 : plans et versions de plan (GET /plans, POST /admin/plans/{plan_code}/versions).
@@ -198,10 +208,14 @@ api_router.include_router(billing_plan_changes_router, prefix="/billing", tags=[
 # BE-077 : devis (POST /billing/quotes, GET /billing/quotes/{quoteId}, POST .../accept).
 api_router.include_router(billing_quotes_router, prefix="/billing", tags=["billing"])
 api_router.include_router(billing_checkouts_router, prefix="/billing", tags=["billing"])
+# BE-201 : entitlements et décision d'accès (POST /api/v1/entitlements, /entitlements/{entitlementId}/revoke, GET /api/v1/access/decisions).
+api_router.include_router(billing_entitlements_router, tags=["billing"])
 # BE-202 : devis, checkout et consentement à la racine (POST /api/v1/quotes, /checkouts, /consents).
 api_router.include_router(billing_commerce_router, tags=["billing"])
 # BE-204 : factures API (GET/POST /api/v1/invoices/{id}, finalize, void).
 api_router.include_router(invoices_be204_router, prefix="/invoices", tags=["invoices"])
+# BE-203 : cycle de vie Subscription à la racine (POST /api/v1/subscriptions/{id}/confirm, cancel, etc).
+api_router.include_router(billing_subscriptions_lifecycle_router, tags=["billing"])
 api_router.include_router(billing_payment_attempts_router, prefix="/billing", tags=["billing"])
 # BE-093 : remboursement avec approbation (POST /billing/payments/{paymentId}/refunds).
 api_router.include_router(billing_refunds_router, prefix="/billing", tags=["billing"])

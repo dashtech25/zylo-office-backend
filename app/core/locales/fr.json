@@ -1,0 +1,4 @@
+{
+  "erreur.validation_error": "Les données envoyées sont invalides.",
+  "erreur.internal_error": "Une erreur interne est survenue."
+}

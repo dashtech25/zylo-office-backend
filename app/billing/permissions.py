@@ -1,2 +1,91 @@
+"""Codes de permission de la facturation.
+
+Chaque code suit le format `domaine.entite.action` et est accordé au rôle
+propriétaire à la création d'une organisation (`OWNER_DEFAULT_PERMISSIONS`,
+app/identity/service.py). `BILLING_INVOICE_READ` est une recommandation
+(QE-SOC-06) : le code de lecture de la facturation n'était pas défini dans la
+définition ; il est retenu ici pour les routes de lecture de BE-027.
+"""
+
 PLAN_MANAGE = "billing.plan.manage"
 SUBSCRIPTION_MANAGE = "billing.subscription.manage"
+# BE-026 (recommandation QE-SOC-06) : lecture de l'abonnement, des droits et des
+# entitlements de l'organisation courante. Accordée au propriétaire à la création
+# de l'organisation (app/identity/service.py::OWNER_DEFAULT_PERMISSIONS).
+SUBSCRIPTION_READ = "billing.subscription.read"
+ENTITLEMENT_MANAGE = "entitlement.manage"
+# Lecture des factures de l'organisation courante (BE-027, routes /organizations/current/invoices).
+BILLING_INVOICE_READ = "billing.invoice.read"
+# BE-045 (QE-MOD-16, recommandation appliquée) : lecture des entitlements d'une organisation
+# désignée par son identifiant dans le chemin (GET /organizations/{organization_id}/entitlements).
+# Portée organisation ; accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS.
+ORGANIZATION_ENTITLEMENT_READ = "organization.entitlement.read"
+# BE-108 : lecture de l'usage (agrégats et limites) de l'organisation du chemin
+# (GET /organizations/{organization_id}/usage). Écart : la fiche écrit `usage:read` ; le format
+# `domaine.entite.action` est retenu, comme pour BE-107. Accordée au propriétaire par défaut.
+ORGANIZATION_USAGE_READ = "organization.usage.read"
+# BE-046 (QE-MOD-16, recommandation appliquée) : attribuer un siège (allocation) d'un
+# entitlement à un membre, et révoquer ce siège. Deux permissions distinctes : un acteur
+# peut attribuer sans pouvoir révoquer, et inversement. Portée organisation.
+ORGANIZATION_ENTITLEMENT_ALLOCATE = "organization.entitlement.allocate"
+ORGANIZATION_ENTITLEMENT_REVOKE = "organization.entitlement.revoke"
+# BE-075 : lecture interne du catalogue figé (snapshotJson). Aucune permission client
+# directe sur le catalogue : ce code n'est accordé à aucun rôle par défaut.
+BILLING_CATALOGUE_READ = "billing.catalogue.read"
+# BE-076 (QE-FAC-03, recommandation appliquée) : enregistrer un consentement versionné pour un
+# compte payeur. Porte les rôles ACTF-04 (acheteur) et ACTF-05 (contact de facturation) ; accordée
+# au propriétaire via OWNER_DEFAULT_PERMISSIONS (app/identity/service.py). Sans elle : 403 FORBIDDEN.
+BILLING_CONSENT_RECORD = "billing.consent.record"
+# BE-086 (ACTF-09, finance) : finaliser une facture brouillon. Code absent de la définition
+# (QE-SOC-06 : recommandation appliquée, nom aligné sur le geste d'audit `billing.invoice.finalize`).
+# Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
+BILLING_INVOICE_FINALIZE = "billing.invoice.finalize"
+# BE-098 (QE-FAC-03, recommandation appliquée) : demander un export des données de facturation
+# d'un compte payeur. Porte les rôles ACTF-04 (acheteur) et ACTF-05 (contact de facturation) ;
+# accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS (app/identity/service.py). Sans elle : 403 FORBIDDEN.
+BILLING_DATA_EXPORT_REQUEST = "billing.data_export.request"
+# BE-099 (QE-FAC-03, recommandation appliquée) : consulter l'historique commercial du tenant
+# courant (GET /api/v1/billing/history), lu dans `audit_event`. Accordée au propriétaire via
+# OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
+BILLING_HISTORY_READ = "billing.history.read"
+# BE-093 (ACTF-09, finance) : demander un remboursement. L'approbation (ACTF-08) n'est pas une
+# permission ici : elle est contrôlée par la règle d'approbation (app/billing/refunds/service.py).
+# Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
+BILLING_REFUND_REQUEST = "billing.refund.request"
+
+# BE-094 (ACTF-09, finance ; ACTF-07 support non modélisé ici, voir disputes/__init__.py) : lire un litige
+# fournisseur de l'organisation courante (GET /api/v1/billing/disputes/{disputeId}). Accordée au propriétaire
+# via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
+BILLING_DISPUTE_READ = "billing.dispute.read"
+# BE-095 (ACTF-09, finance) : lancer une réconciliation des paiements (POST /billing/reconciliations).
+# Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
+BILLING_RECONCILIATION_RUN = "billing.reconciliation.run"
+# BE-096 (recommandation QE-FAC-09, appliquée) : ouvrir un cas de facturation ou d'assistance
+# (POST /api/v1/billing/cases). Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS.
+BILLING_CASE_OPEN = "billing.case.open"
+# BE-096 : résoudre un cas (POST /api/v1/billing/cases/{case_id}/resolve), geste sensible.
+# Distincte d'ouverture : retirer l'une ne retire pas l'autre (moindre privilège). Accordée
+# au propriétaire via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 FORBIDDEN.
+BILLING_CASE_RESOLVE = "billing.case.resolve"
+# BE-116 : ajouter ou remplacer un moyen de paiement par token, et le sélectionner
+# (POST /organizations/{organization_id}/billing/payment-methods[/{method}/select]). Code au format
+# `domaine.entite.action` ; l'écriture fiche `billing:payment-method:manage` est un écart consigné.
+# Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS. Sans elle : 403 permission_denied.
+BILLING_PAYMENT_METHOD_MANAGE = "billing.payment_method.manage"
+
+# BE-202 (QE-API-27) : rôle d'exploitation de la facturation. Exigé pour créer un devis, ouvrir un
+# checkout et enregistrer un consentement (POST /api/v1/quotes, /checkouts, /consents). Revalidé à
+# chaque commande : ni l'autorité du payeur ni celle d'un délégué ne le remplacent. Accordée au
+# propriétaire via OWNER_DEFAULT_PERMISSIONS ; sans elle : 403.
+BILLING_OPERATE = "billing.operate"
+
+# BE-110 : démarrer un achat par session de paiement (POST /organizations/{id}/checkout-sessions).
+# Écart : la fiche écrit `billing:purchase` ; le format `domaine.entite.action` est retenu. Accordée
+# au propriétaire via OWNER_DEFAULT_PERMISSIONS (app/identity/service.py). Sans elle : 403.
+BILLING_CHECKOUT_PURCHASE = "billing.checkout.purchase"
+
+# BE-204 : lire les documents financiers (factures, avoirs, etc.) par API (GET /api/v1/invoices*).
+# Permission de lecture des factures au niveau API BE-204 (distinct de BE-027 qui utilise
+# /organizations/current/invoices). Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS.
+# Sans elle : 403.
+BILLING_DOCUMENTS_READ = "billing.documents.read"

@@ -317,3 +317,9 @@ def classify_tank_variation(
         return "anomaly_extreme_variation", 0.0
 
     return "sale", decline
+
+
+# Un capteur sans valeur depuis plus de ce délai est « hors ligne », même si son dernier
+# statut connu était « en ligne » (synchronisation arrêtée, compte désactivé, panne API).
+# Valeur de démarrage : plusieurs fois l'intervalle de synchro par défaut (HOLYKELL_SYNC_INTERVAL_SEC).
+SENSOR_STALE_THRESHOLD_MINUTES = 15.0

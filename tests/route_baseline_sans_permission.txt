@@ -1,0 +1,13 @@
+# Routes de module SANS garde de permission, après T-019 (2026-10-09).
+# Seules les routes ci-dessous restent sans permission. Chacune a une justification écrite
+# (routes-publiques.md, section « Routes de module restantes »). Une route de module nouvelle
+# sans garde de permission fait échouer tests/test_route_inventory.py ; une route corrigée
+# doit être retirée de cette liste (le test échoue sinon).
+#
+# Webhooks GPS : authentifiés par le secret d'ingestion de l'organisation, pas par un utilisateur.
+POST /api/v1/zylo-liquid/gps/ingest
+POST /api/v1/zylo-tanker/gps/ingest
+# Appartenance seule : constantes globales en lecture seule (aucune donnée d'organisation).
+GET /api/v1/zylo-liquid/system-defaults
+# Appartenance seule : sonde du module (aucune donnée).
+GET /api/v1/zylo-tanker/ping

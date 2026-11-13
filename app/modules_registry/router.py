@@ -1,32 +1,499 @@
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.errors import AppError
 from app.core.security import get_current_user
 from app.identity.models import User
 from app.identity.permissions import ORGANIZATION_MANAGE
 from app.identity.service import require_organization_member
-from app.modules_registry import service
-from app.modules_registry.models import Module, OrganizationModule
-from app.modules_registry.permissions import MODULE_MANAGE
+from app.core.idempotency import require_idempotency_key, run_idempotent
+from app.modules_registry import declarations, desinstallation, disponibilite, installation, mise_a_jour, service
+from app.modules_registry.models import Module, ModuleInstallation, OrganizationModule
+from app.modules_registry.permissions import (
+    MODULE_MANAGE,
+    ORGANIZATION_MODULE_ACTIVATE,
+    ORGANIZATION_MODULE_INSTALL,
+    ORGANIZATION_MODULE_READ,
+    ORGANIZATION_MODULE_SUSPEND,
+    ORGANIZATION_MODULE_UNINSTALL,
+    ORGANIZATION_MODULE_UPGRADE,
+)
 from app.modules_registry.schemas import (
     ActivateModuleRequest,
+    ActivateModuleRequestBE196,
+    ActivateModuleResponseBE196,
+    DisponibiliteRequest,
+    ReactivationRequest,
+    SuspensionRequest,
+    DisponibiliteResponse,
+    InstallModuleRequest,
     InstalledModuleResponse,
+    ModuleAccessResponse,
+    ModuleInstallationResponse,
+    UpgradeModuleRequest,
+    ModulePermissionResponse,
     ModuleResponse,
     OrganizationModuleResponse,
+    SetModuleActivationRequest,
 )
+from app.rbac.garde_acces_module import require_module_action
+from app.rbac.guards import get_current_organization_id
 from app.rbac.service import require_permission
 from app.shared.pagination import PaginationParams, paginate
 from app.shared.schemas import Page
 
 router = APIRouter()
 
+# Routes du catalogue rattachées à l'organisation courante (BE-022), montées sous `/organizations` :
+# l'organisation est choisie par l'en-tête `X-Organization-Id`, validée par l'appartenance active.
+organizations_modules_router = APIRouter()
+
+
+@organizations_modules_router.get(
+    "/current/modules",
+    response_model=list[InstalledModuleResponse],
+    summary="Catalogue des modules avec leur état d'activation pour l'organisation courante",
+)
+async def list_current_organization_modules(
+    organization_id: uuid.UUID = Depends(get_current_organization_id), db: AsyncSession = Depends(get_db)
+) -> list[InstalledModuleResponse]:
+    """Lecture ouverte à tout membre actif de l'organisation courante. Un non-membre ne reçoit
+    jamais le catalogue (refus par `get_current_organization_id`)."""
+    return await service.list_installed_modules(db, organization_id)
+
+
+@organizations_modules_router.get(
+    "/current/modules/{module_id}/access",
+    response_model=ModuleAccessResponse,
+    summary="Projection d'accès (canOpen / canActivate) d'un module pour l'organisation courante",
+)
+async def get_current_organization_module_access(
+    module_id: uuid.UUID,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+) -> ModuleAccessResponse:
+    """Lecture ouverte à tout membre actif de l'organisation courante (BE-025). Les droits sont
+    calculés côté serveur : `canOpen` est faux pour `inactive`, `expired` et `blocked` (comme pour
+    un module non activé ou au manifeste incompatible) ; la garde réelle reste celle des routes du
+    module, qui répond 403. 404 si le module n'existe pas au catalogue."""
+    return await service.get_module_access_projection(db, organization_id, module_id)
+
+
+@organizations_modules_router.get(
+    "/{organization_id}/modules/{module_id}/permissions",
+    response_model=list[ModulePermissionResponse],
+    summary="Permissions déclarées par la version installée d'un module (BE-055)",
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_READ)), Depends(require_permission(ORGANIZATION_MODULE_READ))],
+)
+async def list_module_permissions(
+    module_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[ModulePermissionResponse]:
+    """Liste les permissions déclarées par la version installée du module `module_id`, triées par code.
+
+    Exige `organization.module.read` sur l'organisation du chemin : 403 sans elle, 404 pour une
+    organisation d'un autre tenant (la garde de `require_permission` répond avant la route).
+    Lecture seule : aucune donnée d'une autre organisation n'est renvoyée, puisque la liste ne
+    dépend que du catalogue. 404 si le module est inconnu ou sans version installée.
+    """
+    lignes = await declarations.lister_permissions_installees(db, module_id)
+    return [ModulePermissionResponse.model_validate(ligne) for ligne in lignes]
+
+
+@organizations_modules_router.post(
+    "/{organization_id}/modules/{module_id}/installations",
+    summary="Installer techniquement un module pour une organisation (BE-047)",
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_INSTALL)), Depends(require_permission(ORGANIZATION_MODULE_INSTALL))],
+)
+async def installer_module(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    data: InstallModuleRequest,
+    request: Request,
+    cle: str = Depends(require_idempotency_key),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Crée l'installation de la version `moduleVersionId` et la mène à `installed` (ou `failed`).
+
+    Exige `organization.module.install` sur l'organisation du chemin (403 sinon, sans ligne créée).
+    L'en-tête `Idempotency-Key` est obligatoire : le même couple (clé, charge) renvoie la réponse
+    initiale avec le même `operationId`, sans seconde installation (`core/idempotency`).
+    Refus préalables (détaillés dans `modules_registry/installation.py`) : 422
+    `MODULE_VERSION_NOT_PUBLISHED`, 409 `MODULE_VERSION_INCOMPATIBLE`, 409
+    `MODULE_PREREQUISITE_MISSING`, 409 `MODULE_ALREADY_INSTALLED`. Un échec de provisionnement ne
+    fait pas échouer la requête : la réponse 201 porte l'état `failed` et son `lastErrorCode`.
+    """
+
+    async def produire() -> tuple[int, dict]:
+        ligne = await installation.executer_installation(
+            db,
+            organization_id=organization_id,
+            acteur_id=current_user.id,
+            module_id=module_id,
+            module_version_id=data.moduleVersionId,
+            state_version=data.stateVersion,
+            cle_idempotence=cle,
+        )
+        return 201, ModuleInstallationResponse.model_validate(ligne).model_dump(mode="json")
+
+    resultat = await run_idempotent(
+        db,
+        cle=cle,
+        organisation_id=organization_id,
+        acteur_id=current_user.id,
+        methode=request.method,
+        chemin=request.url.path,
+        charge=data.model_dump(mode="json"),
+        produire=produire,
+    )
+    return JSONResponse(status_code=resultat.statut, content=resultat.corps)
+
+
+@organizations_modules_router.post(
+    "/{organization_id}/modules/{module_id}/upgrades",
+    summary="Mettre à jour une installation vers une version cible rN+1 (BE-051)",
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_UPGRADE)), Depends(require_permission(ORGANIZATION_MODULE_UPGRADE))],
+)
+async def mettre_a_jour_module(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    data: UpgradeModuleRequest,
+    request: Request,
+    cle: str = Depends(require_idempotency_key),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Fait passer l'installation de l'organisation à `targetModuleVersionId` (BE-051).
+
+    Exige `organization.module.upgrade` sur l'organisation du chemin (403 sinon, sans changement).
+    L'en-tête `Idempotency-Key` est obligatoire ; un rejeu avec la même clé renvoie la réponse
+    initiale sans seconde mise à jour (`core/idempotency`). Refus préalables (détaillés dans
+    `modules_registry/mise_a_jour.py`) : 404 installation absente, 409 `MODULE_STATE_VERSION_CONFLICT`,
+    422 `MODULE_VERSION_NOT_PUBLISHED`, 409 `MODULE_UPGRADE_NOT_ALLOWED` (plan absent ou cible
+    incompatible), 409 `MODULE_UPGRADE_FORWARD_ONLY`. Un échec de migration ne fait pas échouer la
+    requête : la réponse 200 porte `upgradeState = failed`, `lastErrorCode` et la version source.
+    """
+
+    async def produire() -> tuple[int, dict]:
+        ligne = await mise_a_jour.executer_mise_a_jour(
+            db,
+            organization_id=organization_id,
+            acteur_id=current_user.id,
+            module_id=module_id,
+            target_module_version_id=data.targetModuleVersionId,
+            state_version=data.stateVersion,
+            cle_idempotence=cle,
+            confirmation_forward_only=data.confirmationForwardOnly,
+        )
+        return 200, ModuleInstallationResponse.model_validate(ligne).model_dump(mode="json")
+
+    resultat = await run_idempotent(
+        db,
+        cle=cle,
+        organisation_id=organization_id,
+        acteur_id=current_user.id,
+        methode=request.method,
+        chemin=request.url.path,
+        charge=data.model_dump(mode="json"),
+        produire=produire,
+    )
+    return JSONResponse(status_code=resultat.statut, content=resultat.corps)
+
+
+@organizations_modules_router.get(
+    "/{organization_id}/modules/{module_id}/installations/{operation_id}",
+    response_model=ModuleInstallationResponse,
+    summary="Relire une opération d'installation (BE-047)",
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_INSTALL)), Depends(require_permission(ORGANIZATION_MODULE_INSTALL))],
+)
+async def lire_operation_installation(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    operation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> ModuleInstallationResponse:
+    """Renvoie l'état courant de l'opération `operation_id` (cas d'un résultat incertain).
+
+    404 si l'opération n'existe pas pour ce couple (organisation, module), y compris pour une
+    opération d'une autre organisation."""
+    ligne = await installation.lire_installation_par_operation(db, organization_id, module_id, operation_id)
+    return ModuleInstallationResponse.model_validate(ligne)
+
+
+def _reponse_disponibilite(ligne: ModuleInstallation) -> DisponibiliteResponse:
+    """Projette l'installation sur la réponse de disponibilité, avec l'explication de l'état."""
+    return DisponibiliteResponse(
+        id=ligne.id,
+        organizationId=ligne.organizationId,
+        moduleId=ligne.moduleId,
+        moduleVersionId=ligne.moduleVersionId,
+        state=ligne.state,
+        stateVersion=ligne.stateVersion,
+        operationId=ligne.operationId,
+        lastErrorCode=ligne.lastErrorCode,
+        explanation=disponibilite.expliquer_etat(ligne.state),
+    )
+
+
+@organizations_modules_router.get(
+    "/{organization_id}/modules/{module_id}",
+    response_model=DisponibiliteResponse,
+    summary="Lire l'état de disponibilité d'un module pour l'organisation (BE-048)",
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_READ)), Depends(require_permission(ORGANIZATION_MODULE_READ))],
+)
+async def lire_disponibilite_module(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> DisponibiliteResponse:
+    """Renvoie l'état courant de l'installation du module et son explication.
+
+    404 si le module n'a pas d'installation non retirée dans cette organisation (y compris pour une
+    autre organisation, CA-6)."""
+    ligne = await disponibilite._installation_courante(db, organization_id, module_id)
+    if ligne is None:
+        raise AppError(code="MODULE_INSTALLATION_NOT_FOUND", message="Installation introuvable.", status_code=404)
+    return _reponse_disponibilite(ligne)
+
+
+@organizations_modules_router.post(
+    "/{organization_id}/modules/{module_id}/activation",
+    response_model=DisponibiliteResponse,
+    summary="Activer un module installé pour l'organisation (BE-048)",
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_ACTIVATE)), Depends(require_permission(ORGANIZATION_MODULE_ACTIVATE))],
+)
+async def activer_module(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    data: DisponibiliteRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DisponibiliteResponse:
+    """Passe l'installation à `active` si les gardes sont franchies (voir `disponibilite.py`).
+
+    Exige `organization.module.activate` (403 sans lui). Gardes en échec : 409 ; l'état ne change pas.
+    Une panne du fournisseur d'activation ne fait pas échouer la requête : la réponse porte
+    `inactive_error` et `lastErrorCode`."""
+    ligne = await disponibilite.executer_activation(
+        db,
+        organization_id=organization_id,
+        acteur_id=current_user.id,
+        module_id=module_id,
+        state_version=data.stateVersion,
+        confirm=data.confirm,
+    )
+    await db.commit()
+    await db.refresh(ligne)
+    return _reponse_disponibilite(ligne)
+
+
+@organizations_modules_router.delete(
+    "/{organization_id}/modules/{module_id}/installation",
+    response_model=ModuleInstallationResponse,
+    summary="Désinstaller un module pour l'organisation, sans purge des données (BE-050)",
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_UNINSTALL)), Depends(require_permission(ORGANIZATION_MODULE_UNINSTALL))],
+)
+async def supprimer_installation_module(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    data: DisponibiliteRequest,
+    request: Request,
+    cle: str = Depends(require_idempotency_key),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Fait passer l'installation `installed|inactive` par `removing` à `removed` (voir `desinstallation.py`).
+
+    Exige `organization.module.uninstall` (403 sinon, distinct de l'activation). L'en-tête
+    `Idempotency-Key` est obligatoire : un rejeu avec la même clé renvoie la réponse initiale sans second
+    passage en `removing`. Module `active` : 409 `MODULE_MUST_BE_INACTIVE`. Les données du module ne sont
+    jamais purgées.
+    """
+
+    async def produire() -> tuple[int, dict]:
+        ligne = await desinstallation.desinstaller_module(
+            db,
+            organization_id=organization_id,
+            acteur_id=current_user.id,
+            module_id=module_id,
+            state_version=data.stateVersion,
+            confirm=data.confirm,
+            cle_idempotence=cle,
+        )
+        return 200, ModuleInstallationResponse.model_validate(ligne).model_dump(mode="json")
+
+    resultat = await run_idempotent(
+        db,
+        cle=cle,
+        organisation_id=organization_id,
+        acteur_id=current_user.id,
+        methode=request.method,
+        chemin=request.url.path,
+        charge=data.model_dump(mode="json"),
+        produire=produire,
+    )
+    return JSONResponse(status_code=resultat.statut, content=resultat.corps)
+
+
+@organizations_modules_router.post(
+    "/{organization_id}/modules/{module_id}/deactivation",
+    response_model=DisponibiliteResponse,
+    summary="Désactiver un module pour l'organisation (BE-048)",
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_ACTIVATE)), Depends(require_permission(ORGANIZATION_MODULE_ACTIVATE))],
+)
+async def desactiver_module(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    data: DisponibiliteRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DisponibiliteResponse:
+    """Passe l'installation `active` à `inactive`, sauf si un module `active` en dépend (409
+    `MODULE_HAS_ACTIVE_DEPENDANTS`, liste dans `details`)."""
+    ligne = await disponibilite.executer_desactivation(
+        db,
+        organization_id=organization_id,
+        acteur_id=current_user.id,
+        module_id=module_id,
+        state_version=data.stateVersion,
+        confirm=data.confirm,
+    )
+    await db.commit()
+    await db.refresh(ligne)
+    return _reponse_disponibilite(ligne)
+
+
+@organizations_modules_router.post(
+    "/{organization_id}/modules/{module_id}/suspensions",
+    response_model=DisponibiliteResponse,
+    summary="Suspendre un module pour l'organisation (BE-049)",
+    dependencies=[Depends(require_module_action(ORGANIZATION_MODULE_SUSPEND))],
+)
+async def suspendre_module(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    data: SuspensionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DisponibiliteResponse:
+    """Passe le module `active` à `suspended` (origine, motif et acteur journalisés).
+
+    Le droit dépend de l'origine (`disponibilite.verifier_droit_suspension`) : `client` exige
+    `organization.module.suspend` ; `commercial` et `security` exigent `platform.module.suspend`.
+    Refus : 403, sans changement d'état. Motif absent ou origine inconnue : 422."""
+    await disponibilite.verifier_droit_suspension(db, current_user.id, organization_id, data.origin)
+    ligne = await disponibilite.executer_suspension(
+        db,
+        organization_id=organization_id,
+        acteur_id=current_user.id,
+        module_id=module_id,
+        origine=data.origin,
+        motif=data.reason,
+        state_version=data.stateVersion,
+    )
+    await db.commit()
+    await db.refresh(ligne)
+    return _reponse_disponibilite(ligne)
+
+
+@organizations_modules_router.post(
+    "/{organization_id}/modules/{module_id}/reactivations",
+    response_model=DisponibiliteResponse,
+    summary="Reprendre un module suspendu pour l'organisation (BE-049)",
+    # QE-BE054-05 : le module est suspendu, donc inactif ; la porte « module actif » est ignorée
+    # pour cette seule route. Membership, permission et politique restent contrôlées ; l'entitlement
+    # est vérifié par le service (409).
+    dependencies=[
+        Depends(
+            require_module_action(ORGANIZATION_MODULE_SUSPEND, exige_entitlement=False, module_actif_requis=False)
+        )
+    ],
+)
+async def reprendre_module(
+    organization_id: uuid.UUID,
+    module_id: uuid.UUID,
+    data: ReactivationRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DisponibiliteResponse:
+    """Repasse le module `suspended` à `active` si release et entitlement le permettent.
+
+    Le droit exigé est celui de l'origine de la suspension courante (une suspension sans origine
+    enregistrée est traitée comme `client`). Refus de droit : 403. Gardes de version, release et
+    entitlement : 409 (voir `disponibilite.executer_reactivation`) ; l'état reste `suspended`."""
+    installation_courante = await disponibilite._installation_courante(db, organization_id, module_id)
+    origine = (installation_courante.suspensionOrigin if installation_courante else None) or "client"
+    await disponibilite.verifier_droit_suspension(db, current_user.id, organization_id, origine)
+    ligne = await disponibilite.executer_reactivation(
+        db,
+        organization_id=organization_id,
+        acteur_id=current_user.id,
+        module_id=module_id,
+        state_version=data.stateVersion,
+        resolution_reference=data.resolutionReference,
+    )
+    await db.commit()
+    await db.refresh(ligne)
+    return _reponse_disponibilite(ligne)
+
+
+@organizations_modules_router.post(
+    "/{organization_id}/modules/{module_code}/activate",
+    response_model=ActivateModuleResponseBE196,
+    summary="Activer un module avec cycle de vie et provisionnement (BE-196)",
+    dependencies=[Depends(require_permission(MODULE_MANAGE))],
+)
+async def activate_module_be196(
+    organization_id: uuid.UUID,
+    module_code: str,
+    data: ActivateModuleRequestBE196,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ActivateModuleResponseBE196:
+    """Activate un module pour une organisation avec cycle de vie et provisionnement (BE-196).
+
+    Exige la permission `modules.module.manage` sur l'organisation (403 sinon).
+    Vérifications : entitlement absent (422), module incompatible (409).
+    Retourne l'état et la version du cycle de vie.
+    """
+    state, version = await service.activate_module_be196(
+        db, organization_id, current_user.id, module_code, data.expectedVersion, data.operationId
+    )
+    return ActivateModuleResponseBE196(state=state, version=version)
+
+
+@organizations_modules_router.put(
+    "/current/modules/{module_id}/activation",
+    response_model=OrganizationModuleResponse,
+    summary="Activer ou désactiver un module pour l'organisation courante",
+    dependencies=[Depends(require_permission(MODULE_MANAGE))],
+)
+async def set_current_organization_module_activation(
+    module_id: uuid.UUID,
+    data: SetModuleActivationRequest,
+    organization_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> OrganizationModule:
+    """Active (`active: true`) ou désactive (`active: false`) le module `module_id` du catalogue.
+
+    Exige la permission `modules.module.manage` (403 sinon, sans modification). Module absent du
+    catalogue ou inconnu de l'application : 404. Module `incompatible` : 409, activation seulement.
+    Chaque transition écrit une entrée d'audit et ne touche qu'à l'organisation courante.
+    """
+    return await service.set_module_activation(db, organization_id, current_user.id, module_id, data.active)
+
 
 @router.get("", response_model=Page[ModuleResponse])
 async def list_modules(pagination: PaginationParams = Depends(), db: AsyncSession = Depends(get_db)) -> Page:
+    """Liste paginée du catalogue des modules, sans donnée d'organisation.
+    """
     return await paginate(db, select(Module).order_by(Module.code), pagination, ModuleResponse)
 
 
@@ -38,6 +505,8 @@ async def list_modules(pagination: PaginationParams = Depends(), db: AsyncSessio
 async def list_organization_modules(
     organization_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 ) -> list[InstalledModuleResponse]:
+    """Liste les modules installés de l'organisation ciblée. Garde : appartenance active à l'organisation (`require_organization_member`).
+    """
     return await service.list_installed_modules(db, organization_id)
 
 
@@ -52,6 +521,8 @@ async def activate(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> OrganizationModule:
+    """Active un module pour l'organisation ciblée. Garde : permission `modules.module.manage` et appartenance ; un refus de garde d'état répond 409.
+    """
     return await service.activate_module(db, organization_id, current_user.id, data.moduleCode)
 
 
@@ -66,6 +537,8 @@ async def deactivate(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> OrganizationModule:
+    """Désactive un module pour l'organisation ciblée. Garde : permission `modules.module.manage` et appartenance ; un refus de garde d'état répond 409.
+    """
     return await service.deactivate_module(db, organization_id, current_user.id, data.moduleCode)
 
 

@@ -28,8 +28,11 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     CheckConstraint,
+    Date,
+    DateTime,
     ForeignKey,
     Index,
+    Integer,
     Numeric,
     SmallInteger,
     String,
@@ -68,7 +71,11 @@ class HolykellAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     holykellUsername: Mapped[str] = mapped_column(String(100), nullable=False)
-    holykellPassword: Mapped[str] = mapped_column(String(255), nullable=False)
+    # T-027 : mot de passe chiffré (app/core/field_crypto.py), seule valeur écrite
+    # par le code. L'ancienne colonne en clair reste lisible pendant la transition
+    # (repli dans app/core/field_crypto.lire_champ) puis sera supprimée par une tâche distincte.
+    holykellPasswordChiffre: Mapped[str | None] = mapped_column(Text, nullable=True)
+    holykellPassword: Mapped[str | None] = mapped_column(String(255), nullable=True)
     holykellTenantId: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     accessToken: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -443,6 +450,10 @@ class Pump(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "zyloLiquidPump"
     __table_args__ = (
+        # D1 (scénario A1) : le numéro est unique PAR STATION, pas par produit ;
+        # le nom généré « Pompe N° {n} – {produit} » reste unique par station.
+        UniqueConstraint("stationId", "pumpNumber", name="uq_zlPump_station_number"),
+        UniqueConstraint("stationId", "name", name="uq_zlPump_station_name"),
         {"comment": "Pompe de distribution rattachée à une cuve (référentiel, sans logique de déclaration de vente)."},
     )
 
@@ -453,7 +464,14 @@ class Pump(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="RESTRICT"), nullable=False, index=True
     )
 
+    # Nom GÉNÉRÉ par le backend (« Pompe N° {pumpNumber} – {produit de la cuve} »),
+    # figé en base pour garantir l'unicité et la stabilité de l'import Excel ;
+    # resynchronisé quand le numéro, la cuve ou le nom du produit changent.
     name: Mapped[str] = mapped_column(String(100), nullable=False)
+    pumpNumber: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="Numéro d'ordre de la pompe, unique par station.")
+    brand: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    serialNumber: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    installedOn: Mapped[date | None] = mapped_column(Date, nullable=True)
     active: Mapped[bool] = mapped_column(nullable=False, default=True)
 
 
@@ -1121,6 +1139,12 @@ class Sale(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True)
     authorUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)
+    # Début de shift — optionnel (nullable) : les ventes créées avant
+    # l'ajout de ce champ (2026-09-25) n'en ont pas, et une déclaration
+    # groupée peut aussi provenir d'un import où cette donnée manque
+    # (jamais une valeur inventée à sa place). `eventAt` reste la fin de
+    # shift, seule donnée obligatoire jusqu'ici — inchangé.
+    shiftStart: Mapped[datetime | None] = mapped_column(nullable=True)
     eventAt: Mapped[datetime] = mapped_column(nullable=False, index=True)
     fuelProductId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidFuelProduct.id", ondelete="RESTRICT"), nullable=False)
     quantityLiters: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
@@ -1416,6 +1440,11 @@ class StationStaffProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "zyloLiquidStationStaffProfile"
     __table_args__ = (
         UniqueConstraint("organizationId", "userId", name="uq_zlStationStaffProfile_org_user"),
+        # A4 (D14) : N° d'employé unique par station si renseigné.
+        Index(
+            "uq_zlStationStaffProfile_station_employeeNumber", "assignedStationId", "employeeNumber", unique=True,
+            postgresql_where=text('"employeeNumber" IS NOT NULL AND "assignedStationId" IS NOT NULL'),
+        ),
         {"comment": "Informations de poste d'un membre du personnel — numéro d'employé, contrat, station affectée, responsable direct."},
     )
 
@@ -1582,3 +1611,965 @@ class TruckOrderAssignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 # TrackingSettings — déplacé vers `app/location/models.py` (2026-09-15,
 # Phase 2).
+
+
+class ShiftDefinition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Modèle de tour d'une station (« Matin 06:00 → 14:00 ») — scénario A9.
+    Ce n'est PAS un tour réel du jour (planifié/ouvert/fermé, vus en A5/B3) :
+    seulement la définition réutilisable. Jamais supprimé, seulement
+    désactivé (`active`), pour garder l'historique — même convention que
+    `Pump`/`Tank`. Heures en heure locale de la station, sans conversion."""
+
+    __tablename__ = "zyloLiquidShiftDefinition"
+    __table_args__ = (
+        UniqueConstraint("stationId", "shiftNumber", name="uq_zlShiftDefinition_station_number", deferrable=True, initially="DEFERRED"),
+        UniqueConstraint("stationId", "name", name="uq_zlShiftDefinition_station_name", deferrable=True, initially="DEFERRED"),
+        CheckConstraint('"shiftNumber" > 0', name="ck_zlShiftDefinition_shiftNumber_positive"),
+        {"comment": "Modèle de tour (période de travail d'une équipe) d'une station ; référentiel, sans planning."},
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    shiftNumber: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="Numéro d'ordre du tour, unique par station (ordre d'affichage).")
+    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="Nom du tour, unique par station.")
+    # Texte « HH:MM » (pas un type TIME) : le contrat d'API l'échange tel quel
+    # et un tour peut passer minuit (fin <= début), ce que la durée calculée gère.
+    startTime: Mapped[str] = mapped_column(String(5), nullable=False, comment="Heure de début locale, format HH:MM.")
+    endTime: Mapped[str] = mapped_column(String(5), nullable=False, comment="Heure de fin locale, format HH:MM ; fin <= début = passe minuit (début = fin = 24 h).")
+    active: Mapped[bool] = mapped_column(nullable=False, default=True)
+
+
+class ShiftOccurrence(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Tour du jour planifié (scénario A5) : un modèle de tour (`ShiftDefinition`)
+    placé à une date précise d'une station. Les horaires et le nom sont COPIÉS du
+    modèle à la création et ne sont jamais resynchronisés : modifier le modèle
+    plus tard n'altère pas un tour déjà planifié. A5 ne crée et ne modifie que le
+    statut `planned` ; `opened`/`closed`/`validated` (et leurs horodatages) sont
+    prévus pour B3 et la suite, sans logique ici. Heures locales de la station,
+    sans conversion de fuseau (même convention qu'A9)."""
+
+    __tablename__ = "zyloLiquidShiftOccurrence"
+    __table_args__ = (
+        UniqueConstraint("stationId", "shiftDate", "shiftDefinitionId", name="uq_zlShiftOccurrence_station_date_shift"),
+        CheckConstraint("status IN ('planned','opened','closed','validated')", name="ck_zlShiftOccurrence_status"),
+        Index("ix_zlShiftOccurrence_station_date", "stationId", "shiftDate"),
+        # B3 : un seul tour ouvert par station (y compris un tour de 24 h).
+        Index("uq_zlShiftOccurrence_station_opened", "stationId", unique=True, postgresql_where=text("status = 'opened'")),
+        {"comment": "Tour du jour planifié d'une station (date + modèle de tour), horaires copiés du modèle ; cycle planned -> opened -> closed -> validated."},
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    shiftDefinitionId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidShiftDefinition.id", ondelete="RESTRICT"), nullable=False, index=True,
+        comment="Modèle d'origine ; référence conservée, mais les champs copiés ci-dessous font foi pour l'occurrence.",
+    )
+    shiftDate: Mapped[date] = mapped_column(Date, nullable=False, comment="Date locale de DÉBUT du tour (un tour de nuit du lundi appartient au lundi).")
+    shiftNumber: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="Copie du numéro d'ordre du modèle à la planification.")
+    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="Copie du nom du modèle à la planification.")
+    startTime: Mapped[str] = mapped_column(String(5), nullable=False, comment="Copie de l'heure de début locale (HH:MM).")
+    endTime: Mapped[str] = mapped_column(String(5), nullable=False, comment="Copie de l'heure de fin locale (HH:MM) ; fin <= début = passe minuit.")
+    # Heure locale de la station : DateTime SANS fuseau volontairement (pas de conversion, A9/Q7).
+    startsAt: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False, comment="Début réel prévu (date + heure copiée), heure locale station.")
+    endsAt: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False, comment="Fin réelle prévue (lendemain si le tour passe minuit), heure locale station ; sert au contrôle de chevauchement.")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="planned", comment="planned (géré par A5) | opened | closed | validated (B3 et suite).")
+    # Prévus pour les statuts suivants, jamais renseignés par A5.
+    openedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Ouverture réelle du tour (B3), non géré par A5.")
+    closedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Clôture réelle du tour, non gérée par A5.")
+    validatedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Validation du tour, non gérée par A5.")
+    # B3 : ouverture du tour.
+    openedByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, comment="Utilisateur qui a ouvert le tour (B3) ; peut être le gérant.")
+    offPlanning: Mapped[bool] = mapped_column(nullable=False, server_default="false", comment="Vrai si l'occurrence a été créée à l'ouverture, faute de planning (B3).")
+
+
+class ShiftAssignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Affectation d'une personne à un tour planifié (scénario A5) : rôle dans
+    le tour (responsable de tour, chef d'équipe, pompiste) et pompe optionnelle
+    (pompiste seulement). Supprimée avec son occurrence."""
+
+    __tablename__ = "zyloLiquidShiftAssignment"
+    __table_args__ = (
+        # Un pompiste peut tenir PLUSIEURS pompes dans un même tour (SOCADA : 6 pompistes
+        # pour 14 pompes) : pas d'unicité (occurrence, personne) ; seulement une ligne
+        # « sans pompe » par personne (les doublons de pompe sont déjà exclus par
+        # l'index sur (occurrence, pompe)). « Un seul rôle par personne et par tour »
+        # est contrôlé par le service.
+        Index("uq_zlShiftAssignment_occurrence_user_nopump", "occurrenceId", "userId", unique=True, postgresql_where=text('"pumpId" IS NULL')),
+        CheckConstraint("\"shiftRole\" IN ('shift_manager','team_lead','pump_attendant')", name="ck_zlShiftAssignment_shiftRole"),
+        CheckConstraint("\"pumpId\" IS NULL OR \"shiftRole\" = 'pump_attendant'", name="ck_zlShiftAssignment_pump_only_attendant"),
+        # Une pompe n'a qu'un pompiste par tour (règle par défaut, PC-18).
+        Index("uq_zlShiftAssignment_occurrence_pump", "occurrenceId", "pumpId", unique=True, postgresql_where=text('"pumpId" IS NOT NULL')),
+        # Un seul responsable de tour par occurrence.
+        Index("uq_zlShiftAssignment_occurrence_manager", "occurrenceId", unique=True, postgresql_where=text("\"shiftRole\" = 'shift_manager'")),
+        {"comment": "Affectation d'une personne à un tour planifié : rôle dans le tour et pompe optionnelle (pompiste)."},
+    )
+
+    occurrenceId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidShiftOccurrence.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    userId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, index=True)
+    shiftRole: Mapped[str] = mapped_column(String(20), nullable=False, comment="shift_manager | team_lead | pump_attendant.")
+    pumpId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidPump.id", ondelete="RESTRICT"), nullable=True, index=True,
+        comment="Pompe tenue (pompiste seulement) ; NULL = placé sans pompe précise (renfort).",
+    )
+
+
+class ShiftAttendanceSheet(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Feuille de pointage d'un tour (scénario B1) : UNE par occurrence, créée au
+    PREMIER enregistrement seulement (avant cela, la lecture renvoie des lignes
+    virtuelles pré-remplies depuis le planning, rien n'est stocké). L'enregistrement
+    par l'utilisateur authentifié vaut signature (auteur + horodatage serveur) :
+    le premier enregistrement n'est jamais modifié, le dernier est rafraîchi.
+    `version` sert au verrou optimiste (409 `attendance_changed`). Le verrou
+    `locked` (tour validé, E1) est calculé à la lecture depuis l'occurrence."""
+
+    __tablename__ = "zyloLiquidShiftAttendanceSheet"
+    __table_args__ = (
+        UniqueConstraint("occurrenceId", name="uq_zlShiftAttendanceSheet_occurrence"),
+        CheckConstraint("\"lifecycleStatus\" IN ('declared','locked')", name="ck_zlShiftAttendanceSheet_lifecycleStatus"),
+        {"comment": "Feuille de pointage d'un tour (une par occurrence) : signature du dernier enregistrement et version pour le verrou optimiste."},
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True)
+    occurrenceId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidShiftOccurrence.id", ondelete="RESTRICT"), nullable=False,
+        comment="Tour (occurrence A5) pointé ; une seule feuille par tour.",
+    )
+    version: Mapped[int] = mapped_column(nullable=False, server_default="1", comment="Incrémentée à chaque enregistrement ; verrou optimiste.")
+    firstSignedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Auteur du premier enregistrement (jamais modifié).")
+    firstSignedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Horodatage serveur du premier enregistrement (jamais modifié).")
+    lastSignedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Signature : auteur du dernier enregistrement.")
+    lastSignedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Signature : horodatage serveur du dernier enregistrement.")
+    lifecycleStatus: Mapped[str] = mapped_column(String(10), nullable=False, server_default="declared", comment="declared | locked (tour validé, E1).")
+
+
+class ShiftAttendanceLine(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Ligne de pointage (scénario B1) : une par personne planifiée (`planned`),
+    par remplaçant lié à un absent (`replacement`) ou par personne présente hors
+    planning (`unplanned`). Le PRÉVU reste lu via `plannedAssignmentId` (rôle,
+    pompes), jamais recopié ni modifié ; le RÉEL (statut, heures) vit ici. Le
+    statut initial est `pending` (« à pointer »), jamais `present` par défaut.
+    Heures en heure locale de la station, sans fuseau (même convention qu'A5/A9)."""
+
+    __tablename__ = "zyloLiquidShiftAttendanceLine"
+    __table_args__ = (
+        UniqueConstraint("sheetId", "plannedAssignmentId", name="uq_zlShiftAttendanceLine_sheet_assignment"),
+        UniqueConstraint("replacesLineId", name="uq_zlShiftAttendanceLine_replaces"),
+        Index("uq_zlShiftAttendanceLine_sheet_person", "sheetId", "personUserId", unique=True, postgresql_where=text('"personUserId" IS NOT NULL')),
+        CheckConstraint("\"lineKind\" IN ('planned','replacement','unplanned')", name="ck_zlShiftAttendanceLine_lineKind"),
+        CheckConstraint("status IN ('pending','present','late','absent_justified','absent_unjustified')", name="ck_zlShiftAttendanceLine_status"),
+        CheckConstraint("\"lineKind\" <> 'replacement' OR \"replacesLineId\" IS NOT NULL", name="ck_zlShiftAttendanceLine_replacement_needs_target"),
+        CheckConstraint("\"replacesLineId\" IS NULL OR \"lineKind\" = 'replacement'", name="ck_zlShiftAttendanceLine_target_only_replacement"),
+        CheckConstraint("\"lineKind\" <> 'planned' OR \"plannedAssignmentId\" IS NOT NULL", name="ck_zlShiftAttendanceLine_planned_needs_assignment"),
+        CheckConstraint("\"plannedAssignmentId\" IS NULL OR \"lineKind\" = 'planned'", name="ck_zlShiftAttendanceLine_assignment_only_planned"),
+        CheckConstraint("status IN ('present','late') OR (\"arrivedAt\" IS NULL AND \"departedAt\" IS NULL)", name="ck_zlShiftAttendanceLine_no_times_if_absent"),
+        CheckConstraint("(\"personUserId\" IS NULL) <> (\"externalName\" IS NULL)", name="ck_zlShiftAttendanceLine_person_xor_external"),
+        CheckConstraint("\"shiftRole\" IN ('shift_manager','team_lead','pump_attendant')", name="ck_zlShiftAttendanceLine_shiftRole"),
+        {"comment": "Ligne de pointage d'un tour : personne planifiée, remplaçant lié ou personne hors planning ; prévu (affectation A5) et réel (statut, heures) conservés côte à côte."},
+    )
+
+    sheetId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftAttendanceSheet.id", ondelete="CASCADE"), nullable=False, index=True)
+    lineKind: Mapped[str] = mapped_column(String(12), nullable=False, comment="planned | replacement | unplanned (déduit, jamais saisi).")
+    plannedAssignmentId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidShiftAssignment.id", ondelete="RESTRICT"), nullable=True, index=True,
+        comment="Affectation A5 représentant la personne prévue (kind planned) ; le prévu se lit via elle, jamais recopié.",
+    )
+    replacesLineId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidShiftAttendanceLine.id", ondelete="RESTRICT"), nullable=True,
+        comment="Ligne `planned` absente remplacée par cette ligne (kind replacement) ; un seul remplaçant par absent.",
+    )
+    personUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, index=True, comment="Personne pointée ; NULL pour un remplaçant externe sans compte (nom libre).")
+    externalName: Mapped[str | None] = mapped_column(String(120), nullable=True, comment="Nom libre d'un remplaçant externe sans compte (jamais affectable à une pompe sans compte).")
+    shiftRole: Mapped[str] = mapped_column(String(20), nullable=False, comment="Rôle réel dans le tour : planned = rôle de l'affectation ; replacement = rôle de la ligne remplacée ; unplanned = poste de la personne.")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending", comment="pending (à pointer, défaut) | present | late | absent_justified | absent_unjustified.")
+    arrivedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True, comment="Arrivée réelle (heure locale station, résolue depuis HH:MM) ; obligatoire si present/late, interdite sinon.")
+    departedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True, comment="Départ réel (heure locale station) ; facultatif, postérieur à l'arrivée.")
+    reason: Mapped[str | None] = mapped_column(String(300), nullable=True, comment="Motif (obligatoire pour absent_justified, facultatif pour absent_unjustified et late, interdit sinon).")
+    note: Mapped[str | None] = mapped_column(String(300), nullable=True, comment="Note libre facultative.")
+    declaredByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Auteur de la dernière modification de cette ligne.")
+    declaredAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Horodatage serveur de la dernière modification de cette ligne.")
+    changeReason: Mapped[str | None] = mapped_column(Text, nullable=True, comment="Raison d'une correction faite alors que le tour est clos.")
+
+
+class ShiftHandover(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Passation d'un tour (scénario B2) : ce que le tour SORTANT laisse au
+    suivant. Ancrée à l'occurrence sortante (le tour suivant peut ne pas exister),
+    créée au premier enregistrement. Signature = dernier enregistrement par
+    l'utilisateur authentifié ; prise de connaissance = trace de lecture du RT
+    entrant (pas un accord sur le contenu) et non bloquante."""
+
+    __tablename__ = "zyloLiquidShiftHandover"
+    __table_args__ = (
+        UniqueConstraint("occurrenceId", name="uq_zlShiftHandover_occurrence"),
+        CheckConstraint("\"lifecycleStatus\" IN ('declared','locked')", name="ck_zlShiftHandover_lifecycleStatus"),
+        {"comment": "Passation d'un tour sortant au suivant (une par occurrence) : signature, case « rien à signaler », prise de connaissance."},
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True)
+    occurrenceId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidShiftOccurrence.id", ondelete="RESTRICT"), nullable=False,
+        comment="Occurrence SORTANTE : la passation est ce que ce tour laisse au suivant.",
+    )
+    nothingToReport: Mapped[bool] = mapped_column(nullable=False, server_default="false", comment="« Rien à signaler » explicite : vrai exige zéro ligne, faux exige au moins une ligne.")
+    version: Mapped[int] = mapped_column(nullable=False, server_default="1", comment="Incrémentée à chaque enregistrement ; verrou optimiste (409 handover_changed).")
+    firstSignedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Auteur du premier enregistrement (jamais modifié).")
+    firstSignedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Horodatage serveur du premier enregistrement (jamais modifié).")
+    lastSignedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Signature : auteur du dernier enregistrement.")
+    lastSignedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Signature : horodatage serveur du dernier enregistrement.")
+    receivedByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, comment="Personne ayant pris connaissance (dernière prise) ; NULL = pas encore reçue.")
+    receivedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Horodatage serveur de la dernière prise de connaissance ; la première reste dans l'audit.")
+    receivingOccurrenceId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidShiftOccurrence.id", ondelete="SET NULL"), nullable=True,
+        comment="Occurrence du tour suivant au moment de la prise de connaissance ; NULL si aucun tour suivant.",
+    )
+    lifecycleStatus: Mapped[str] = mapped_column(String(10), nullable=False, server_default="declared", comment="declared | locked (tour sortant validé, E1).")
+
+
+class ShiftHandoverItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Ligne de passation (scénario B2) : consigne (`instruction`), anomalie en
+    cours (`open_issue`, persiste au niveau STATION jusqu'à être réglée) ou
+    information (`info`). Texte écrit par une personne : jamais généré par le
+    système, jamais interprété. Une consigne du gérant est une ligne `instruction`
+    dont `authorRole` = `station_admin` (pas de table séparée)."""
+
+    __tablename__ = "zyloLiquidShiftHandoverItem"
+    __table_args__ = (
+        CheckConstraint("kind IN ('instruction','open_issue','info')", name="ck_zlShiftHandoverItem_kind"),
+        CheckConstraint("category IN ('pump','tank','delivery','price_credit','safety','staff','customer','report_feedback','other')", name="ck_zlShiftHandoverItem_category"),
+        CheckConstraint("importance IN ('normal','high')", name="ck_zlShiftHandoverItem_importance"),
+        CheckConstraint("\"pumpId\" IS NULL OR category = 'pump'", name="ck_zlShiftHandoverItem_pump_only_category_pump"),
+        CheckConstraint("\"tankId\" IS NULL OR category = 'tank'", name="ck_zlShiftHandoverItem_tank_only_category_tank"),
+        CheckConstraint("(status IS NOT NULL) = (kind = 'open_issue')", name="ck_zlShiftHandoverItem_status_iff_open_issue"),
+        CheckConstraint("status IS NULL OR status IN ('open','closed')", name="ck_zlShiftHandoverItem_status"),
+        CheckConstraint("\"closedAt\" IS NULL OR status = 'closed'", name="ck_zlShiftHandoverItem_closed_needs_status"),
+        CheckConstraint(
+            "status IS DISTINCT FROM 'closed' OR (\"closedAt\" IS NOT NULL AND \"closedByUserId\" IS NOT NULL AND resolution IS NOT NULL)",
+            name="ck_zlShiftHandoverItem_closed_needs_resolution",
+        ),
+        Index("ix_zlShiftHandoverItem_open_issues", "handoverId", postgresql_where=text("status = 'open'")),
+        {"comment": "Ligne de passation : consigne, anomalie en cours (niveau station jusqu'à réglée) ou information, écrite par une personne."},
+    )
+
+    handoverId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftHandover.id", ondelete="CASCADE"), nullable=False, index=True)
+    position: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="0", comment="Ordre de saisie dans le tableau (affichage).")
+    kind: Mapped[str] = mapped_column(String(12), nullable=False, comment="instruction (consigne) | open_issue (anomalie en cours) | info (information).")
+    category: Mapped[str] = mapped_column(String(20), nullable=False, comment="pump | tank | delivery | price_credit | safety | staff | customer | report_feedback | other.")
+    pumpId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidPump.id", ondelete="RESTRICT"), nullable=True, index=True, comment="Pompe concernée (catégorie pump) ; une pompe désactivée reste choisissable.")
+    tankId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="RESTRICT"), nullable=True, index=True, comment="Cuve concernée (catégorie tank).")
+    description: Mapped[str] = mapped_column(Text, nullable=False, comment="Texte libre factuel (3 à 1000 caractères), jamais interprété par le système.")
+    importance: Mapped[str] = mapped_column(String(10), nullable=False, server_default="normal", comment="normal | high.")
+    status: Mapped[str | None] = mapped_column(String(10), nullable=True, comment="open_issue seulement : open puis closed ; NULL pour les autres types.")
+    closedByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, comment="Auteur du règlement de l'anomalie.")
+    closedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Horodatage serveur du règlement de l'anomalie.")
+    resolution: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="Comment l'anomalie a été réglée (obligatoire à la clôture).")
+    authorUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Auteur de la ligne.")
+    authorRole: Mapped[str] = mapped_column(String(30), nullable=False, comment="Rôle de l'auteur à l'écriture : station_admin (gérant/direction) ou shift_manager ; mémorisé pour afficher « consigne du gérant ».")
+    declaredAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Horodatage serveur du dernier enregistrement de la ligne.")
+    addedAfterReceipt: Mapped[bool] = mapped_column(nullable=False, server_default="false", comment="Vrai si ajoutée après la prise de connaissance (affichée « complément »).")
+    changeReason: Mapped[str | None] = mapped_column(Text, nullable=True, comment="Raison d'une correction faite alors que la passation est déjà reçue.")
+
+
+class ShiftReport(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Rapport de tour (scénario B3) : UN par occurrence, créé à l'ouverture du tour
+    dans la même transaction que le passage `planned -> opened`. Station, journée et
+    tour sont COPIÉS de l'occurrence (jamais resynchronisés). Le RT prévu (planning)
+    et le RT réel (en-tête) sont conservés côte à côte (PC-40). D1 à D8 ajouteront
+    leurs colonnes ; B3 ne crée que celles dont il a besoin. Le statut du rapport
+    suit celui de l'occurrence."""
+
+    __tablename__ = "zyloLiquidShiftReport"
+    __table_args__ = (
+        UniqueConstraint("occurrenceId", name="uq_zlShiftReport_occurrence"),
+        Index("ix_zlShiftReport_station_date", "stationId", "shiftDate"),
+        CheckConstraint("\"closingPhase\" IN ('open','ready_to_close')", name="ck_zlShiftReport_closingPhase"),
+        {"comment": "Rapport de tour d'une station (un par occurrence), créé à l'ouverture du tour : en-tête, responsable de tour prévu et réel."},
+    )
+
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True)
+    occurrenceId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidShiftOccurrence.id", ondelete="RESTRICT"), nullable=False, comment="Tour (occurrence A5) dont ce rapport est le rapport ; un seul rapport par tour."
+    )
+    shiftDate: Mapped[date] = mapped_column(Date, nullable=False, comment="Journée du rapport = date de début du tour (copie de l'occurrence).")
+    shiftNumber: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="Copie du numéro du tour.")
+    shiftName: Mapped[str] = mapped_column(String(100), nullable=False, comment="Copie du nom du tour.")
+    startTime: Mapped[str] = mapped_column(String(5), nullable=False, comment="Copie de l'heure de début (HH:MM).")
+    endTime: Mapped[str] = mapped_column(String(5), nullable=False, comment="Copie de l'heure de fin (HH:MM).")
+    responsibleUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Responsable de tour RÉEL du rapport (en-tête).")
+    responsiblePhone: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="Téléphone du responsable copié du compte ou saisi à l'ouverture ; jamais inventé.")
+    plannedResponsibleUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, comment="Responsable de tour PRÉVU au planning (A5) ; nul si aucun (trace prévu vs réel).")
+    openedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Utilisateur qui a ouvert le tour (peut être le gérant).")
+    openedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Horodatage serveur de l'ouverture (UTC).")
+    # --- Colonnes ajoutées par D1 (index de fermeture des pompes) ---
+    closingVersion: Mapped[int] = mapped_column(nullable=False, server_default="0", comment="Version du bloc « fermeture des pompes » (D1) : 0 tant que rien n'est enregistré, +1 à chaque enregistrement ; verrou optimiste (409 closing_version_changed) et base de l'état « à recalculer » de D2/D3.")
+    closingPhase: Mapped[str] = mapped_column(String(20), nullable=False, server_default="open", comment="open (en cours) | ready_to_close (index de fermeture enregistrés, D1). La fermeture définitive du tour (statut `closed` de l'occurrence) reste D7 : cette phase ne ferme rien.")
+    closingLastRecordedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Horodatage serveur du dernier enregistrement D1 (nul tant que rien n'est enregistré).")
+    closingLastRecordedByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, comment="Auteur du dernier enregistrement D1 (RT ou gérant à sa place).")
+    # --- Colonnes ajoutées par D3 (caisse par pompiste) ---
+    cashVersion: Mapped[int] = mapped_column(nullable=False, server_default="0", comment="Version du bloc « caisse par pompiste » (D3) : 0 tant que rien n'est enregistré, +1 à chaque enregistrement ; verrou optimiste (409 cash_version_changed).")
+    cashLastRecordedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Horodatage serveur du dernier enregistrement D3 (nul tant que rien n'est enregistré).")
+    cashLastRecordedByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, comment="Auteur du dernier enregistrement D3 (RT ou gérant à sa place) ; sert au message de conflit de version.")
+
+
+class ShiftReportPumpLine(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Ligne de pompe d'un rapport (scénario B3) : UNE par pompe ACTIVE à l'ouverture
+    (ou ajoutée explicitement en cours de tour). Numéro, nom, cuve et produit sont un
+    INSTANTANÉ : renommer le produit ou changer la cuve plus tard n'altère pas le
+    rapport. `openingSource` garde l'origine de l'index pour que D1 sache quand une
+    exception (compteur remplacé/remis à zéro) est légitime. Les colonnes `closing*`
+    sont réservées à D1 (aucun code B3 ne les écrit) : elles alimentent le report
+    vers le tour suivant (`get_last_closing_for_pump`)."""
+
+    __tablename__ = "zyloLiquidShiftReportPumpLine"
+    __table_args__ = (
+        UniqueConstraint("reportId", "pumpId", name="uq_zlShiftReportPumpLine_report_pump"),
+        CheckConstraint("\"openingSource\" IN ('carried','initial','continuity_break')", name="ck_zlShiftReportPumpLine_openingSource"),
+        CheckConstraint("\"openingIndex\" >= 0", name="ck_zlShiftReportPumpLine_openingIndex_positive"),
+        CheckConstraint("\"openingSource\" = 'continuity_break' OR (\"continuityBreakReason\" IS NULL AND \"continuityBreakNote\" IS NULL)", name="ck_zlShiftReportPumpLine_break_only_on_break"),
+        CheckConstraint("\"counterEvent\" IN ('none','rollover','replaced')", name="ck_zlShiftReportPumpLine_counterEvent"),
+        CheckConstraint("(\"exitsLiters\" IS NULL OR \"exitsLiters\" >= 0) AND (\"tankReturnLiters\" IS NULL OR \"tankReturnLiters\" >= 0)", name="ck_zlShiftReportPumpLine_exits_nonneg"),
+        {"comment": "Ligne de pompe d'un rapport de tour : index d'ouverture (reporté, initial ou écart déclaré) et instantané des libellés de la pompe."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="CASCADE"), nullable=False, index=True)
+    pumpId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidPump.id", ondelete="RESTRICT"), nullable=False, index=True)
+    pumpNumber: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="Instantané du numéro de la pompe à l'ouverture.")
+    pumpName: Mapped[str] = mapped_column(String(100), nullable=False, comment="Instantané du nom généré de la pompe.")
+    tankId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="RESTRICT"), nullable=False, comment="Instantané de la cuve de la pompe à l'ouverture.")
+    fuelProductName: Mapped[str] = mapped_column(String(100), nullable=False, comment="Instantané du produit (via la cuve).")
+    openingIndex: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, comment="Index d'ouverture ; comparé en décimal exact, jamais en flottant.")
+    openingSource: Mapped[str] = mapped_column(String(20), nullable=False, comment="carried (reporté de la fermeture précédente) | initial (premier tour de la pompe, saisi) | continuity_break (écart déclaré avec motif).")
+    carriedIndex: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="Fermeture précédente que le serveur avait calculée (écart = openingIndex - carriedIndex) ; nul si initial.")
+    previousLineId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReportPumpLine.id", ondelete="SET NULL"), nullable=True, comment="Ligne du tour précédent dont la fermeture a été reportée (traçabilité) ; nul si initial."
+    )
+    continuityBreakReason: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="meter_replaced | meter_reset | carry_error | other (écart de continuité seulement).")
+    continuityBreakNote: Mapped[str | None] = mapped_column(String(300), nullable=True, comment="Précision de l'écart de continuité (10 caractères minimum).")
+    addedDuringShift: Mapped[bool] = mapped_column(nullable=False, server_default="false", comment="Vrai si la ligne a été ajoutée explicitement après l'ouverture (« Ajouter une pompe au tour »).")
+    lockedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Verrouillage de l'ouverture à la création ; correction possible seulement tant que le tour est ouvert (initial/écart).")
+    closingIndex: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="Index de fermeture : RÉSERVÉ à D1 (non écrit par B3) ; sert de source au report du tour suivant.")
+    # --- Colonnes ajoutées par D1 (`closingIndex` ci-dessus a été créée par B3 et est écrite par D1) ---
+    closingReadWithUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, comment="Personne avec qui l'index de fermeture a été lu à deux (pompiste de la pompe ou chef d'équipe) ; déclaratif, jamais une signature.")
+    closingReadAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Horodatage SERVEUR de l'enregistrement de l'index de fermeture (≠ heure réelle de lecture, jamais prétendu).")
+    closingRecordedByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, comment="Qui a saisi l'index de fermeture (RT ou gérant à sa place).")
+    exitsLiters: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True, comment="Sorties : litres passés dans la pompe sans être vendus (test, étalonnage) ; nul = non déclaré = 0 (méthode PC-04 provisoire).")
+    tankReturnLiters: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True, comment="Retours en cuve : litres remis en cuve (≤ sorties) ; n'agissent que sur le stock (D2), jamais sur les litres vendus (PC-04).")
+    exitsNote: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Observation des sorties ; obligatoire si les sorties sont > 0.")
+    counterEvent: Mapped[str] = mapped_column(String(10), nullable=False, server_default="none", comment="none | rollover (compteur remis à zéro après 999 999,99) | replaced (compteur remplacé).")
+    counterEventNote: Mapped[str | None] = mapped_column(String(300), nullable=True, comment="Précision de l'événement compteur (10 caractères minimum) ; obligatoire si counterEvent ≠ none.")
+    replacedOldFinalIndex: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="Dernier index de l'ancien compteur (compteur remplacé seulement).")
+    replacedNewStartIndex: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="Index de départ du nouveau compteur (compteur remplacé seulement).")
+    zeroSaleConfirmed: Mapped[bool] = mapped_column(nullable=False, server_default="false", comment="Vrai si le RT a confirmé « pompe sans vente » (fermeture = ouverture) pour cette ligne.")
+    soldLiters: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="Litres vendus CALCULÉS par le serveur : (fermeture - ouverture) - sorties (méthode PC-04 provisoire, formules spéciales si événement compteur) ; nul tant que l'index de fermeture n'est pas saisi.")
+    unitPriceAmount: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True, comment="Prix unitaire en vigueur à l'OUVERTURE du tour, COPIÉ à l'enregistrement (changer le prix plus tard n'altère pas le rapport) ; nul = prix non disponible (jamais un prix inventé).")
+    unitPriceCurrencyId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("currency.id", ondelete="RESTRICT"), nullable=True, comment="Devise du prix copié.")
+    unitPriceEffectiveFrom: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True, comment="Date d'effet du prix retenu (traçabilité, avertissement « prix modifié pendant le tour »).")
+    amount: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True, comment="Montant de la ligne = litres vendus × prix copié, arrondi à 2 décimales ; nul si le prix est non disponible.")
+
+
+class ShiftReportPumpLineCorrection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Rature d'une valeur déjà enregistrée d'une ligne de pompe (scénario D1) : UNE ligne par champ modifié
+    (`closingIndex`, `exitsLiters`, `tankReturnLiters`). L'ancienne valeur est CONSERVÉE (jamais d'écrasement
+    silencieux), avec motif et « paraphé par » obligatoires (cahier §5.3 : « une rature est paraphée »)."""
+
+    __tablename__ = "zyloLiquidShiftReportPumpLineCorrection"
+    __table_args__ = (
+        CheckConstraint("\"field\" IN ('closingIndex','exitsLiters','tankReturnLiters')", name="ck_zlShiftReportPumpLineCorrection_field"),
+        CheckConstraint("\"reasonCode\" IN ('read_error','digits_swapped','decimal_forgotten','read_before_end','other')", name="ck_zlShiftReportPumpLineCorrection_reason"),
+        {"comment": "Historique des ratures d'une ligne de pompe du rapport (index de fermeture, sorties, retours) : ancienne valeur conservée, motif, paraphé par."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="RESTRICT"), nullable=False, index=True)
+    pumpLineId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReportPumpLine.id", ondelete="RESTRICT"), nullable=False, index=True, comment="Ligne de pompe corrigée.")
+    field: Mapped[str] = mapped_column(String(20), nullable=False, comment="Champ modifié : closingIndex | exitsLiters | tankReturnLiters.")
+    oldValue: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="Valeur avant la correction (conservée, jamais écrasée) ; nulle si le champ n'était pas déclaré.")
+    newValue: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="Valeur après la correction ; nulle si le champ est vidé.")
+    reasonCode: Mapped[str] = mapped_column(String(20), nullable=False, comment="Motif de la liste : read_error | digits_swapped | decimal_forgotten | read_before_end | other.")
+    reasonNote: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Précision du motif (10 caractères minimum si « other »).")
+    initialedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="« Paraphé par » : personne qui a confirmé la correction (déclaratif, pompiste ou chef d'équipe).")
+    recordedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Qui a saisi la correction (RT ou gérant).")
+    recordedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Horodatage serveur de la correction.")
+    closingVersion: Mapped[int] = mapped_column(nullable=False, comment="Version du bloc « fermeture des pompes » produite par cette correction.")
+
+
+class ShiftReportTankLine(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Ligne de cuve d'un rapport (scénario B3) : UNE par cuve ACTIVE à l'ouverture.
+    Stock d'ouverture en LITRES (hauteur et table de jaugeage hors B3, PC-35), reporté
+    du stock réel de fermeture du tour précédent (D2) ou saisi (`initial`). La colonne
+    `closingRealStockLiters` est RÉSERVÉE à D2 (aucun code B3 ne l'écrit)."""
+
+    __tablename__ = "zyloLiquidShiftReportTankLine"
+    __table_args__ = (
+        UniqueConstraint("reportId", "tankId", name="uq_zlShiftReportTankLine_report_tank"),
+        CheckConstraint("\"openingStockSource\" IN ('previous_real_stock','initial')", name="ck_zlShiftReportTankLine_openingStockSource"),
+        CheckConstraint("\"openingStockLiters\" >= 0", name="ck_zlShiftReportTankLine_openingStock_positive"),
+        CheckConstraint("\"realStockSource\" IS NULL OR \"realStockSource\" IN ('calibration_table','paper_table')", name="ck_zlShiftReportTankLine_realStockSource"),
+        {"comment": "Ligne de cuve d'un rapport de tour : stock d'ouverture en litres (reporté ou initial) et instantané des libellés de la cuve."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="CASCADE"), nullable=False, index=True)
+    tankId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidTank.id", ondelete="RESTRICT"), nullable=False, index=True)
+    tankNumber: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="Instantané du numéro de la cuve.")
+    tankName: Mapped[str] = mapped_column(String(100), nullable=False, comment="Instantané du libellé de la cuve.")
+    fuelProductName: Mapped[str] = mapped_column(String(100), nullable=False, comment="Instantané du produit de la cuve.")
+    capacityLiters: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, comment="Instantané de la capacité de la cuve (litres).")
+    openingStockLiters: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, comment="Stock d'ouverture en litres, entre 0 et la capacité.")
+    openingStockSource: Mapped[str] = mapped_column(String(20), nullable=False, comment="previous_real_stock (stock réel de fermeture du tour précédent, D2) | initial (saisi).")
+    previousTankLineId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReportTankLine.id", ondelete="SET NULL"), nullable=True, comment="Ligne de cuve du tour précédent reportée ; nulle si initial."
+    )
+    closingRealStockLiters: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True, comment="Stock réel de fermeture en litres : RÉSERVÉ à D2 (non écrit par B3) ; source du report du tour suivant.")
+    # --- D2 : jaugeage de fermeture (la colonne closingRealStockLiters ci-dessus est celle de B3, non recréée) ---
+    gaugingDeclarationId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidManualGaugingDeclaration.id", ondelete="SET NULL"), nullable=True, comment="D2 : ManualGaugingDeclaration COURANTE de la cuve pour ce tour (la hauteur, la méthode et le rapprochement restent portés par la déclaration)."
+    )
+    gaugingHeightMm: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True, comment="D2 : copie de declaredHeightMm (toujours lue à la règle, même si les litres viennent de la table papier) pour la lecture rapide du rapport.")
+    gaugedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="D2 : heure de la mesure (UTC) ; = eventAt de la déclaration.")
+    realStockSource: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="D2 : calibration_table (hauteur convertie par la table de jaugeage) | paper_table (litres lus sur la table papier, table absente).")
+    paperTableReference: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="D2 : référence du document papier, obligatoire si realStockSource = paper_table.")
+    measuredByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, comment="D2 : préleveur (déclaratif).")
+    assistedByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, comment="D2 : aide à la règle (facultatif, déclaratif).")
+    receivedLiters: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True, comment="D2 : litres reçus (réceptions DÉCLARÉES depuis l'ouverture) figés à l'enregistrement ; jamais la télémétrie.")
+    soldOutLiters: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="D2 : litres vendus par les pompes de la cuve (D1) figés à l'enregistrement ; nul si D1 pas encore enregistré.")
+    nonSaleOutLiters: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="D2 : sorties hors vente nettes (somme exits - retours en cuve des pompes, D1) ; nul si D1 pas encore enregistré.")
+    theoreticalStockLiters: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="D2 : ouverture + reçu - vendu - sorties hors vente nettes ; nul tant que D1 n'est pas enregistré (jamais inventé).")
+    stockVarianceLiters: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="D2 : écart de stock = réel - théorique, signé (positif = excédent, négatif = manquant).")
+    basedOnClosingVersion: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="D2 : version de la fermeture des pompes (D1) sur laquelle repose le calcul ; différente de l'actuelle = ligne à recalculer.")
+    gaugingVersion: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", comment="D2 : verrou optimiste du bloc jaugeage (identique sur toutes les lignes du rapport, incrémenté à chaque enregistrement).")
+    gaugingUpdatedByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, comment="D2 : dernier utilisateur ayant enregistré le jaugeage (message de conflit de version).")
+    gaugingUpdatedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="D2 : horodatage (UTC) du dernier enregistrement du jaugeage.")
+    varianceNote: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="D2 : explication facultative de l'écart de stock.")
+    lastCorrectionInitialedByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, comment="D2 : « paraphé par » de la dernière rature (correction d'une mesure enregistrée).")
+
+
+class ShiftPumpAssignmentSheet(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Confirmation de l'affectation de départ des pompistes d'un rapport de tour
+    (scénario B4) : UNE par rapport, créée à la confirmation (« Enregistrer tout »)
+    uniquement ; avant cela, la lecture renvoie un brouillon calculé depuis le
+    planning A5, rien n'est stocké. Sa présence = verrou de l'affectation de départ
+    (tout changement ultérieur passe par B5). `version` sert au verrou optimiste
+    (409 `assignment_changed`) ; B5 l'incrémente à chaque mouvement de personnel."""
+
+    __tablename__ = "zyloLiquidShiftPumpAssignmentSheet"
+    __table_args__ = (
+        UniqueConstraint("reportId", name="uq_zlShiftPumpAssignmentSheet_report"),
+        {"comment": "Confirmation (verrou) de l'affectation de départ des pompistes d'un rapport de tour ; une par rapport."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="RESTRICT"), nullable=False,
+        comment="Rapport de tour (B3) dont l'affectation de départ est confirmée.",
+    )
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(nullable=False, server_default="1", comment="Incrémentée à chaque modification de l'affectation (B4 : 1 à la confirmation ; B5 ensuite) ; verrou optimiste.")
+    plannedDeciderUserId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True,
+        comment="Chef d'équipe PRÉVU au planning (A5) à la confirmation ; figé, jamais écrasé.",
+    )
+    decidedByUserId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True,
+        comment="Chef d'équipe décideur (information, non authentifiante : il décide oralement, le RT saisit).",
+    )
+    confirmedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Horodatage serveur de la confirmation (verrou).")
+    confirmedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Utilisateur qui a saisi et confirmé (RT ou gérant).")
+
+
+class ShiftPumpAssignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Segment d'affectation d'une pompe à un pompiste pendant un tour (scénario B4).
+    Chronologie par pompe : B4 ne crée que les segments de départ (`kind = start`) ;
+    B5 clôt un segment (`endsAt`) et en ouvre un autre sans jamais réécrire
+    l'original. PRÉVU (`plannedUserId`, copie de l'affectation A5 à la confirmation)
+    et RÉEL (`userId`) sont conservés côte à côte : l'écart n'est jamais écrasé."""
+
+    __tablename__ = "zyloLiquidShiftPumpAssignment"
+    __table_args__ = (
+        # Une pompe n'a qu'UN titulaire à un instant donné ; un pompiste peut tenir PLUSIEURS pompes
+        # (SOCADA : 6 pompistes pour 14 pompes) : aucune unicité (rapport, personne).
+        Index("uq_zlShiftPumpAssignment_current", "reportId", "pumpLineId", unique=True, postgresql_where=text('"endsAt" IS NULL')),
+        CheckConstraint(
+            "kind IN ('start','break_cover','break_return','replacement','late_arrival','reassignment')",
+            name="ck_zlShiftPumpAssignment_kind",
+        ),
+        # Seule une pompe « fermée pour ce tour » peut être sans pompiste (vérifié à la confirmation).
+        CheckConstraint('"userId" IS NOT NULL OR "closedForShift"', name="ck_zlShiftPumpAssignment_user_or_closed"),
+        CheckConstraint('NOT "closedForShift" OR ("userId" IS NULL AND note IS NOT NULL)', name="ck_zlShiftPumpAssignment_closed_needs_note_no_user"),
+        CheckConstraint('"endsAt" IS NULL OR "endsAt" >= "startsAt"', name="ck_zlShiftPumpAssignment_period"),
+        {"comment": "Segment d'affectation d'une pompe à un pompiste pendant un tour (chronologie ; prévu A5 et réel conservés)."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="RESTRICT"), nullable=False, index=True,
+    )
+    pumpLineId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReportPumpLine.id", ondelete="RESTRICT"), nullable=False, index=True,
+        comment="Ligne de pompe du rapport (B3) ; la pompe est celle de la ligne.",
+    )
+    pumpId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidPump.id", ondelete="RESTRICT"), nullable=False, index=True,
+        comment="Pompe (copie de la ligne, pour les requêtes par pompe).",
+    )
+    userId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, index=True,
+        comment="Pompiste RÉEL ; nul seulement si la pompe est fermée pour ce tour.",
+    )
+    plannedUserId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True,
+        comment="Pompiste PRÉVU (copie de l'affectation A5 de cette pompe), figé à la confirmation ; nul si aucun prévu. Jamais modifié.",
+    )
+    startsAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Début du segment ; segment de départ = ouverture du tour (la décision orale précède la saisie).")
+    endsAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Fin du segment ; nulle tant qu'il est en cours (renseignée par B5).")
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, server_default="start", comment="start (B4) | break_cover | break_return | replacement | late_arrival | reassignment (B5).")
+    startIndex: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="Index de la pompe au début du segment (index d'ouverture pour un segment de départ) ; sert à B5 pour répartir les litres.")
+    closedForShift: Mapped[bool] = mapped_column(nullable=False, server_default="false", comment="Pompe fermée pour ce tour : aucun pompiste, observation obligatoire.")
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Observation (obligatoire si la pompe est fermée).")
+    recordedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Horodatage serveur de la saisie (≠ startsAt : la décision orale précède la saisie).")
+    recordedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Qui a saisi (RT, ou gérant à sa place).")
+    # --- Colonnes ajoutées par B5 (mouvements de personnel en cours de tour) ---
+    movementId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidShiftStaffMovement.id", ondelete="RESTRICT"), nullable=True, index=True,
+        comment="Mouvement de personnel (B5) qui a créé ce segment ; nul pour un segment de départ (B4).",
+    )
+    closedByMovementId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidShiftStaffMovement.id", ondelete="RESTRICT"), nullable=True, index=True,
+        comment="Mouvement (B5) qui a fermé ce segment (renseigne endsAt) ; remis à nul si ce mouvement est annulé.",
+    )
+    coversUserId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True,
+        comment="Pompiste remplacé ou en pause que ce segment couvre (break_cover, replacement) ; nul sinon.",
+    )
+    holderIsTeamLead: Mapped[bool] = mapped_column(nullable=False, server_default="false", comment="Vrai si le titulaire du segment est le chef d'équipe (remplaçant autorisé, PC-52) : marqueur figé à la création.")
+    cancelledAt: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Renseigné quand le mouvement qui a créé ce segment est annulé : le segment est neutralisé (endsAt = startsAt), jamais supprimé, et exclu de la chronologie.",
+    )
+
+
+class ShiftStaffMovement(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Mouvement de personnel en cours de tour (scénario B5) : une ACTION de l'utilisateur
+    (pause, retour de pause, remplacement, réaffectation) pouvant toucher plusieurs pompes.
+    Il ne modifie jamais l'affectation de départ (B4) ni le planning (A5) : il ferme les
+    segments en cours (`ShiftPumpAssignment.endsAt`) et en ouvre d'autres, de sorte que la
+    chronologie de chaque pompe reste continue et que prévu et réel restent côte à côte.
+    Un mouvement n'est jamais supprimé : il est seulement annulé (`cancelledAt`)."""
+
+    __tablename__ = "zyloLiquidShiftStaffMovement"
+    __table_args__ = (
+        CheckConstraint("kind IN ('break_start','break_end','replacement','reassignment')", name="ck_zlShiftStaffMovement_kind"),
+        CheckConstraint(
+            "reason IS NULL OR reason IN ('absence_unforeseen','left_during_shift','rebalancing','late_arrival','pump_breakdown','other')",
+            name="ck_zlShiftStaffMovement_reason",
+        ),
+        CheckConstraint(
+            "(\"cancelledAt\" IS NULL) = (\"cancelledByUserId\" IS NULL) AND (\"cancelledAt\" IS NULL) = (\"cancelReason\" IS NULL)",
+            name="ck_zlShiftStaffMovement_cancel_complete",
+        ),
+        Index("ix_zlShiftStaffMovement_report_occurred", "reportId", "occurredAt"),
+        {"comment": "Mouvement de personnel en cours de tour (pause, retour, remplacement, réaffectation) ; jamais supprimé, seulement annulé."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="RESTRICT"), nullable=False, index=True)
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, comment="break_start | break_end | replacement | reassignment.")
+    occurredAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Heure RÉELLE du mouvement (≤ maintenant, ≥ ouverture du tour) ; ≠ recordedAt car la décision orale précède la saisie.")
+    recordedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Horodatage serveur de la saisie.")
+    recordedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Qui a saisi (RT ou gérant) ; le chef d'équipe décide oralement, il n'écrit pas.")
+    subjectUserId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, index=True,
+        comment="Pompiste concerné : celui qui part en pause, revient ou est remplacé ; pour une réaffectation, le NOUVEAU titulaire.",
+    )
+    reason: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="Motif (remplacement et réaffectation) ; nul pour une pause (imposé par la nature).")
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Observation ; obligatoire si motif « other » ou pompe fermée pendant la pause.")
+    breakStartMovementId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zyloLiquidShiftStaffMovement.id", ondelete="RESTRICT"), nullable=True, index=True,
+        comment="Pour un break_end : la pause terminée.",
+    )
+    cancelledAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Annulation du mouvement (jamais de suppression).")
+    cancelledByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True)
+    cancelReason: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Motif obligatoire de l'annulation.")
+
+
+class ShiftReportCashLine(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Caisse d'UN pompiste pour UN rapport de tour (scénario D3) : ventes attribuées (calculées par le serveur à partir
+    de D1 et de l'affectation B4/B5), déductions saisies (bons de crédit, paiements mobiles, autres : `manual` tant que
+    C2/C3/C5/C9 n'existent pas), comptage pompiste et recomptage RT, montant théorique, remis et écart signé
+    (remis - théorique). `remittedAmount` = `managerRecountedAmount`. Théorique et écart sont NULS (« non calculé »)
+    quand la part du pompiste dépend d'une pompe partagée non répartie ou d'un prix absent : jamais une valeur estimée.
+    Aucun lien avec `ShiftCashDeclaration` (par cuve) ni avec `Sale` (PC-15)."""
+
+    __tablename__ = "zyloLiquidShiftReportCashLine"
+    __table_args__ = (
+        UniqueConstraint("reportId", "userId", name="uq_zlShiftReportCashLine_report_user"),
+        CheckConstraint("\"roleMarker\" IN ('attendant','team_lead')", name="ck_zlShiftReportCashLine_roleMarker"),
+        CheckConstraint("\"deductionsSource\" IN ('manual','computed')", name="ck_zlShiftReportCashLine_deductionsSource"),
+        CheckConstraint("\"varianceNature\" IS NULL OR \"varianceNature\" IN ('surplus','shortage','balanced')", name="ck_zlShiftReportCashLine_varianceNature"),
+        CheckConstraint(
+            "\"creditVouchersAmount\" >= 0 AND \"mobilePaymentsAmount\" >= 0 AND \"otherDeductionsAmount\" >= 0 AND \"attendantCountedAmount\" >= 0 AND \"managerRecountedAmount\" >= 0",
+            name="ck_zlShiftReportCashLine_amounts_nonneg",
+        ),
+        {"comment": "Caisse d'un pompiste pour un rapport de tour (D3) : ventes attribuées, déductions, comptage pompiste et RT, théorique, remis, écart signé."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="RESTRICT"), nullable=False, index=True)
+    userId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, index=True, comment="Personne ayant tenu au moins une pompe pendant le tour (chronologie B4/B5).")
+    userNameSnapshot: Mapped[str] = mapped_column(String(200), nullable=False, comment="Nom copié à l'enregistrement : le rapport reste lisible si le personnel change.")
+    roleMarker: Mapped[str] = mapped_column(String(15), nullable=False, server_default="attendant", comment="attendant | team_lead (chef d'équipe remplaçant, PC-46/PC-52 : ligne marquée « CE »).")
+    attributedLiters: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="Litres vendus attribués au pompiste (règle PC-05) ; nul si une de ses pompes est partagée non répartie.")
+    salesValue: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True, comment="Valeur des ventes attribuées (somme des montants D1 attribués, prix copié) ; nul si non calculable (pompe partagée non répartie, prix absent).")
+    creditVouchersAmount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, server_default="0", comment="Total des bons de crédit signés remis par le pompiste (saisi à la main tant que C2 n'existe pas).")
+    mobilePaymentsAmount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, server_default="0", comment="Total des paiements mobiles encaissés par le pompiste (saisi à la main tant que C3 n'existe pas).")
+    otherDeductionsAmount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, server_default="0", comment="Autres déductions (bons valeur, dépenses autorisées) ; note obligatoire si > 0.")
+    otherDeductionsNote: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Explication des autres déductions.")
+    deductionsSource: Mapped[str] = mapped_column(String(10), nullable=False, server_default="manual", comment="manual (saisie du RT) tant que C2/C3/C5/C9 n'existent pas ; computed ensuite (cellule verrouillée).")
+    theoreticalAmount: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True, comment="Montant théorique dû = valeur des ventes - déductions ; nul (« non calculé ») si la valeur des ventes est inconnue.")
+    attendantCountedAmount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, comment="Espèces comptées par le pompiste.")
+    managerRecountedAmount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, comment="Espèces recomptées par le RT devant le pompiste.")
+    remittedAmount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, comment="Remis = montant recompté par le RT (ce qu'il a réellement reçu).")
+    countsMatch: Mapped[bool] = mapped_column(nullable=False, comment="Vrai si comptage pompiste = recomptage RT.")
+    varianceAmount: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True, comment="Écart signé = remis - théorique (positif = excédent, négatif = manquant) ; nul si le théorique n'est pas calculé.")
+    varianceNature: Mapped[str | None] = mapped_column(String(10), nullable=True, comment="surplus (> 0) | shortage (< 0) | balanced (= 0) ; nul si non calculé.")
+    documentsHandedOver: Mapped[bool] = mapped_column(nullable=False, server_default="false", comment="Bons de crédit et notes de paiement mobile physiquement remis (contrôlé en D6).")
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Observation ; obligatoire si les deux comptages diffèrent.")
+    basedOnClosingVersion: Mapped[int] = mapped_column(nullable=False, comment="Version de la fermeture des pompes (D1) sur laquelle repose le calcul ; différente de l'actuelle = à recalculer.")
+    recordedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Qui a saisi (RT, ou gérant à sa place).")
+    recordedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Horodatage serveur du dernier enregistrement de la ligne.")
+
+
+class ShiftReportPumpShare(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Répartition MANUELLE d'une pompe partagée sans index intermédiaire (scénario D3, PC-05) : une ligne par (ligne de
+    pompe, pompiste). C'est une déclaration humaine TRACÉE (motif obligatoire, auteur, date) : le système n'estime jamais
+    une part. La répartition automatique par index de changement (B5) est calculée à la lecture, jamais stockée ici."""
+
+    __tablename__ = "zyloLiquidShiftReportPumpShare"
+    __table_args__ = (
+        UniqueConstraint("pumpLineId", "userId", name="uq_zlShiftReportPumpShare_line_user"),
+        CheckConstraint("\"source\" IN ('manual','segment_index')", name="ck_zlShiftReportPumpShare_source"),
+        CheckConstraint("\"litersShare\" >= 0", name="ck_zlShiftReportPumpShare_liters_nonneg"),
+        {"comment": "Répartition manuelle (déclarée et tracée) des litres d'une pompe partagée entre ses pompistes (D3)."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="RESTRICT"), nullable=False, index=True)
+    pumpLineId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReportPumpLine.id", ondelete="RESTRICT"), nullable=False, index=True, comment="Ligne de pompe du rapport.")
+    userId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Pompiste ayant tenu cette pompe (chronologie B4/B5).")
+    litersShare: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, comment="Litres attribués ; la somme des parts de la pompe égale ses litres vendus (D1).")
+    source: Mapped[str] = mapped_column(String(15), nullable=False, server_default="manual", comment="manual (déclaration du RT) | segment_index (réservé : calculé à la lecture, non stocké).")
+    reason: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Comment la répartition a été décidée (10 caractères minimum) ; obligatoire si manual.")
+    declaredByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Qui a saisi la répartition.")
+    declaredAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Horodatage serveur de la déclaration.")
+
+
+class ShiftReportCashLineCorrection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Rature d'une valeur déjà enregistrée d'une ligne de caisse (scénario D3) : UNE ligne par champ modifié. L'ancienne
+    valeur est CONSERVÉE (jamais d'écrasement silencieux), motif et « paraphé par » obligatoires ; aucune suppression."""
+
+    __tablename__ = "zyloLiquidShiftReportCashLineCorrection"
+    __table_args__ = (
+        CheckConstraint(
+            "\"field\" IN ('creditVouchersAmount','mobilePaymentsAmount','otherDeductionsAmount','attendantCountedAmount','managerRecountedAmount')",
+            name="ck_zlShiftReportCashLineCorrection_field",
+        ),
+        CheckConstraint("\"reasonCode\" IN ('count_error','entry_error','voucher_found','index_corrected','other')", name="ck_zlShiftReportCashLineCorrection_reason"),
+        {"comment": "Historique des ratures d'une ligne de caisse (comptage, déductions) : ancienne valeur conservée, motif, paraphé par."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="RESTRICT"), nullable=False, index=True)
+    cashLineId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReportCashLine.id", ondelete="RESTRICT"), nullable=False, index=True, comment="Ligne de caisse corrigée.")
+    field: Mapped[str] = mapped_column(String(25), nullable=False, comment="Champ modifié : creditVouchersAmount | mobilePaymentsAmount | otherDeductionsAmount | attendantCountedAmount | managerRecountedAmount.")
+    oldValue: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, comment="Valeur avant la correction (conservée, jamais écrasée).")
+    newValue: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, comment="Valeur après la correction.")
+    reasonCode: Mapped[str] = mapped_column(String(20), nullable=False, comment="Motif : count_error | entry_error | voucher_found | index_corrected | other.")
+    reasonNote: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Précision du motif (10 caractères minimum si « other »).")
+    initialedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="« Paraphé par » : personne qui a confirmé la correction (déclaratif).")
+    recordedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Qui a saisi la correction (RT ou gérant).")
+    recordedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Horodatage serveur de la correction.")
+    cashVersion: Mapped[int] = mapped_column(nullable=False, comment="Version du bloc caisse produite par cette correction.")
+
+
+class ShiftReportCashAdjustment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Réglages de caisse d'un rapport de tour (scénario D5) : UNE ligne par rapport, créée au premier enregistrement. Porte la
+    règle PC-03 (« ventes lubrifiants et boutique déduites » : par défaut OUI, désactivable avec motif) et la version du bloc
+    de saisie D5 (verrou optimiste : dépenses, règlements, règle). Aucune valeur calculée (A à H) n'est stockée ici."""
+
+    __tablename__ = "zyloLiquidShiftReportCashAdjustment"
+    __table_args__ = (
+        UniqueConstraint("reportId", name="uq_zlShiftReportCashAdjustment_report"),
+        CheckConstraint("\"deductRetainedSales\" OR \"deductRetainedSalesNote\" IS NOT NULL", name="ck_zlShiftReportCashAdjustment_note_if_off"),
+        {"comment": "Réglages de la caisse d'un rapport de tour (D5) : règle de déduction lubrifiants/boutique (PC-03) avec motif, version du bloc de saisie."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="RESTRICT"), nullable=False)
+    deductRetainedSales: Mapped[bool] = mapped_column(nullable=False, server_default="true", comment="Vrai (défaut) : les ventes de lubrifiants (rubrique 2) et de boutique (rubrique 4) sont comptées comme dépenses diverses (PC-03) ; faux : elles ne le sont plus (motif obligatoire).")
+    deductRetainedSalesNote: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Motif de la désactivation de la déduction (10 caractères minimum) ; nul tant que la règle est active.")
+    inputsVersion: Mapped[int] = mapped_column(nullable=False, server_default="0", comment="Version du bloc de saisie D5 : +1 à chaque enregistrement ; verrou optimiste (409 cash_inputs_version_changed).")
+    lastRecordedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Horodatage serveur du dernier enregistrement D5.")
+    lastRecordedByUserId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, comment="Auteur du dernier enregistrement D5 (RT ou gérant à sa place) ; sert au message de conflit.")
+
+
+class ShiftReportExpenseLine(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Dépense diverse SAISIE d'un rapport de tour (scénario D5, partagée plus tard avec C9). Les lignes « Lubrifiants » et
+    « Boutique » ne sont PAS stockées : elles sont calculées depuis les cumuls D4 quand la règle PC-03 est active."""
+
+    __tablename__ = "zyloLiquidShiftReportExpenseLine"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_zlShiftReportExpenseLine_amount_positive"),
+        CheckConstraint("\"receiptReference\" IS NOT NULL OR note IS NOT NULL", name="ck_zlShiftReportExpenseLine_receipt_or_note"),
+        {"comment": "Dépense diverse saisie d'un rapport de tour (D5) : libellé, montant > 0, justificatif ou note."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="RESTRICT"), nullable=False, index=True)
+    position: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="Ordre d'affichage (1, 2, 3…).")
+    label: Mapped[str] = mapped_column(String(150), nullable=False, comment="Libellé de la dépense (carburant du groupe, réparation…).")
+    amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, comment="Montant de la dépense, strictement positif, 2 décimales.")
+    receiptReference: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="N° du reçu / justificatif ; nul seulement si une note explique pourquoi il n'y en a pas.")
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Précision ; obligatoire sans justificatif.")
+    origin: Mapped[str] = mapped_column(String(10), nullable=False, server_default="manual", comment="manual (saisie du RT) ; réservé C9 (dépense de caisse en cours de tour).")
+    recordedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Qui a saisi la ligne (RT ou gérant à sa place).")
+    recordedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Horodatage serveur de l'enregistrement.")
+
+
+class ShiftReportSettlementLine(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Règlement VAL/CCT reçu pendant le tour (scénario D5) : la grandeur D de la caisse. Saisi (aucune autre source), avec
+    PROPOSITIONS lues dans `Payment` ; `paymentId` rattache la ligne à un `Payment` existant (jamais créé ni modifié ici) et
+    un `Payment` ne peut être compté qu'une seule fois (index unique)."""
+
+    __tablename__ = "zyloLiquidShiftReportSettlementLine"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_zlShiftReportSettlementLine_amount_positive"),
+        CheckConstraint("mode IN ('cash','cheque','loading_card')", name="ck_zlShiftReportSettlementLine_mode"),
+        CheckConstraint("\"commercialAccountId\" IS NOT NULL OR \"payerLabel\" IS NOT NULL", name="ck_zlShiftReportSettlementLine_payer"),
+        Index("uq_zlShiftReportSettlementLine_payment", "paymentId", unique=True, postgresql_where=text("\"paymentId\" IS NOT NULL")),
+        {"comment": "Règlement VAL/CCT reçu pendant un tour (D5) : client ou payeur libre, montant, mode, référence, paiement existant éventuel."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="RESTRICT"), nullable=False, index=True)
+    position: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="Ordre d'affichage (1, 2, 3…).")
+    commercialAccountId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidCommercialAccount.id", ondelete="RESTRICT"), nullable=True, comment="Compte client qui règle ; nul si le payeur est saisi en texte libre.")
+    payerLabel: Mapped[str | None] = mapped_column(String(150), nullable=True, comment="Payeur en texte libre (quand il n'y a pas de compte client).")
+    amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, comment="Montant du règlement, strictement positif, 2 décimales.")
+    mode: Mapped[str] = mapped_column(String(15), nullable=False, comment="cash (espèces) | cheque | loading_card (carte de chargement).")
+    reference: Mapped[str] = mapped_column(String(100), nullable=False, comment="Référence : n° de chèque, « PM SCT »…")
+    paymentId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidPayment.id", ondelete="RESTRICT"), nullable=True, comment="Paiement existant dont la ligne provient (proposition acceptée) ; lu, jamais modifié ; unique : un paiement ne compte qu'une fois.")
+    recordedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Qui a saisi la ligne (RT ou gérant à sa place).")
+    recordedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Horodatage serveur de l'enregistrement.")
+
+
+class ShiftReportSection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """État d'UNE rubrique 2 à 7 d'un rapport de tour (D4) : une ligne par (rapport, rubrique), créée au premier enregistrement.
+    L'enregistrement EST le brouillon (modifiable tant que le tour est ouvert) ; `version` = verrou optimiste (409). Le total est
+    CALCULÉ par le serveur à chaque enregistrement (jamais saisi) et recopié ici pour D5/D6. Une rubrique sans ligne ici est
+    « non commencée » : jamais une valeur par défaut."""
+
+    __tablename__ = "zyloLiquidShiftReportSection"
+    __table_args__ = (
+        UniqueConstraint("reportId", "sectionNumber", name="uq_zlShiftReportSection_report_number"),
+        CheckConstraint("\"sectionNumber\" BETWEEN 2 AND 7", name="ck_zlShiftReportSection_number"),
+        CheckConstraint("status IN ('not_started','saved','ras')", name="ck_zlShiftReportSection_status"),
+        CheckConstraint("\"detailMode\" IS NULL OR \"detailMode\" IN ('detailed','summary')", name="ck_zlShiftReportSection_detailMode"),
+        {"comment": "État d'une rubrique 2 à 7 d'un rapport de tour (D4) : statut, mode de détail, total calculé, version (verrou optimiste)."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="CASCADE"), nullable=False, index=True)
+    sectionNumber: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="Numéro de rubrique du rapport : 2 lubrifiants, 3 gaz, 4 boutique, 5 crédits clients, 6 bons valeur, 7 paiements électroniques.")
+    status: Mapped[str] = mapped_column(String(15), nullable=False, server_default="not_started", comment="not_started | saved (enregistrée, modifiable jusqu'à D7) | ras (barrée « rien à signaler », aucune ligne).")
+    rasNote: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Remarque facultative saisie en barrant la rubrique RAS.")
+    detailMode: Mapped[str | None] = mapped_column(String(10), nullable=True, comment="Rubriques 4 et 7 : detailed (par catégorie / un paiement par ligne) | summary (« sans détail » / cumul par opérateur) ; nul ailleurs.")
+    totalAmount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, server_default="0", comment="Total de la rubrique CALCULÉ par le serveur (somme des montants de lignes), recopié pour D5 ; jamais saisi.")
+    orangeBalance: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="Rubrique 7 : solde du compte Orange Money noté en en-tête du papier ; informatif, jamais utilisé dans un calcul.")
+    mtnBalance: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="Rubrique 7 : solde du compte MTN Mobile Money noté en en-tête du papier ; informatif, jamais utilisé dans un calcul.")
+    version: Mapped[int] = mapped_column(nullable=False, server_default="1", comment="Version de la rubrique : 1 au premier enregistrement, +1 ensuite ; verrou optimiste (409 shift_report_sections_version_changed).")
+    savedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Horodatage serveur du dernier enregistrement.")
+    savedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Auteur du dernier enregistrement (RT ou gérant à sa place).")
+
+
+class ShiftReportLubricantLine(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Rubrique 2 — une ligne par référence de lubrifiant : stock d'ouverture (reporté de la fermeture du rapport précédent, ou
+    saisi la première fois), entrées, ventes, fermeture CALCULÉE, prix et montant. Désignation et prix sont un INSTANTANÉ."""
+
+    __tablename__ = "zyloLiquidShiftReportLubricantLine"
+    __table_args__ = (
+        UniqueConstraint("reportId", "lineKey", name="uq_zlShiftReportLubricantLine_report_key"),
+        CheckConstraint("\"openingSource\" IN ('carried','initial','continuity_break')", name="ck_zlShiftReportLubricantLine_openingSource"),
+        CheckConstraint("\"unitPriceSource\" IS NULL OR \"unitPriceSource\" IN ('catalogue','manual')", name="ck_zlShiftReportLubricantLine_priceSource"),
+        CheckConstraint("\"openingQty\" >= 0 AND \"entryQty\" >= 0 AND \"soldQty\" >= 0 AND \"closingQty\" >= 0", name="ck_zlShiftReportLubricantLine_qty_nonneg"),
+        {"comment": "Rubrique 2 du rapport de tour : une ligne par référence de lubrifiant (ouverture, entrée, ventes, fermeture, prix, montant)."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="CASCADE"), nullable=False, index=True)
+    lineNumber: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="Position de la ligne dans le tableau.")
+    lineKey: Mapped[str] = mapped_column(String(220), nullable=False, comment="Identité de la ligne dans le rapport : p:<id produit> (catalogue) ou d:<désignation normalisée> (hors catalogue).")
+    sellableProductId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidSellableProduct.id", ondelete="RESTRICT"), nullable=True, comment="Produit vendable du catalogue ; nul = référence hors catalogue (avertissement D6).")
+    designation: Mapped[str] = mapped_column(String(200), nullable=False, comment="Désignation COPIÉE (instantané) : le rapport reste lisible si le catalogue change.")
+    openingQty: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, comment="Stock d'ouverture déclaré (jamais lu dans SellableProduct.stockQuantity, stock vif non fiable pour cette déclaration).")
+    openingSource: Mapped[str] = mapped_column(String(20), nullable=False, comment="carried (fermeture du rapport précédent) | initial (première fois, saisi) | continuity_break (écart déclaré avec motif).")
+    openingNote: Mapped[str | None] = mapped_column(String(300), nullable=True, comment="Motif de l'écart avec la fermeture précédente (10 caractères minimum).")
+    previousLineId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReportLubricantLine.id", ondelete="SET NULL"), nullable=True, comment="Ligne du rapport précédent dont la fermeture a été reportée (traçabilité).")
+    entryQty: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, server_default="0", comment="Entrées du tour ; vide = 0.")
+    soldQty: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, comment="Quantités vendues pendant le tour (≤ ouverture + entrées).")
+    closingQty: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, comment="Fermeture CALCULÉE = ouverture + entrées - ventes.")
+    countedQty: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True, comment="Stock physiquement compté (facultatif) ; l'écart avec la fermeture est un avertissement D6.")
+    unitPriceAmount: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True, comment="Prix unitaire figé : prix en vigueur à l'ouverture du tour (catalogue) ou saisi (hors catalogue) ; nul = prix non disponible, jamais inventé.")
+    unitPriceSource: Mapped[str | None] = mapped_column(String(10), nullable=True, comment="catalogue | manual (« prix saisi »).")
+    unitPriceCurrencyId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("currency.id", ondelete="RESTRICT"), nullable=True, comment="Devise du prix catalogue ; nulle pour un prix saisi.")
+    amount: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True, comment="Montant = ventes x prix arrondi à 2 décimales ; nul si le prix est indisponible.")
+
+
+class ShiftReportGasLine(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Rubrique 3 — gaz domestique : une ligne par taille de bouteille (6 ; 12,5 ; 26 ; 35 kg) et par type (bouteille, consignation,
+    déconsignation). Stock (ouverture, entrées, fermeture) seulement pour les bouteilles ; consignation/déconsignation : quantité seule.
+    Hypothèse à confirmer terrain (PC-D4-e) : la déconsignation est NÉGATIVE dans le montant (retour de consigne)."""
+
+    __tablename__ = "zyloLiquidShiftReportGasLine"
+    __table_args__ = (
+        UniqueConstraint("reportId", "sizeKg", "lineKind", name="uq_zlShiftReportGasLine_report_size_kind"),
+        CheckConstraint("\"lineKind\" IN ('bottle','deposit','deposit_refund')", name="ck_zlShiftReportGasLine_lineKind"),
+        CheckConstraint("\"openingSource\" IS NULL OR \"openingSource\" IN ('carried','initial','continuity_break')", name="ck_zlShiftReportGasLine_openingSource"),
+        CheckConstraint("\"soldQty\" >= 0 AND (\"openingQty\" IS NULL OR \"openingQty\" >= 0) AND (\"entryQty\" IS NULL OR \"entryQty\" >= 0) AND (\"closingQty\" IS NULL OR \"closingQty\" >= 0)", name="ck_zlShiftReportGasLine_qty_nonneg"),
+        {"comment": "Rubrique 3 du rapport de tour : gaz domestique par taille de bouteille (bouteille, consignation, déconsignation)."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="CASCADE"), nullable=False, index=True)
+    sizeKg: Mapped[float] = mapped_column(Numeric(5, 1), nullable=False, comment="Taille de la bouteille en kg : 6, 12.5, 26 ou 35 (tailles par défaut tant qu'aucun catalogue gaz n'existe, A3).")
+    lineKind: Mapped[str] = mapped_column(String(20), nullable=False, comment="bottle (bouteille) | deposit (consignation) | deposit_refund (déconsignation, montant négatif).")
+    openingQty: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="Bouteilles : stock d'ouverture (reporté du rapport précédent ou saisi) ; nul pour consignation/déconsignation.")
+    openingSource: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="carried | initial | continuity_break (bouteilles seulement).")
+    openingNote: Mapped[str | None] = mapped_column(String(300), nullable=True, comment="Motif de l'écart avec la fermeture précédente (10 caractères minimum).")
+    previousLineId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReportGasLine.id", ondelete="SET NULL"), nullable=True, comment="Ligne du rapport précédent dont la fermeture a été reportée.")
+    entryQty: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="Bouteilles : entrées du tour ; nul pour consignation/déconsignation.")
+    soldQty: Mapped[int] = mapped_column(Integer, nullable=False, comment="Quantité vendue (bouteilles), consignées ou déconsignées pendant le tour.")
+    closingQty: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="Bouteilles : fermeture CALCULÉE = ouverture + entrées - ventes.")
+    unitPriceAmount: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True, comment="Prix unitaire SAISI par le RT (aucun catalogue gaz en base : jamais de prix inventé).")
+    amount: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True, comment="Montant CALCULÉ = quantité x prix ; négatif pour la déconsignation.")
+
+
+class ShiftReportShopLine(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Rubrique 4 — boutique (S.F.S) : une ligne par catégorie de l'imprimé (mode détaillé) ou une ligne unique « total boutique sans détail »."""
+
+    __tablename__ = "zyloLiquidShiftReportShopLine"
+    __table_args__ = (
+        UniqueConstraint("reportId", "categoryCode", name="uq_zlShiftReportShopLine_report_category"),
+        CheckConstraint("amount >= 0", name="ck_zlShiftReportShopLine_amount_nonneg"),
+        {"comment": "Rubrique 4 du rapport de tour : ventes boutique par catégorie, ou total sans détail."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="CASCADE"), nullable=False, index=True)
+    categoryCode: Mapped[str] = mapped_column(String(30), nullable=False, comment="Code de catégorie de l'imprimé (telecards, insecticides, alcoholic_drinks…) ou `total` (mode sans détail).")
+    categoryLabel: Mapped[str] = mapped_column(String(100), nullable=False, comment="Libellé français copié (instantané).")
+    amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, comment="Montant déclaré de la catégorie (≥ 0, 2 décimales).")
+
+
+class ShiftReportCreditVoucher(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Rubrique 5 — UNE ligne par bon de crédit client. Le bon papier est la preuve ; l'application ne voit que la déclaration du RT
+    (« signé en main »). AUCUNE `Sale` ni `Receivable` n'est créée ici : `saleId`/`receivableId` sont réservés à E7 (report sur la fiche
+    client via `create_sale`, idempotent) et nuls en D4. Plaque et chauffeur : lien vers la fiche (`Vehicle`/`Driver`) ou texte libre signalé."""
+
+    __tablename__ = "zyloLiquidShiftReportCreditVoucher"
+    __table_args__ = (
+        UniqueConstraint("reportId", "voucherNumber", name="uq_zlShiftReportCreditVoucher_report_number"),
+        Index("uq_zlShiftReportCreditVoucher_station_number", "stationId", "voucherNumber", unique=True),
+        CheckConstraint("\"quantityLiters\" > 0 AND \"voucherAmount\" > 0", name="ck_zlShiftReportCreditVoucher_positive"),
+        {"comment": "Rubrique 5 du rapport de tour : un bon de crédit client par ligne (client, produit, pompe, quantité, montant, plaque, chauffeur, signature déclarée)."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="CASCADE"), nullable=False, index=True)
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, comment="Station du rapport (copie) : le numéro de bon est unique par station.")
+    lineNumber: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="Position de la ligne dans le tableau.")
+    voucherNumber: Mapped[str] = mapped_column(String(30), nullable=False, comment="Numéro imprimé sur le bon ; unique par station, tous rapports confondus.")
+    commercialAccountId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidCommercialAccount.id", ondelete="RESTRICT"), nullable=False, index=True, comment="Compte client à crédit existant et actif (jamais de texte libre).")
+    accountNameSnapshot: Mapped[str] = mapped_column(String(150), nullable=False, comment="Nom du compte copié : le rapport reste lisible si la fiche change.")
+    vehicleId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidVehicle.id", ondelete="RESTRICT"), nullable=True, comment="Véhicule de la fiche du compte ; nul si plaque en texte libre.")
+    plateText: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="Plaque : plaque de la fiche (copie) ou texte libre SIGNALÉ en D6 (jamais ajouté à la fiche).")
+    driverId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidDriver.id", ondelete="RESTRICT"), nullable=True, comment="Chauffeur de la fiche (jamais un utilisateur Zylo) ; nul si texte libre.")
+    driverNameText: Mapped[str | None] = mapped_column(String(150), nullable=True, comment="Nom du chauffeur : fiche (copie) ou texte libre signalé en D6.")
+    fuelProductId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidFuelProduct.id", ondelete="RESTRICT"), nullable=False, comment="Produit carburant ; doit être celui de la cuve de la pompe indiquée.")
+    fuelProductName: Mapped[str] = mapped_column(String(100), nullable=False, comment="Nom du produit copié (instantané).")
+    pumpLineId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReportPumpLine.id", ondelete="RESTRICT"), nullable=False, index=True, comment="Pompe qui a servi le bon (ligne de pompe du rapport) : nécessaire à D3 (crédits servis par pompiste).")
+    quantityLiters: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, comment="Litres servis (> 0, 2 décimales).")
+    unitPriceAmount: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True, comment="Prix en vigueur à l'OUVERTURE du tour, figé à la première écriture ; nul = prix non disponible (jamais inventé).")
+    voucherAmount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, comment="Montant INSCRIT sur le bon (> 0) : c'est lui qui est cumulé ; un écart avec quantité x prix est un avertissement, jamais un blocage.")
+    servedAt: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False, comment="Date et heure du bon, heure locale de la station.")
+    signedConfirmed: Mapped[bool] = mapped_column(nullable=False, server_default="false", comment="« Bon signé en main » : le RT atteste détenir le bon papier signé (déclaratif, audité) ; faux bloque D6 et D7.")
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Observation (exigée en D6 si écart de montant ou plaque/chauffeur hors fiche).")
+    saleId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidSale.id", ondelete="RESTRICT"), nullable=True, comment="RÉSERVÉ à E7 : vente à crédit créée au report sur la fiche client ; nul en D4.")
+    receivableId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidReceivable.id", ondelete="RESTRICT"), nullable=True, comment="RÉSERVÉ à E7 : créance créée au report ; nul en D4.")
+
+
+class ShiftReportValueVoucherLine(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Rubrique 6 — bons valeur : nombre de bons par coupure (10 000, 5 000, 3 000) dans deux colonnes, « bons du jour » (a) et « bons en
+    valeur » (c). La colonne (b) n'existe pas sur l'imprimé (PC-D4-g). Seules les lignes non nulles sont stockées."""
+
+    __tablename__ = "zyloLiquidShiftReportValueVoucherLine"
+    __table_args__ = (
+        UniqueConstraint("reportId", "denomination", "voucherColumn", name="uq_zlShiftReportValueVoucherLine_report_denom_col"),
+        CheckConstraint("\"voucherColumn\" IN ('daily','value')", name="ck_zlShiftReportValueVoucherLine_column"),
+        CheckConstraint("\"voucherCount\" > 0", name="ck_zlShiftReportValueVoucherLine_count_positive"),
+        {"comment": "Rubrique 6 du rapport de tour : nombre de bons valeur par coupure et par colonne (du jour / en valeur)."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="CASCADE"), nullable=False, index=True)
+    denomination: Mapped[int] = mapped_column(Integer, nullable=False, comment="Valeur d'un bon (10000, 5000 ou 3000).")
+    voucherColumn: Mapped[str] = mapped_column(String(10), nullable=False, comment="daily (a : bons du jour) | value (c : bons en valeur).")
+    voucherCount: Mapped[int] = mapped_column(Integer, nullable=False, comment="Nombre de bons (entier > 0).")
+    amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, comment="Montant CALCULÉ = nombre x coupure.")
+
+
+class ShiftReportElectronicPayment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Rubrique 7 — paiements électroniques : Tomcard / E-Pay Box (cartes, tickets, montant ; une ligne) et paiements mobile money
+    (Orange Money, MTN) : une ligne par paiement (code, montant, pompe, heure) ou, en mode « cumul par opérateur », une ligne par
+    opérateur sans code ni pompe (SOCADA : avertissement D6, D3 ne peut rien déduire par pompiste)."""
+
+    __tablename__ = "zyloLiquidShiftReportElectronicPayment"
+    __table_args__ = (
+        UniqueConstraint("reportId", "lineKey", name="uq_zlShiftReportElectronicPayment_report_key"),
+        Index(
+            "uq_zlShiftReportElectronicPayment_station_operator_code", "stationId", "operator", "transactionCode",
+            unique=True, postgresql_where=text('"transactionCode" IS NOT NULL'),
+        ),
+        CheckConstraint("kind IN ('tomcard','mobile')", name="ck_zlShiftReportElectronicPayment_kind"),
+        CheckConstraint("operator IS NULL OR operator IN ('orange_money','mtn_momo')", name="ck_zlShiftReportElectronicPayment_operator"),
+        CheckConstraint("(kind = 'mobile') = (operator IS NOT NULL)", name="ck_zlShiftReportElectronicPayment_operator_iff_mobile"),
+        CheckConstraint("amount >= 0", name="ck_zlShiftReportElectronicPayment_amount_nonneg"),
+        CheckConstraint("origin IS NULL OR origin IN ('pump','shop','other')", name="ck_zlShiftReportElectronicPayment_origin"),
+        CheckConstraint("COALESCE(origin, '') = 'pump' OR \"pumpLineId\" IS NULL", name="ck_zlShiftReportElectronicPayment_pump_only_if_origin_pump"),
+        {"comment": "Rubrique 7 du rapport de tour : Tomcard / E-Pay Box et paiements Orange Money / MTN Mobile Money."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="CASCADE"), nullable=False, index=True)
+    stationId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidStation.id", ondelete="RESTRICT"), nullable=False, comment="Station du rapport (copie) : un code de paiement est unique par station et par opérateur.")
+    lineNumber: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="Position de la ligne dans le tableau.")
+    lineKey: Mapped[str] = mapped_column(String(80), nullable=False, comment="Identité de la ligne : tomcard | <opérateur>:<code> (détail) | <opérateur>:summary (cumul).")
+    kind: Mapped[str] = mapped_column(String(10), nullable=False, comment="tomcard (Tomcard / E-Pay Box) | mobile (mobile money).")
+    operator: Mapped[str | None] = mapped_column(String(15), nullable=True, comment="orange_money | mtn_momo (paiements mobile money seulement).")
+    cardCount: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="Tomcard : nombre de cartes ; nul sinon.")
+    ticketCount: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="Tomcard : nombre de tickets ; nul sinon.")
+    amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, comment="Montant de la ligne (≥ 0, 2 décimales).")
+    transactionCode: Mapped[str | None] = mapped_column(String(40), nullable=True, comment="Code du paiement mobile (majuscules) : obligatoire en mode détail, unique par station et opérateur ; nul en mode cumul.")
+    origin: Mapped[str | None] = mapped_column(String(10), nullable=True, comment="Origine d'un paiement mobile en mode détail : pump (reçu à une pompe) | shop (boutique) | other ; nulle en mode cumul et pour Tomcard. La pompe n'est obligatoire que si origin = pump.")
+    pumpLineId: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReportPumpLine.id", ondelete="RESTRICT"), nullable=True, index=True, comment="Pompe qui a reçu le paiement (obligatoire si origin = pump, nulle sinon) : sert à D3 (paiements mobiles par pompiste).")
+    receivedAt: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True, comment="Heure du paiement, heure locale de la station (facultative).")
+
+
+class ShiftReportSectionCorrection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Rature d'une valeur déjà enregistrée d'une rubrique 2 à 7 (D4) : UNE ligne par champ modifié ou ligne retirée. L'ancienne valeur est
+    CONSERVÉE (jamais d'écrasement silencieux), motif et « paraphé par » obligatoires (cahier : une rature est paraphée). Historique
+    conservé tant que le rapport n'est pas signé ; visible du gérant."""
+
+    __tablename__ = "zyloLiquidShiftReportSectionCorrection"
+    __table_args__ = (
+        CheckConstraint("\"sectionNumber\" BETWEEN 2 AND 7", name="ck_zlShiftReportSectionCorrection_number"),
+        CheckConstraint("\"reasonCode\" IN ('entry_error','count_error','voucher_found','price_corrected','other')", name="ck_zlShiftReportSectionCorrection_reason"),
+        {"comment": "Historique des ratures des rubriques 2 à 7 du rapport de tour : ancienne valeur conservée, motif, paraphé par."},
+    )
+
+    reportId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("zyloLiquidShiftReport.id", ondelete="RESTRICT"), nullable=False, index=True)
+    sectionNumber: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="Rubrique corrigée (2 à 7).")
+    lineKey: Mapped[str] = mapped_column(String(220), nullable=False, comment="Identité de la ligne corrigée (voir la table de la rubrique).")
+    field: Mapped[str] = mapped_column(String(40), nullable=False, comment="Champ modifié, ou `line` pour une ligne retirée.")
+    oldValue: Mapped[str | None] = mapped_column(String(300), nullable=True, comment="Valeur avant la correction (texte, conservée) ; nulle si le champ était vide.")
+    newValue: Mapped[str | None] = mapped_column(String(300), nullable=True, comment="Valeur après la correction ; nulle si le champ est vidé ou la ligne retirée.")
+    reasonCode: Mapped[str] = mapped_column(String(20), nullable=False, comment="Motif : entry_error | count_error | voucher_found | price_corrected | other.")
+    reasonNote: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Précision du motif (10 caractères minimum si « other »).")
+    initialedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="« Paraphé par » : personne qui a confirmé la correction (déclaratif).")
+    recordedByUserId: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, comment="Qui a saisi la correction (RT ou gérant).")
+    recordedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Horodatage serveur de la correction.")
+    sectionVersion: Mapped[int] = mapped_column(nullable=False, comment="Version de la rubrique produite par cette correction.")

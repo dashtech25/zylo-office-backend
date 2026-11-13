@@ -1,23 +1,78 @@
+import unicodedata
 import uuid
 
-from fastapi import Depends
-from sqlalchemy import select
+from fastapi import Depends, Header
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.audit.permissions import AUDIT_LOG_VIEW
+from app.audit.permissions import AUDIT_EXPORT, AUDIT_LOG_VIEW, ORGANIZATION_AUDIT_READ
+from app.exports.permissions import DONNEES_EXPORT_CREER
+from app.portail.exports.permissions import DATA_EXPORT
 from app.audit.service import record_audit_event
-from app.billing.permissions import SUBSCRIPTION_MANAGE
+from app.support.permissions import SUPPORT_REQUEST_CREATE
+from app.billing.permissions import (
+    BILLING_CASE_OPEN,
+    BILLING_CASE_RESOLVE,
+    BILLING_CHECKOUT_PURCHASE,
+    BILLING_CONSENT_RECORD,
+    BILLING_DOCUMENTS_READ,
+    BILLING_OPERATE,
+    BILLING_DATA_EXPORT_REQUEST,
+    BILLING_DISPUTE_READ,
+    BILLING_HISTORY_READ,
+    BILLING_PAYMENT_METHOD_MANAGE,
+    BILLING_RECONCILIATION_RUN,
+    BILLING_REFUND_REQUEST,
+    BILLING_INVOICE_FINALIZE,
+    BILLING_INVOICE_READ,
+    ORGANIZATION_ENTITLEMENT_ALLOCATE,
+    ORGANIZATION_ENTITLEMENT_READ,
+    ORGANIZATION_ENTITLEMENT_REVOKE,
+    ORGANIZATION_USAGE_READ,
+    SUBSCRIPTION_MANAGE,
+    SUBSCRIPTION_READ,
+)
 from app.core.database import get_db
 from app.core.errors import AppError
+from app.core.field_crypto import dechiffrer
 from app.core.security import get_current_user
-from app.identity.models import Organization, OrganizationUser, User
-from app.identity.permissions import ORGANIZATION_MANAGE
-from app.identity.schemas import CreateOrganizationRequest, UpdateOrganizationRequest, UpdateUserProfileRequest
-from app.modules_registry.permissions import MODULE_MANAGE
+from app.core.versioning import mutation_versionnee
+from app.identity import permissions as permissions_identite
+from app.identity.models import Organization, OrganizationUser, Tenant, User
+from app.identity.permissions import (
+    MEMBERS_INVITE,
+    MEMBERS_READ,
+    MEMBERS_REMOVE,
+    ORGANIZATION_LEGAL_READ,
+    ORGANIZATION_MANAGE,
+    ORGANIZATION_READ,
+    ORGANIZATION_SETTINGS_UPDATE,
+    ORGANIZATION_UPDATE,
+    ORGANIZATION_VERIFICATION_READ,
+    ORGANIZATION_VERIFICATION_SUBMIT,
+    PORTAL_SUMMARY_READ,
+    USER_MANAGE,
+)
+from app.identity.schemas import (
+    CreateOrganizationRequest,
+    OrganizationDetailResponse,
+    UpdateOrganizationRequest,
+    UpdateUserProfileRequest,
+)
+from app.modules_registry.permissions import (
+    MODULE_MANAGE,
+    ORGANIZATION_MODULE_ACTIVATE,
+    ORGANIZATION_MODULE_SUSPEND,
+    ORGANIZATION_MODULE_INSTALL,
+    ORGANIZATION_MODULE_READ,
+    ORGANIZATION_MODULE_UNINSTALL,
+    ORGANIZATION_MODULE_UPGRADE,
+)
 from app.rbac.models import Role, RolePermission, UserRole
 from app.rbac.permissions import GRANT_MANAGE, ROLE_MANAGE
-from app.rbac.service import get_or_create_permission
+from app.rbac.service import assert_active_membership, get_or_create_permission, organisation_introuvable
 from app.shared.permissions import CURRENCY_MANAGE, CURRENCY_READ, EXCHANGE_RATE_MANAGE, EXCHANGE_RATE_READ, GEO_READ
+from app.shared.storage import organisation_de_la_reference
 
 # Permissions d'administration du socle accordées automatiquement au rôle
 # owner à la création d'une organisation — jamais les permissions d'un futur
@@ -28,12 +83,53 @@ from app.shared.permissions import CURRENCY_MANAGE, CURRENCY_READ, EXCHANGE_RATE
 # MODULE_MANAGE/SUBSCRIPTION_MANAGE, plutôt que d'inventer un nouveau
 # mécanisme de bootstrap (issue #49).
 OWNER_DEFAULT_PERMISSIONS = [
+    (DATA_EXPORT, "data", "Demander, lire et télécharger un export de données de l'organisation (BE-117)."),
+    (DONNEES_EXPORT_CREER, "exports", "Demander un export de données d'un sujet ou du tenant (BE-243)."),
     (ORGANIZATION_MANAGE, "identity", "Gérer l'organisation (membres, rôles, paramètres)."),
+    (USER_MANAGE, "identity", "Créer des utilisateurs, réémettre une invitation, suspendre et réactiver un membre."),
+    (MEMBERS_INVITE, "identity", "Inviter une personne à rejoindre l'organisation et consulter les invitations en attente."),
+    (MEMBERS_READ, "identity", "Lister les membres de l'organisation courante."),
+    (MEMBERS_REMOVE, "identity", "Retirer un membre de l'organisation (le rôle propriétaire reste réservé aux propriétaires)."),
+    (ORGANIZATION_SETTINGS_UPDATE, "identity", "Modifier les réglages de l'organisation courante (nom)."),
+    (ORGANIZATION_READ, "identity", "Lire l'organisation courante (BE-186)."),
+    (ORGANIZATION_UPDATE, "identity", "Modifier l'organisation courante, verrou expectedVersion (BE-186)."),
+    (ORGANIZATION_LEGAL_READ, "identity", "Voir les identifiants légaux confidentiels de l'organisation (BE-186)."),
     (MODULE_MANAGE, "modules_registry", "Activer/désactiver les modules pour l'organisation."),
+    (ORGANIZATION_MODULE_READ, "modules_registry", "Lire les permissions déclarées par les modules de l'organisation (BE-055)."),
+    (ORGANIZATION_MODULE_INSTALL, "modules_registry", "Installer techniquement un module pour l'organisation (BE-047)."),
+    (ORGANIZATION_MODULE_ACTIVATE, "modules_registry", "Activer ou désactiver un module installé pour l'organisation (BE-048)."),
+    (ORGANIZATION_MODULE_SUSPEND, "modules_registry", "Suspendre ou reprendre un module pour l'organisation, origine client (BE-049)."),
+    (ORGANIZATION_MODULE_UPGRADE, "modules_registry", "Mettre à jour une installation de module vers une version supérieure (BE-051)."),
+    (ORGANIZATION_MODULE_UNINSTALL, "modules_registry", "Désinstaller un module de l'organisation, sans purge des données (BE-050)."),
     (ROLE_MANAGE, "rbac", "Créer des rôles et modifier leurs permissions, attribuer/retirer un rôle."),
     (GRANT_MANAGE, "rbac", "Accorder ou refuser une permission individuelle, révoquer un grant."),
     (AUDIT_LOG_VIEW, "audit", "Consulter le journal d'audit."),
+    (AUDIT_EXPORT, "audit", "Demander un export du journal d'audit (BE-173)."),
+    (ORGANIZATION_AUDIT_READ, "audit", "Consulter le journal des transitions de modules de l'organisation (BE-056)."),
     (SUBSCRIPTION_MANAGE, "billing", "Gérer les abonnements de l'organisation."),
+    (SUBSCRIPTION_READ, "billing", "Consulter l'abonnement, les droits et les entitlements de l'organisation."),
+    (BILLING_INVOICE_READ, "billing", "Consulter les factures et tentatives de paiement de l'organisation."),
+    (BILLING_DOCUMENTS_READ, "billing", "Lire les documents financiers (factures) par API (BE-204)."),
+    (BILLING_INVOICE_FINALIZE, "billing", "Finaliser une facture brouillon (BE-086, finance)."),
+    (ORGANIZATION_ENTITLEMENT_READ, "billing", "Consulter les entitlements de l'organisation désignée par son identifiant (BE-045)."),
+    (ORGANIZATION_ENTITLEMENT_ALLOCATE, "billing", "Attribuer un siège d'entitlement à un membre de l'organisation (BE-046)."),
+    (ORGANIZATION_ENTITLEMENT_REVOKE, "billing", "Révoquer le siège d'entitlement d'un membre de l'organisation (BE-046)."),
+    (PORTAL_SUMMARY_READ, "portal", "Consulter le résumé du portail, filtré par permission (BE-109)."),
+    (ORGANIZATION_VERIFICATION_READ, "identity", "Lire le statut de vérification de l'organisation (BE-103)."),
+    (ORGANIZATION_VERIFICATION_SUBMIT, "identity", "Déposer une demande de vérification de l'organisation (BE-103)."),
+    (ORGANIZATION_USAGE_READ, "billing", "Consulter l'usage (agrégats et limites) de l'organisation désignée par son identifiant (BE-108)."),
+    (BILLING_CONSENT_RECORD, "billing", "Enregistrer un consentement versionné pour un compte payeur (BE-076)."),
+    (BILLING_OPERATE, "billing", "Exploiter la facturation : créer un devis, ouvrir un checkout, enregistrer un consentement (BE-202)."),
+    (BILLING_DATA_EXPORT_REQUEST, "billing", "Demander un export des données de facturation d'un compte payeur (BE-098)."),
+    (BILLING_HISTORY_READ, "billing", "Consulter l'historique commercial du tenant courant (BE-099)."),
+    (BILLING_REFUND_REQUEST, "billing", "Demander un remboursement d'un paiement réussi (BE-093, finance)."),
+    (BILLING_DISPUTE_READ, "billing", "Consulter les litiges fournisseur de l'organisation courante (BE-094, finance)."),
+    (BILLING_RECONCILIATION_RUN, "billing", "Lancer une réconciliation des paiements et résultats incertains (BE-095, finance)."),
+    (BILLING_CASE_OPEN, "billing", "Ouvrir un cas de facturation ou d'assistance (BE-096)."),
+    (BILLING_CASE_RESOLVE, "billing", "Résoudre un cas de facturation ou d'assistance, geste sensible (BE-096)."),
+    (BILLING_PAYMENT_METHOD_MANAGE, "billing", "Ajouter, remplacer et sélectionner un moyen de paiement par token (BE-116)."),
+    (BILLING_CHECKOUT_PURCHASE, "billing", "Démarrer un achat par session de paiement (BE-110)."),
+    (SUPPORT_REQUEST_CREATE, "support", "Ouvrir une demande de support client (BE-118)."),
     (CURRENCY_READ, "shared", "Consulter le référentiel des devises."),
     (CURRENCY_MANAGE, "shared", "Créer/modifier le référentiel des devises."),
     (EXCHANGE_RATE_READ, "shared", "Consulter les taux de change."),
@@ -46,7 +142,8 @@ async def check_email_available(db: AsyncSession, email: str) -> None:
     """Même contrôle que `register_user` (app/auth/service.py) — factorisé
     ici pour être réutilisé par tout flux de création de compte (ex. module
     Personnel, un gérant créant un compte pour un employé), jamais dupliqué."""
-    existing = await db.execute(select(User).where(User.email == email))
+    # Insensible à la casse : même règle que l'index unique sur lower(email).
+    existing = await db.execute(select(User).where(func.lower(User.email) == email.lower()))
     if existing.scalar_one_or_none() is not None:
         raise AppError(code="email_already_used", message="Cet email est déjà utilisé.", status_code=409)
 
@@ -72,27 +169,62 @@ def build_user(
     )
 
 
+def normalise_nom_organisation(nom: str) -> str:
+    """Forme de comparaison d'un nom d'organisation (BE-102, doublon) : accents retirés,
+    casse ignorée, espaces de bord supprimés et espaces internes réduits à un seul.
+    Seule la comparaison utilise cette forme ; le nom enregistré reste celui saisi."""
+    sans_accents = "".join(c for c in unicodedata.normalize("NFKD", nom) if not unicodedata.combining(c))
+    return " ".join(sans_accents.split()).casefold()
+
+
 async def create_organization(db: AsyncSession, owner: User, data: CreateOrganizationRequest) -> Organization:
+    """Crée une organisation et son tenant racine, dans une seule transaction (BE-102).
+
+    Le créateur devient membre (`organization_user`) mais ne reçoit AUCUN rôle : aucun
+    rôle Owner n'est attribué à la création (QE-POR-04). Le rôle propriétaire est affecté
+    ensuite par une action explicite, jamais implicitement par cette fonction.
+
+    Refus : 403 `permission_denied` si le créateur ne détient pas `org:create` (voir
+    `app.identity.permissions.permissions_globales`) ; 409 `organization_name_duplicate`
+    si le créateur a déjà une organisation au même nom normalisé ; 409 `slug_already_used`
+    si le slug est pris. Le nom est comparé après `normalise_nom_organisation`, par créateur
+    (`organization.createdByUserId`). Le corps n'a pas d'autre effet : un champ `owner` est ignoré.
+    """
+    if permissions_identite.ORGANIZATION_CREATE not in permissions_identite.permissions_globales(owner):
+        raise AppError(
+            code="permission_denied",
+            message="Vous n'avez pas le droit de créer une organisation.",
+            status_code=403,
+        )
+
     existing = await db.execute(select(Organization).where(Organization.slug == data.slug))
     if existing.scalar_one_or_none() is not None:
         raise AppError(code="slug_already_used", message="Ce slug d'organisation est déjà utilisé.", status_code=409)
 
-    organization = Organization(name=data.name, slug=data.slug)
+    cle_nom = normalise_nom_organisation(data.name)
+    noms_du_createur = await db.execute(
+        select(Organization.name).where(
+            Organization.createdByUserId == owner.id,
+            Organization.deletedAt.is_(None),
+        )
+    )
+    if any(normalise_nom_organisation(nom) == cle_nom for nom in noms_du_createur.scalars().all()):
+        raise AppError(
+            code="organization_name_duplicate",
+            message="Vous avez déjà une organisation portant ce nom.",
+            status_code=409,
+        )
+
+    # BE-186 : toute organisation créée porte son tenant racine (un tenant, une organisation en v1).
+    tenant = Tenant(status="active", version=1)
+    db.add(tenant)
+    await db.flush()
+
+    organization = Organization(name=data.name, slug=data.slug, tenantId=tenant.id, createdByUserId=owner.id)
     db.add(organization)
     await db.flush()
 
     db.add(OrganizationUser(organizationId=organization.id, userId=owner.id))
-
-    # Rôle "owner" auto-créé pour le créateur — seul rôle qui existe par défaut,
-    # tout autre rôle est créé explicitement par la suite via l'API rbac.
-    owner_role = Role(organizationId=organization.id, code="owner", name="Propriétaire")
-    db.add(owner_role)
-    await db.flush()
-
-    for code, module_code, description in OWNER_DEFAULT_PERMISSIONS:
-        permission = await get_or_create_permission(db, code, module_code, description)
-        db.add(RolePermission(roleId=owner_role.id, permissionId=permission.id))
-    db.add(UserRole(userId=owner.id, organizationId=organization.id, roleId=owner_role.id))
 
     await db.commit()
     await db.refresh(organization)
@@ -144,12 +276,24 @@ async def update_organization(
     """Seul `name` est modifiable — `Organization` (Core) n'a aucun autre
     champ éditable (pas de logo/téléphone/email/langue/devise : voir l'audit
     fait pour la page Paramètres Zylo Liquid, aucun de ces champs n'existe
-    dans le modèle). `slug` reste immuable (identifiant stable)."""
+    dans le modèle). `slug` reste immuable (identifiant stable).
+
+    Contrôle de version (BE-233) : si `data.version` est fourni et ne correspond
+    plus à la version courante, `mutation_versionnee` lève 409 `version_conflict`
+    avant toute écriture ni trace d'audit. Le droit `ORGANIZATION_MANAGE` est
+    déjà vérifié par la route, donc un refus reste un 403."""
     organization = await db.get(Organization, organization_id)
     if organization is None:
         raise AppError(code="organization_not_found", message="Organisation introuvable.", status_code=404)
     before_name = organization.name
-    organization.name = data.name
+    await mutation_versionnee(
+        db,
+        Organization,
+        organization.id,
+        data.expectedVersion,
+        {"name": data.name},
+        code_introuvable="organization_not_found",
+    )
     await record_audit_event(
         db,
         organization.id,
@@ -163,6 +307,36 @@ async def update_organization(
     await db.commit()
     await db.refresh(organization)
     return organization
+
+
+async def get_organization_detail(
+    db: AsyncSession, organization_id: str, legal_visible: bool
+) -> OrganizationDetailResponse:
+    """Lecture de l'organisation courante (BE-186, CA-1 et CA-5).
+
+    Le contrôle d'appartenance et le droit `organization.read` sont faits par la
+    route (rbac/guards.py : 404 hors tenant, 403 sans droit). Ici, les
+    identifiants légaux ne sont déchiffrés et renseignés que si `legal_visible`
+    (droit `organization.legal.read`) ; sinon les champs restent absents de la
+    réponse (`response_model_exclude_unset`), et jamais renvoyés vides.
+    """
+    organization = await db.get(Organization, uuid.UUID(organization_id))
+    if organization is None or organization.deletedAt is not None:
+        raise organisation_introuvable()
+    champs = {
+        "id": organization.id,
+        "name": organization.name,
+        "slug": organization.slug,
+        "status": organization.status,
+        "version": organization.version,
+        "tenantId": organization.tenantId,
+    }
+    if legal_visible:
+        champs["legalRegistrationNumber"] = (
+            dechiffrer(organization.legalRegistrationNumberChiffre) if organization.legalRegistrationNumberChiffre else None
+        )
+        champs["legalTaxNumber"] = dechiffrer(organization.legalTaxNumberChiffre) if organization.legalTaxNumberChiffre else None
+    return OrganizationDetailResponse(**champs)
 
 
 async def _is_owner_of_target_user_organization(db: AsyncSession, actor_user_id: uuid.UUID, target_user_id: uuid.UUID) -> bool:
@@ -207,6 +381,25 @@ async def update_user_profile(
                 status_code=403,
             )
 
+    # T-014 (IAM-019) : une photo ne peut référencer qu'un fichier écrit par une
+    # organisation dont l'acteur est membre. Sans ce contrôle, une référence d'une
+    # autre organisation (obtenue par énumération ou fuite) serait acceptée.
+    if data.photoStorageReference is not None:
+        organisation = organisation_de_la_reference(data.photoStorageReference)
+        membre = None
+        if organisation is not None:
+            membre = await db.scalar(
+                select(OrganizationUser.id).where(
+                    OrganizationUser.organizationId == organisation, OrganizationUser.userId == actor.id
+                )
+            )
+        if membre is None:
+            raise AppError(
+                code="photo_reference_forbidden",
+                message="Cette photo n'appartient pas à une organisation dont vous êtes membre.",
+                status_code=403,
+            )
+
     updates = data.model_dump(exclude_unset=True)
     for field, value in updates.items():
         setattr(target, field, value)
@@ -218,25 +411,22 @@ async def update_user_profile(
 
 async def require_organization_member(
     organization_id: uuid.UUID,
+    x_organization_id: uuid.UUID | None = Header(None, alias="X-Organization-Id"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Vérifie seulement l'appartenance à l'organisation — plus permissive
-    que `require_permission()` : voir les modules installés pour son
-    organisation ne doit pas nécessiter une permission d'administration
+    """Vérifie seulement l'appartenance (active) à l'organisation du chemin —
+    plus permissive que `require_permission()` : voir les modules installés pour
+    son organisation ne doit pas nécessiter une permission d'administration
     (contrairement à les activer/désactiver, toujours derrière MODULE_MANAGE).
     `organization_id` est résolu par FastAPI depuis le paramètre de chemin
     de même nom sur la route appelante — jamais une fabrique à la
     `require_permission(code)`, la valeur varie par requête, pas au chargement
-    du module."""
-    result = await db.execute(
-        select(OrganizationUser).where(
-            OrganizationUser.organizationId == organization_id, OrganizationUser.userId == current_user.id
-        )
-    )
-    if result.scalar_one_or_none() is None:
-        raise AppError(
-            code="not_organization_member",
-            message="Vous n'appartenez pas à cette organisation.",
-            status_code=403,
-        )
+    du module.
+
+    T-010 : un en-tête `X-Organization-Id` présent doit désigner la même
+    organisation que le chemin, sinon refus uniforme 404 ; un non-membre reçoit
+    la même réponse qu'une organisation inexistante (pas d'énumération)."""
+    if x_organization_id is not None and x_organization_id != organization_id:
+        raise organisation_introuvable()
+    await assert_active_membership(db, current_user.id, organization_id)

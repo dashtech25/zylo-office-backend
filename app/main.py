@@ -10,15 +10,13 @@ from app.core.config import settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import setup_logging
 from app.core.middleware import RequestIdMiddleware, TimingMiddleware
-from app.audit.seed import seed_known_permissions as seed_audit_permissions
-from app.core.database import AsyncSessionLocal
-from app.identity.service import backfill_owner_default_permissions
-from app.modules.zylo_liquid.seed import seed_known_permissions
+from app.core.securite_http import EnTetesSecuriteMiddleware, options_documentation
+from app.core.migrations import verifie_revision_a_jour
 from app.modules.zylo_liquid.telemetry_sync import structural_sweep_loop, sync_loop as holykell_sync_loop
-from app.modules.zylo_tanker.seed import seed_known_permissions as seed_zylo_tanker_permissions
-from app.modules_registry.seed import seed_known_modules
-from app.modules_registry.service import backfill_active_module_permissions_for_owners
-from app.rbac.seed import seed_known_permissions as seed_rbac_permissions
+from app.modules.zylo_liquid.roles_seed import seed_default_roles as seed_roles_zylo_liquid
+from app.modules.zylo_tanker.roles_seed import seed_default_roles as seed_roles_zylo_tanker
+from app.modules_registry.service import enregistre_hook_activation
+from app.notifications.service import handle_alert_created
 from app.shared.events import subscribe
 
 setup_logging()
@@ -31,11 +29,23 @@ TAGS_METADATA = [
     {"name": "rbac", "description": "Rôles, permissions et grants individuels (allow/deny, scopés, délégables)."},
     {"name": "audit", "description": "Journal d'audit — qui a fait quoi, sur quel élément, quand, filtré par portée."},
     {"name": "billing", "description": "Plans, abonnements et facturation par module (aucun prestataire de paiement réel intégré)."},
+    {"name": "operator", "description": "Support opérateur strictement en lecture seule, accessible par allowlist serveur."},
     {"name": "currencies", "description": "Référentiel des devises — Core, sans isolation tenant, réutilisable par tout module."},
     {"name": "exchange-rates", "description": "Taux de change historisés — Core, toujours une insertion, jamais une correction."},
 ]
 
-app = FastAPI(title=settings.APP_NAME, openapi_tags=TAGS_METADATA)
+# Intention (T-015) : Swagger, ReDoc et /openapi.json ne sont montés qu'en
+# ENVIRONMENT=development (voir app/core/securite_http.py). Hors développement,
+# ces routes n'existent pas : 404.
+app = FastAPI(
+    title=settings.APP_NAME,
+    openapi_tags=TAGS_METADATA,
+    **options_documentation(settings.ENVIRONMENT),
+)
+
+# Seeds de rôles par défaut, branchés à l'activation (composition root : le socle ne connaît pas les modules).
+enregistre_hook_activation("zylo_liquid", seed_roles_zylo_liquid)
+enregistre_hook_activation("zylo_tanker", seed_roles_zylo_tanker)
 
 # Ordre important : TimingMiddleware doit être ajouté avant RequestIdMiddleware
 # pour s'exécuter à l'intérieur de celui-ci (Starlette empile les middlewares
@@ -46,13 +56,22 @@ app = FastAPI(title=settings.APP_NAME, openapi_tags=TAGS_METADATA)
 # dernier).
 app.add_middleware(TimingMiddleware)
 app.add_middleware(RequestIdMiddleware)
+# CORS (T-015) : méthodes et en-têtes listés explicitement, ceux qu'utilise le
+# frontend (fetch GET/POST/PUT/PATCH/DELETE ; Authorization, Content-Type,
+# X-Organization-Id). Une méthode ou un en-tête non listé est refusé au
+# préflight. Les origines restent lues depuis la configuration (CORS_ORIGINS).
+# T-037a : credentials explicites (cookies de session) et en-tête X-CSRF-Token
+# (double soumission, voir app/core/session_http.py). Jamais de joker sur les origines.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Organization-Id", "X-CSRF-Token", "Accept"],
 )
+# En-têtes de sécurité (T-015) : ajoutés en dernier, donc les plus externes ;
+# ils couvrent aussi les réponses du préflight CORS.
+app.add_middleware(EnTetesSecuriteMiddleware)
 
 register_exception_handlers(app)
 
@@ -70,28 +89,19 @@ app.include_router(api_router, prefix="/api/v1")
 # `app.shared.events` et `app.location.service.run_truck_stop_detection`,
 # premier cas d'usage réel).
 subscribe("TruckStopUnqualified", handle_truck_stop_unqualified)
+# Notifications Web Push (2026-09-20) — même mécanisme, voir la docstring
+# de `app.notifications.service` pour le détail du découplage.
+subscribe("AlertCreated", handle_alert_created)
 
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    await seed_known_modules()
-    await seed_rbac_permissions()
-    await seed_audit_permissions()
-    await seed_known_permissions()
-    await seed_zylo_tanker_permissions()
-    # Répare les organisations créées avant l'ajout d'une entrée à
-    # OWNER_DEFAULT_PERMISSIONS (ex. ROLE_MANAGE/GRANT_MANAGE/AUDIT_LOG_VIEW) —
-    # idempotent, sans effet une fois toutes les organisations à jour.
-    async with AsyncSessionLocal() as db:
-        await backfill_owner_default_permissions(db)
-    # Même principe, côté permissions de module : répare les organisations
-    # dont un module était déjà actif avant l'ajout de nouvelles permissions
-    # à ce module (ex. couche déclarative/commerciale/rapprochement ajoutée
-    # à zylo_liquid après coup, processus-double-sources-verite Phase 8) —
-    # sans quoi un owner déjà actif ne reçoit jamais les permissions
-    # ajoutées après son activation initiale du module.
-    async with AsyncSessionLocal() as db:
-        await backfill_active_module_permissions_for_owners(db)
+    # T-028 : le démarrage ne migre pas, ne seed pas et ne rejoue aucun backfill.
+    # Migrations : `python -m app.cli migrer` ; seeds et backfills : `python -m
+    # app.cli seed` puis `python -m app.cli backfill`, une fois par déploiement
+    # (docs/operations/deploiement.md). Ici, seule une vérification en lecture
+    # seule : une base non à la tête fait refuser le démarrage avec un message clair.
+    await verifie_revision_a_jour()
 
     # Refonte alertes Étape 2 (décision D1) : la boucle de sondage Holykell
     # tourne dans ce process, plus jamais dépendante d'un script externe.

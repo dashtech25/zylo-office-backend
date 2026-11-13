@@ -340,12 +340,12 @@ async def _setup_station_product_tank(client: AsyncClient, headers: dict, suffix
 async def test_truck_order_assignment_is_many_to_many_and_bidirectional(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
     headers = _headers(registered_user, zylo_liquid_organization)
     suffix = uuid.uuid4().hex[:6]
-    station_id, _fuel_product_id, tank_id = await _setup_station_product_tank(client, headers, suffix)
+    station_id, fuel_product_id, _tank_id = await _setup_station_product_tank(client, headers, suffix)
     sup_res = await client.post("/api/v1/zylo-liquid/suppliers", json={"name": f"Fournisseur {suffix}", "type": "Grossiste"}, headers=headers)
     supplier_id = sup_res.json()["id"]
     order_res = await client.post(
         "/api/v1/zylo-liquid/purchase-orders",
-        json={"stationId": station_id, "tankId": tank_id, "supplierId": supplier_id, "orderReference": f"CMD-{suffix}", "orderedVolumeLiters": 5000},
+        json={"stationId": station_id, "supplierId": supplier_id, "orderReference": f"CMD-{suffix}", "lines": [{"fuelProductId": fuel_product_id, "orderedVolumeLiters": 5000}]},
         headers=headers,
     )
     assert order_res.status_code == 201, order_res.text
@@ -366,7 +366,7 @@ async def test_truck_order_assignment_is_many_to_many_and_bidirectional(client: 
     # Un camion peut être rattaché à plusieurs commandes.
     order_res_2 = await client.post(
         "/api/v1/zylo-liquid/purchase-orders",
-        json={"stationId": station_id, "tankId": tank_id, "supplierId": supplier_id, "orderReference": f"CMD2-{suffix}", "orderedVolumeLiters": 3000},
+        json={"stationId": station_id, "supplierId": supplier_id, "orderReference": f"CMD2-{suffix}", "lines": [{"fuelProductId": fuel_product_id, "orderedVolumeLiters": 3000}]},
         headers=headers,
     )
     order_id_2 = order_res_2.json()["id"]

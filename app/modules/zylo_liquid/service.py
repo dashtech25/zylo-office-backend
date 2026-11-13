@@ -3,6 +3,7 @@ import secrets
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 
+import httpx
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,24 +12,25 @@ logger = logging.getLogger(__name__)
 
 from app.alerts import service as alerts_service
 from app.audit.service import record_audit_event
+from app.core.config import settings
 from app.core.errors import AppError
+from app.core.field_crypto import chiffrer
+from app.integrations.holykell import client as holykell_client
+from app.integrations.holykell.client import HolykellApiError, HolykellAuthError
 from app.files import service as files_service
 from app.files.schemas import DocumentResponse
 from app.core.security import hash_password
 from app.identity.models import OrganizationUser, User
+from app.auth.service import revoque_sessions
 from app.identity.service import build_user, check_email_available
 from app.rbac.models import UserRole
 from app.rbac.service import assign_role, unassign_role
 from app.shared.simple_cache import TTLCache
 from app.shared.storage import get_storage_backend
 
-# Cache TTL 60s pour les listes de produits carburant — quasi statique,
-# refetché sans cache sur chaque requête sinon (Phase 1 audit, problème #3).
-# Clé par organisation (`organizationId` : donnée scopée, jamais globale,
-# voir commentaire de `FuelProduct.__table_args__`). Invalidé explicitement
-# dans `create_fuel_product`/`update_fuel_product` ci-dessous — jamais de
-# valeur périmée survivant une écriture dans le même process.
-fuel_product_list_cache = TTLCache(default_ttl_seconds=60.0)
+from app.modules.zylo_liquid.nommage_pompes import _resync_pump_names  # noqa: E402
+from app.modules.zylo_liquid.algorithms import SENSOR_STALE_THRESHOLD_MINUTES  # noqa: E402
+from app.modules.zylo_liquid.schemas import CreateHolykellAccountRequest  # noqa: E402
 from app.modules.zylo_liquid.permissions import (
     CARRIER_MANAGE,
     CARRIER_READ,
@@ -323,6 +325,50 @@ from app.shared.geo import City, Country, Region
 from app.shared.pagination import PaginationParams
 from app.shared.schemas import Page, PageMeta
 
+# Façade (T-034, lot 1) : stations, cuves et helpers partagés vivent dans `stations/`,
+# `tanks/` et `common.py`. Ces réexports gardent les anciens chemins (router, dev_seed,
+# tests) inchangés. Ne pas ajouter de logique ici.
+from app.modules.zylo_liquid.common import fuel_product_list_cache, _check_declaration_scope, _check_org_scope  # noqa: F401
+from app.modules.zylo_liquid.stations.service import (  # noqa: F401
+    create_fuel_product,
+    get_fuel_product,
+    create_station_fuel_product,
+    list_station_fuel_products,
+    update_station_fuel_product,
+    create_station_service,
+    update_station_service,
+    list_station_services,
+    get_pricing_policy,
+    update_pricing_policy,
+    _assert_city_exists,
+    _assert_currency_exists,
+    create_station,
+    get_station,
+    update_station,
+    deactivate_station,
+    reactivate_station,
+    list_stations,
+)
+from app.modules.zylo_liquid.tanks.service import (  # noqa: F401
+    create_tank,
+    _assert_tank_station_in_organization,
+    get_tank,
+    _TANK_PRODUCT_UPDATE_FIELDS,
+    update_tank,
+    list_tanks,
+    create_pump,
+    _assert_pump_station_in_organization,
+    get_pump,
+    update_pump,
+    list_pumps,
+    create_tank_sensor_mapping,
+    get_tank_sensor_mapping,
+    close_tank_sensor_mapping,
+    list_tank_sensor_mappings,
+    replace_tank_calibration_points,
+    list_tank_calibration_points,
+)
+
 
 def _to_naive_utc(value: datetime | None) -> datetime | None:
     """Normalise un datetime potentiellement "aware" (ex. suffixe Z, ISO
@@ -341,130 +387,22 @@ def _to_naive_utc(value: datetime | None) -> datetime | None:
     return value
 
 
-async def create_fuel_product(
-    db: AsyncSession, organization_id: uuid.UUID, data: CreateFuelProductRequest
-) -> FuelProduct:
-    existing = await db.execute(
-        select(FuelProduct).where(
-            FuelProduct.organizationId == organization_id, FuelProduct.code == data.code
-        )
-    )
-    if existing.scalar_one_or_none() is not None:
-        raise AppError(
-            code="fuel_product_code_already_used",
-            message=f"Un produit carburant avec le code '{data.code}' existe déjà pour cette organisation.",
-            status_code=409,
-        )
-
-    fuel_product = FuelProduct(organizationId=organization_id, **data.model_dump())
-    db.add(fuel_product)
-    await db.commit()
-    await db.refresh(fuel_product)
-    fuel_product_list_cache.invalidate_prefix(f"org:{organization_id}:")
-    return fuel_product
-
-
-async def get_fuel_product(db: AsyncSession, organization_id: uuid.UUID, fuel_product_id: uuid.UUID) -> FuelProduct:
-    result = await db.execute(
-        select(FuelProduct).where(
-            FuelProduct.id == fuel_product_id, FuelProduct.organizationId == organization_id
-        )
-    )
-    fuel_product = result.scalar_one_or_none()
-    if fuel_product is None:
-        raise AppError(code="fuel_product_not_found", message="Produit carburant introuvable.", status_code=404)
-    return fuel_product
-
-
 async def update_fuel_product(
     db: AsyncSession, organization_id: uuid.UUID, fuel_product_id: uuid.UUID, data: UpdateFuelProductRequest
 ) -> FuelProduct:
     fuel_product = await get_fuel_product(db, organization_id, fuel_product_id)
-    for field, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+    for field, value in updates.items():
         setattr(fuel_product, field, value)
+    if "name" in updates:
+        # Le nom des pompes embarque le nom du produit (figé en base) :
+        # resynchronisé dans la même transaction que le renommage.
+        await _resync_pump_names(db, fuel_product_id=fuel_product.id)
     await db.commit()
     await db.refresh(fuel_product)
     fuel_product_list_cache.invalidate_prefix(f"org:{organization_id}:")
     return fuel_product
 
-
-async def create_station_fuel_product(
-    db: AsyncSession, organization_id: uuid.UUID, data: CreateStationFuelProductRequest
-) -> StationFuelProduct:
-    """Associe explicitement un produit à une station — jamais déduite d'une
-    cuve ou d'un prix existant (page_configuration.md §15). Vérifie que la
-    station et le produit appartiennent bien à l'organisation courante."""
-    station = await db.execute(
-        select(Station.id).where(Station.id == data.stationId, Station.organizationId == organization_id)
-    )
-    if station.scalar_one_or_none() is None:
-        raise AppError(code="station_not_found", message="Station introuvable.", status_code=404)
-
-    fuel_product = await db.execute(
-        select(FuelProduct.id).where(FuelProduct.id == data.fuelProductId, FuelProduct.organizationId == organization_id)
-    )
-    if fuel_product.scalar_one_or_none() is None:
-        raise AppError(code="fuel_product_not_found", message="Produit carburant introuvable.", status_code=404)
-
-    existing = await db.execute(
-        select(StationFuelProduct).where(
-            StationFuelProduct.stationId == data.stationId, StationFuelProduct.fuelProductId == data.fuelProductId
-        )
-    )
-    row = existing.scalar_one_or_none()
-    if row is not None:
-        if not row.active:
-            row.active = True
-            await db.commit()
-            await db.refresh(row)
-        return row
-
-    association = StationFuelProduct(stationId=data.stationId, fuelProductId=data.fuelProductId)
-    db.add(association)
-    await db.commit()
-    await db.refresh(association)
-    return association
-
-
-async def list_station_fuel_products(
-    db: AsyncSession,
-    organization_id: uuid.UUID,
-    pagination: PaginationParams,
-    station_id: uuid.UUID | None,
-    fuel_product_id: uuid.UUID | None,
-) -> Page:
-    stmt = (
-        select(StationFuelProduct)
-        .join(Station, Station.id == StationFuelProduct.stationId)
-        .where(Station.organizationId == organization_id)
-    )
-    if station_id is not None:
-        stmt = stmt.where(StationFuelProduct.stationId == station_id)
-    if fuel_product_id is not None:
-        stmt = stmt.where(StationFuelProduct.fuelProductId == fuel_product_id)
-
-    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
-    result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
-    rows = result.scalars().all()
-    data = [StationFuelProductResponse.model_validate(row) for row in rows]
-    return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
-
-
-async def update_station_fuel_product(
-    db: AsyncSession, organization_id: uuid.UUID, association_id: uuid.UUID, data: UpdateStationFuelProductRequest
-) -> StationFuelProduct:
-    result = await db.execute(
-        select(StationFuelProduct)
-        .join(Station, Station.id == StationFuelProduct.stationId)
-        .where(StationFuelProduct.id == association_id, Station.organizationId == organization_id)
-    )
-    association = result.scalar_one_or_none()
-    if association is None:
-        raise AppError(code="station_fuel_product_not_found", message="Association station/produit introuvable.", status_code=404)
-    association.active = data.active
-    await db.commit()
-    await db.refresh(association)
-    return association
 
 
 # ================================================================
@@ -565,716 +503,6 @@ async def list_station_fuel_products_overview(db: AsyncSession, organization_id:
             currentPriceAmount=current_price, currencyCode=currency_code, priceEffectiveFrom=price_effective_from,
         ))
     return rows
-
-
-async def create_station_service(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateStationServiceRequest) -> StationServiceResponse:
-    station = await get_station(db, organization_id, data.stationId)
-    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_SERVICE_MANAGE)
-    instance = StationService(stationId=data.stationId, type=data.type, label=data.label, available=data.available)
-    db.add(instance)
-    await db.flush()
-    await record_audit_event(
-        db, organization_id, actor_user_id,
-        action="zyloLiquid.stationService.create", entity_type="StationService", entity_id=instance.id,
-        summary=f"Ajout du service {data.label}", scope_resource_type="station", scope_resource_id=station.id,
-    )
-    await db.commit()
-    await db.refresh(instance)
-    return StationServiceResponse.model_validate(instance)
-
-
-async def update_station_service(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, service_id: uuid.UUID, data: UpdateStationServiceRequest) -> StationServiceResponse:
-    result = await db.execute(
-        select(StationService, Station)
-        .join(Station, Station.id == StationService.stationId)
-        .where(StationService.id == service_id, Station.organizationId == organization_id)
-    )
-    row = result.one_or_none()
-    if row is None:
-        raise AppError(code="station_service_not_found", message="Service introuvable.", status_code=404)
-    instance, station = row
-    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_SERVICE_MANAGE)
-    for field, value in data.model_dump(exclude_unset=True).items():
-        if value is not None:
-            setattr(instance, field, value)
-    await record_audit_event(
-        db, organization_id, actor_user_id,
-        action="zyloLiquid.stationService.update", entity_type="StationService", entity_id=instance.id,
-        summary=f"Modification du service {instance.label}", scope_resource_type="station", scope_resource_id=station.id,
-    )
-    await db.commit()
-    await db.refresh(instance)
-    return StationServiceResponse.model_validate(instance)
-
-
-async def list_station_services(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_id: uuid.UUID) -> list[StationServiceResponse]:
-    station = await get_station(db, organization_id, station_id)
-    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_SERVICE_READ)
-    result = await db.execute(select(StationService).where(StationService.stationId == station_id).order_by(StationService.label))
-    return [StationServiceResponse.model_validate(r) for r in result.scalars().all()]
-
-
-async def get_pricing_policy(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_id: uuid.UUID, fuel_product_id: uuid.UUID) -> PricingPolicyResponse | None:
-    station = await get_station(db, organization_id, station_id)
-    await _check_declaration_scope(db, organization_id, actor_user_id, station, PRICING_POLICY_READ)
-    result = await db.execute(
-        select(StationProductPricingPolicy).where(
-            StationProductPricingPolicy.stationId == station_id, StationProductPricingPolicy.fuelProductId == fuel_product_id
-        )
-    )
-    instance = result.scalar_one_or_none()
-    return PricingPolicyResponse.model_validate(instance) if instance is not None else None
-
-
-async def update_pricing_policy(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_id: uuid.UUID, fuel_product_id: uuid.UUID, data: UpdatePricingPolicyRequest) -> PricingPolicyResponse:
-    station = await get_station(db, organization_id, station_id)
-    await _check_declaration_scope(db, organization_id, actor_user_id, station, PRICING_POLICY_MANAGE)
-    await get_fuel_product(db, organization_id, fuel_product_id)
-    result = await db.execute(
-        select(StationProductPricingPolicy).where(
-            StationProductPricingPolicy.stationId == station_id, StationProductPricingPolicy.fuelProductId == fuel_product_id
-        )
-    )
-    instance = result.scalar_one_or_none()
-    if instance is None:
-        instance = StationProductPricingPolicy(stationId=station_id, fuelProductId=fuel_product_id)
-        db.add(instance)
-        await db.flush()
-    for field, value in data.model_dump(exclude_unset=True).items():
-        if value is not None:
-            setattr(instance, field, value)
-    await record_audit_event(
-        db, organization_id, actor_user_id,
-        action="zyloLiquid.pricingPolicy.update", entity_type="StationProductPricingPolicy", entity_id=instance.id,
-        summary="Modification de la politique commerciale", scope_resource_type="station", scope_resource_id=station.id,
-    )
-    await db.commit()
-    await db.refresh(instance)
-    return PricingPolicyResponse.model_validate(instance)
-
-
-async def _assert_city_exists(db: AsyncSession, city_id: uuid.UUID) -> None:
-    result = await db.execute(select(City.id).where(City.id == city_id))
-    if result.scalar_one_or_none() is None:
-        raise AppError(code="city_not_found", message="Ville inconnue du référentiel géographique.", status_code=422)
-
-
-async def _assert_currency_exists(db: AsyncSession, currency_id: uuid.UUID) -> None:
-    result = await db.execute(select(Currency.id).where(Currency.id == currency_id))
-    if result.scalar_one_or_none() is None:
-        raise AppError(code="currency_not_found", message="Devise inconnue du référentiel.", status_code=422)
-
-
-async def create_station(
-    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateStationRequest
-) -> Station:
-    if data.cityId is not None:
-        await _assert_city_exists(db, data.cityId)
-    if data.currencyOverrideId is not None:
-        await _assert_currency_exists(db, data.currencyOverrideId)
-
-    existing = await db.execute(
-        select(Station).where(Station.organizationId == organization_id, Station.code == data.code)
-    )
-    if existing.scalar_one_or_none() is not None:
-        raise AppError(
-            code="station_code_already_used",
-            message=f"Une station avec le code '{data.code}' existe déjà pour cette organisation.",
-            status_code=409,
-        )
-
-    station = Station(organizationId=organization_id, status="active", **data.model_dump())
-    db.add(station)
-    await db.flush()
-    await record_audit_event(
-        db,
-        organization_id,
-        actor_user_id,
-        action="zyloLiquid.station.create",
-        entity_type="Station",
-        entity_id=station.id,
-        summary=f"Création de la station {station.name}",
-        scope_resource_type="station",
-        scope_resource_id=station.id,
-    )
-    await db.commit()
-    await db.refresh(station)
-    return station
-
-
-async def get_station(db: AsyncSession, organization_id: uuid.UUID, station_id: uuid.UUID) -> Station:
-    result = await db.execute(
-        select(Station).where(Station.id == station_id, Station.organizationId == organization_id)
-    )
-    station = result.scalar_one_or_none()
-    if station is None:
-        raise AppError(code="station_not_found", message="Station introuvable.", status_code=404)
-    return station
-
-
-async def update_station(
-    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_id: uuid.UUID, data: UpdateStationRequest
-) -> Station:
-    station = await get_station(db, organization_id, station_id)
-    updates = data.model_dump(exclude_unset=True)
-    if "cityId" in updates and updates["cityId"] is not None:
-        await _assert_city_exists(db, updates["cityId"])
-    if "currencyOverrideId" in updates and updates["currencyOverrideId"] is not None:
-        await _assert_currency_exists(db, updates["currencyOverrideId"])
-    before = {field: getattr(station, field) for field in updates}
-    for field, value in updates.items():
-        setattr(station, field, value)
-    await record_audit_event(
-        db,
-        organization_id,
-        actor_user_id,
-        action="zyloLiquid.station.update",
-        entity_type="Station",
-        entity_id=station.id,
-        summary=f"Modification de la station {station.name}",
-        changes={field: {"before": str(before[field]), "after": str(updates[field])} for field in updates},
-        scope_resource_type="station",
-        scope_resource_id=station.id,
-    )
-    await db.commit()
-    await db.refresh(station)
-    return station
-
-
-async def deactivate_station(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_id: uuid.UUID) -> Station:
-    station = await get_station(db, organization_id, station_id)
-    if station.status == "inactive":
-        raise AppError(code="station_already_inactive", message="Cette station est déjà désactivée.", status_code=409)
-    station.status = "inactive"
-    await record_audit_event(
-        db,
-        organization_id,
-        actor_user_id,
-        action="zyloLiquid.station.close",
-        entity_type="Station",
-        entity_id=station.id,
-        summary=f"Fermeture de la station {station.name}",
-        scope_resource_type="station",
-        scope_resource_id=station.id,
-    )
-    await db.commit()
-    await db.refresh(station)
-    return station
-
-
-async def reactivate_station(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_id: uuid.UUID) -> Station:
-    station = await get_station(db, organization_id, station_id)
-    if station.status == "active":
-        raise AppError(code="station_already_active", message="Cette station est déjà active.", status_code=409)
-    station.status = "active"
-    await record_audit_event(
-        db,
-        organization_id,
-        actor_user_id,
-        action="zyloLiquid.station.reopen",
-        entity_type="Station",
-        entity_id=station.id,
-        summary=f"Réouverture de la station {station.name}",
-        scope_resource_type="station",
-        scope_resource_id=station.id,
-    )
-    await db.commit()
-    await db.refresh(station)
-    return station
-
-
-async def list_stations(
-    db: AsyncSession,
-    organization_id: uuid.UUID,
-    actor_user_id: uuid.UUID,
-    pagination: PaginationParams,
-    city_id: uuid.UUID | None,
-    status: str | None,
-) -> Page:
-    """Filtrée selon la portée réelle de l'utilisateur — un gérant dont le
-    rôle n'est attribué que sur SA station (`UserRole.resourceType="station"`)
-    ne voit que celle-ci ici, jamais le réseau entier (résout le point
-    bloquant de `processus-double-sources-verite/02-modele-double-source.md`
-    §6 : la portée existait déjà côté vérification, elle est maintenant
-    appliquée au filtrage des listes)."""
-    sees_all, visible_station_ids = await list_visible_resource_ids(db, actor_user_id, organization_id, STATION_READ, "station")
-    if not sees_all and not visible_station_ids:
-        raise AppError(code="permission_denied", message=f"Permission manquante : {STATION_READ}.", status_code=403)
-
-    stmt = select(Station).where(Station.organizationId == organization_id)
-    if not sees_all:
-        stmt = stmt.where(Station.id.in_(visible_station_ids))
-    if city_id is not None:
-        stmt = stmt.where(Station.cityId == city_id)
-    if status is not None:
-        stmt = stmt.where(Station.status == status)
-    stmt = stmt.order_by(Station.name)
-
-    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
-    result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
-    stations = result.scalars().all()
-
-    station_ids = [station.id for station in stations]
-    tank_counts: dict[uuid.UUID, int] = {}
-    if station_ids:
-        count_result = await db.execute(
-            select(Tank.stationId, func.count()).where(Tank.stationId.in_(station_ids), Tank.active.is_(True)).group_by(Tank.stationId)
-        )
-        tank_counts = dict(count_result.all())
-
-    data = [
-        StationResponse.model_validate(station).model_copy(update={"activeTankCount": tank_counts.get(station.id, 0)})
-        for station in stations
-    ]
-    return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
-
-
-async def create_tank(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateTankRequest) -> Tank:
-    await get_station(db, organization_id, data.stationId)  # lève station_not_found si hors périmètre
-
-    has_existing_product = data.fuelProductId is not None
-    has_new_product = data.newFuelProductName is not None or data.newFuelProductCode is not None
-    if has_existing_product == has_new_product:
-        raise AppError(
-            code="fuel_product_selection_invalid",
-            message="Fournir soit fuelProductId, soit newFuelProductName + newFuelProductCode — jamais les deux, ni aucun des deux.",
-            status_code=422,
-        )
-
-    existing = await db.execute(
-        select(Tank).where(Tank.stationId == data.stationId, Tank.tankNumber == data.tankNumber)
-    )
-    if existing.scalar_one_or_none() is not None:
-        raise AppError(
-            code="tank_number_already_used",
-            message=f"Le numéro de cuve {data.tankNumber} est déjà utilisé dans cette station.",
-            status_code=409,
-        )
-
-    if has_existing_product:
-        fuel_product = await get_fuel_product(db, organization_id, data.fuelProductId)
-    else:
-        if not data.newFuelProductName or not data.newFuelProductCode:
-            raise AppError(
-                code="fuel_product_selection_invalid",
-                message="newFuelProductName et newFuelProductCode sont tous deux requis pour créer un produit à la volée.",
-                status_code=422,
-            )
-        fuel_product = await create_fuel_product(
-            db, organization_id, CreateFuelProductRequest(name=data.newFuelProductName, code=data.newFuelProductCode)
-        )
-
-    tank_fields = data.model_dump(exclude={"fuelProductId", "newFuelProductName", "newFuelProductCode"})
-    tank = Tank(fuelProductId=fuel_product.id, **tank_fields)
-    db.add(tank)
-    await db.flush()
-    await record_audit_event(
-        db,
-        organization_id,
-        actor_user_id,
-        action="zyloLiquid.tank.create",
-        entity_type="Tank",
-        entity_id=tank.id,
-        summary=f"Création de la cuve {tank.displayName}",
-        scope_resource_type="station",
-        scope_resource_id=tank.stationId,
-    )
-    await db.commit()
-    await db.refresh(tank)
-    return tank
-
-
-async def _assert_tank_station_in_organization(db: AsyncSession, organization_id: uuid.UUID, tank: Tank) -> None:
-    result = await db.execute(
-        select(Station.id).where(Station.id == tank.stationId, Station.organizationId == organization_id)
-    )
-    if result.scalar_one_or_none() is None:
-        raise AppError(code="tank_not_found", message="Cuve introuvable.", status_code=404)
-
-
-async def get_tank(db: AsyncSession, organization_id: uuid.UUID, tank_id: uuid.UUID) -> Tank:
-    result = await db.execute(select(Tank).where(Tank.id == tank_id))
-    tank = result.scalar_one_or_none()
-    if tank is None:
-        raise AppError(code="tank_not_found", message="Cuve introuvable.", status_code=404)
-    await _assert_tank_station_in_organization(db, organization_id, tank)
-    return tank
-
-
-_TANK_PRODUCT_UPDATE_FIELDS = {"fuelProductId", "newFuelProductName", "newFuelProductCode"}
-
-
-async def update_tank(
-    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, tank_id: uuid.UUID, data: UpdateTankRequest
-) -> Tank:
-    tank = await get_tank(db, organization_id, tank_id)
-    updates = data.model_dump(exclude_unset=True, exclude=_TANK_PRODUCT_UPDATE_FIELDS)
-    before = {field: getattr(tank, field) for field in updates}
-    for field, value in updates.items():
-        setattr(tank, field, value)
-
-    # Changement de produit carburant (P0-1, audit module Stations
-    # 2026-09-16) — traité à part du reste car il exige de résoudre/créer un
-    # FuelProduct, exactement comme `create_tank` : soit un produit
-    # existant, soit un nouveau créé à la volée, jamais aucun des deux ni les
-    # deux à la fois. `productSince` n'est mis à jour que si le produit
-    # résolu diffère réellement de l'actuel, pour ne jamais réinitialiser
-    # cette date lors d'une simple modification de seuils.
-    has_existing_product = data.fuelProductId is not None
-    has_new_product = data.newFuelProductName is not None or data.newFuelProductCode is not None
-    if has_existing_product or has_new_product:
-        if has_existing_product and has_new_product:
-            raise AppError(
-                code="fuel_product_selection_invalid",
-                message="Fournir soit fuelProductId, soit newFuelProductName + newFuelProductCode — jamais les deux.",
-                status_code=422,
-            )
-        if has_existing_product:
-            fuel_product = await get_fuel_product(db, organization_id, data.fuelProductId)
-        else:
-            if not data.newFuelProductName or not data.newFuelProductCode:
-                raise AppError(
-                    code="fuel_product_selection_invalid",
-                    message="newFuelProductName et newFuelProductCode sont tous deux requis pour créer un produit à la volée.",
-                    status_code=422,
-                )
-            fuel_product = await create_fuel_product(
-                db, organization_id, CreateFuelProductRequest(name=data.newFuelProductName, code=data.newFuelProductCode)
-            )
-        if fuel_product.id != tank.fuelProductId:
-            before["fuelProductId"] = tank.fuelProductId
-            updates["fuelProductId"] = fuel_product.id
-            tank.fuelProductId = fuel_product.id
-            tank.productSince = date.today()
-
-    await record_audit_event(
-        db,
-        organization_id,
-        actor_user_id,
-        action="zyloLiquid.tank.update",
-        entity_type="Tank",
-        entity_id=tank.id,
-        summary=f"Modification de la cuve {tank.displayName}",
-        changes={field: {"before": str(before[field]), "after": str(updates[field])} for field in updates},
-        scope_resource_type="station",
-        scope_resource_id=tank.stationId,
-    )
-    await db.commit()
-    await db.refresh(tank)
-    return tank
-
-
-async def list_tanks(
-    db: AsyncSession,
-    organization_id: uuid.UUID,
-    actor_user_id: uuid.UUID,
-    pagination: PaginationParams,
-    station_id: uuid.UUID | None,
-    fuel_product_id: uuid.UUID | None,
-    active: bool | None,
-) -> Page:
-    """Une cuve n'a pas de portée propre : filtrée par la STATION visible de
-    l'utilisateur (même principe que `list_stations`, `_tank_station_scope`
-    au niveau vérification) — un gérant/pompiste scopé à une station ne voit
-    ici que les cuves de celle-ci."""
-    sees_all, visible_station_ids = await list_visible_resource_ids(db, actor_user_id, organization_id, TANK_READ, "station")
-    if not sees_all and not visible_station_ids:
-        raise AppError(code="permission_denied", message=f"Permission manquante : {TANK_READ}.", status_code=403)
-
-    stmt = select(Tank).join(Station, Station.id == Tank.stationId).where(Station.organizationId == organization_id)
-    if not sees_all:
-        stmt = stmt.where(Tank.stationId.in_(visible_station_ids))
-    if station_id is not None:
-        stmt = stmt.where(Tank.stationId == station_id)
-    if fuel_product_id is not None:
-        stmt = stmt.where(Tank.fuelProductId == fuel_product_id)
-    if active is not None:
-        stmt = stmt.where(Tank.active.is_(active))
-    stmt = stmt.order_by(Tank.tankNumber)
-
-    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
-    result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
-    tanks = result.scalars().all()
-    data = [TankResponse.model_validate(tank) for tank in tanks]
-    return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
-
-
-async def create_pump(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreatePumpRequest) -> Pump:
-    await get_station(db, organization_id, data.stationId)  # lève station_not_found si hors périmètre
-    tank = await get_tank(db, organization_id, data.tankId)
-    if tank.stationId != data.stationId:
-        raise AppError(
-            code="pump_tank_station_mismatch",
-            message="La cuve sélectionnée n'appartient pas à la station de la pompe.",
-            status_code=422,
-        )
-
-    pump = Pump(stationId=data.stationId, tankId=data.tankId, name=data.name)
-    db.add(pump)
-    await db.flush()
-    await record_audit_event(
-        db,
-        organization_id,
-        actor_user_id,
-        action="zyloLiquid.pump.create",
-        entity_type="Pump",
-        entity_id=pump.id,
-        summary=f"Création de la pompe {pump.name}",
-        scope_resource_type="station",
-        scope_resource_id=pump.stationId,
-    )
-    await db.commit()
-    await db.refresh(pump)
-    return pump
-
-
-async def _assert_pump_station_in_organization(db: AsyncSession, organization_id: uuid.UUID, pump: Pump) -> None:
-    result = await db.execute(
-        select(Station.id).where(Station.id == pump.stationId, Station.organizationId == organization_id)
-    )
-    if result.scalar_one_or_none() is None:
-        raise AppError(code="pump_not_found", message="Pompe introuvable.", status_code=404)
-
-
-async def get_pump(db: AsyncSession, organization_id: uuid.UUID, pump_id: uuid.UUID) -> Pump:
-    result = await db.execute(select(Pump).where(Pump.id == pump_id))
-    pump = result.scalar_one_or_none()
-    if pump is None:
-        raise AppError(code="pump_not_found", message="Pompe introuvable.", status_code=404)
-    await _assert_pump_station_in_organization(db, organization_id, pump)
-    return pump
-
-
-async def update_pump(
-    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, pump_id: uuid.UUID, data: UpdatePumpRequest
-) -> Pump:
-    pump = await get_pump(db, organization_id, pump_id)
-    updates = data.model_dump(exclude_unset=True)
-
-    if "tankId" in updates and updates["tankId"] is not None:
-        tank = await get_tank(db, organization_id, updates["tankId"])
-        if tank.stationId != pump.stationId:
-            raise AppError(
-                code="pump_tank_station_mismatch",
-                message="La cuve sélectionnée n'appartient pas à la station de la pompe.",
-                status_code=422,
-            )
-
-    before = {field: getattr(pump, field) for field in updates}
-    for field, value in updates.items():
-        setattr(pump, field, value)
-
-    await record_audit_event(
-        db,
-        organization_id,
-        actor_user_id,
-        action="zyloLiquid.pump.update",
-        entity_type="Pump",
-        entity_id=pump.id,
-        summary=f"Modification de la pompe {pump.name}",
-        changes={field: {"before": str(before[field]), "after": str(updates[field])} for field in updates},
-        scope_resource_type="station",
-        scope_resource_id=pump.stationId,
-    )
-    await db.commit()
-    await db.refresh(pump)
-    return pump
-
-
-async def list_pumps(
-    db: AsyncSession,
-    organization_id: uuid.UUID,
-    actor_user_id: uuid.UUID,
-    pagination: PaginationParams,
-    station_id: uuid.UUID | None,
-    active: bool | None,
-) -> Page:
-    """Une pompe n'a pas de portée propre : filtrée par la STATION visible de
-    l'utilisateur, même principe que `list_tanks`/`_tank_station_scope`."""
-    sees_all, visible_station_ids = await list_visible_resource_ids(db, actor_user_id, organization_id, PUMP_READ, "station")
-    if not sees_all and not visible_station_ids:
-        raise AppError(code="permission_denied", message=f"Permission manquante : {PUMP_READ}.", status_code=403)
-
-    stmt = select(Pump).join(Station, Station.id == Pump.stationId).where(Station.organizationId == organization_id)
-    if not sees_all:
-        stmt = stmt.where(Pump.stationId.in_(visible_station_ids))
-    if station_id is not None:
-        stmt = stmt.where(Pump.stationId == station_id)
-    if active is not None:
-        stmt = stmt.where(Pump.active.is_(active))
-    stmt = stmt.order_by(Pump.name)
-
-    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
-    result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
-    pumps = result.scalars().all()
-    data = [PumpResponse.model_validate(pump) for pump in pumps]
-    return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
-
-
-async def create_tank_sensor_mapping(
-    db: AsyncSession, organization_id: uuid.UUID, data: CreateTankSensorMappingRequest
-) -> TankSensorMapping:
-    tank = await get_tank(db, organization_id, data.tankId)
-
-    # hkSerialNumber (numéro de série physique) correspond à plusieurs lignes
-    # du registre Holykell — une par canal de mesure. Résolu via hkSensorName
-    # préfixé par measurementType, confirmé sur la base réelle zylo_liquid
-    # (ex. "product_level Cuve 1", "water_level Cuve 1", "temperature Cuve 1"
-    # — issue #29), jamais une invention.
-    result = await db.execute(
-        select(HolykellDeviceRegistry).where(
-            HolykellDeviceRegistry.hkSerialNumber == data.hkSerialNumber,
-            HolykellDeviceRegistry.hkSensorName.ilike(f"{data.measurementType}%"),
-        )
-    )
-    registry_entry = result.scalars().first()
-    if registry_entry is None:
-        raise AppError(
-            code="sensor_not_found_in_holykell_registry",
-            message="Ce capteur n'a pas encore été vu par Holykell, vérifier qu'il est bien configuré côté plateforme du fabricant.",
-            status_code=422,
-        )
-
-    existing = await db.execute(
-        select(TankSensorMapping).where(
-            TankSensorMapping.tankId == tank.id,
-            TankSensorMapping.measurementType == data.measurementType,
-            TankSensorMapping.active.is_(True),
-        )
-    )
-    if existing.scalar_one_or_none() is not None:
-        raise AppError(
-            code="tank_sensor_mapping_already_active",
-            message="Une association active existe déjà pour cette cuve et ce type de mesure — la clore d'abord.",
-            status_code=409,
-        )
-
-    now = datetime.now(timezone.utc).replace(tzinfo=None)  # colonnes TIMESTAMP WITHOUT TIME ZONE (Phase 1)
-    mapping = TankSensorMapping(
-        hkSensorId=registry_entry.hkSensorId,
-        tankId=tank.id,
-        measurementType=data.measurementType,
-        validFrom=now,
-        active=True,
-        createdAt=now,
-    )
-    db.add(mapping)
-    await db.commit()
-    await db.refresh(mapping)
-    return mapping
-
-
-async def get_tank_sensor_mapping(db: AsyncSession, organization_id: uuid.UUID, mapping_id: uuid.UUID) -> TankSensorMapping:
-    result = await db.execute(select(TankSensorMapping).where(TankSensorMapping.id == mapping_id))
-    mapping = result.scalar_one_or_none()
-    if mapping is None:
-        raise AppError(code="tank_sensor_mapping_not_found", message="Association introuvable.", status_code=404)
-    await get_tank(db, organization_id, mapping.tankId)  # lève tank_not_found si hors périmètre
-    return mapping
-
-
-async def close_tank_sensor_mapping(db: AsyncSession, organization_id: uuid.UUID, mapping_id: uuid.UUID) -> TankSensorMapping:
-    mapping = await get_tank_sensor_mapping(db, organization_id, mapping_id)
-    if not mapping.active:
-        raise AppError(code="tank_sensor_mapping_already_closed", message="Cette association est déjà close.", status_code=409)
-    mapping.active = False
-    mapping.validUntil = datetime.now(timezone.utc).replace(tzinfo=None)
-    await db.commit()
-    await db.refresh(mapping)
-    return mapping
-
-
-async def list_tank_sensor_mappings(
-    db: AsyncSession, organization_id: uuid.UUID, pagination: PaginationParams, tank_id: uuid.UUID | None
-) -> Page:
-    stmt = (
-        select(TankSensorMapping)
-        .join(Tank, Tank.id == TankSensorMapping.tankId)
-        .join(Station, Station.id == Tank.stationId)
-        .where(Station.organizationId == organization_id)
-    )
-    if tank_id is not None:
-        stmt = stmt.where(TankSensorMapping.tankId == tank_id)
-    stmt = stmt.order_by(TankSensorMapping.validFrom.desc())
-
-    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
-    result = await db.execute(stmt.limit(pagination.limit).offset(pagination.offset))
-    mappings = result.scalars().all()
-
-    # Enrichissement de chaque mapping avec l'état *mesuré* du sensor côté
-    # registre Holykell (dernière valeur, dernière visibilité, statut
-    # remonté par l'équipement) : une seule requête pour tous les sensors de
-    # la page, jamais N+1. Un sensor absent du registre (mapping sans
-    # découverte Holykell) reste `live: null` — pas d'état inventé.
-    sensor_ids = [mapping.hkSensorId for mapping in mappings]
-    registry_by_sensor_id: dict[int, HolykellDeviceRegistry] = {}
-    if sensor_ids:
-        registry_rows = await db.execute(
-            select(HolykellDeviceRegistry).where(HolykellDeviceRegistry.hkSensorId.in_(sensor_ids))
-        )
-        registry_by_sensor_id = {row.hkSensorId: row for row in registry_rows.scalars().all()}
-
-    data = []
-    for mapping in mappings:
-        item = TankSensorMappingResponse.model_validate(mapping)
-        registry = registry_by_sensor_id.get(mapping.hkSensorId)
-        if registry is not None:
-            item.live = HolykellSensorLiveState(
-                hkSerialNumber=registry.hkSerialNumber,
-                hkSensorName=registry.hkSensorName,
-                hkUnit=registry.hkUnit,
-                hkReportCycleSec=registry.hkReportCycleSec,
-                hkLastStatus=registry.hkLastStatus,
-                hkLastSeenAt=registry.hkLastSeenAt,
-                lastValue=registry.lastValue,
-                lastValueAt=registry.lastValueAt,
-                syncFrom=registry.syncFrom,
-            )
-        data.append(item)
-    return Page(data=data, meta=PageMeta(total=total or 0, limit=pagination.limit, offset=pagination.offset))
-
-
-async def replace_tank_calibration_points(
-    db: AsyncSession, organization_id: uuid.UUID, tank_id: uuid.UUID, data: ReplaceTankCalibrationPointsRequest
-) -> list[TankCalibrationPoint]:
-    tank = await get_tank(db, organization_id, tank_id)
-
-    sorted_points = sorted(data.points, key=lambda p: p.heightMm)
-    max_height = sorted_points[-1].heightMm
-    if tank.tankHeightMm is not None and max_height > tank.tankHeightMm:
-        raise AppError(
-            code="calibration_height_exceeds_tank",
-            message=f"La hauteur maximale de la table ({max_height} mm) dépasse la hauteur physique déclarée de la cuve ({tank.tankHeightMm} mm).",
-            status_code=422,
-        )
-
-    for previous, current in zip(sorted_points, sorted_points[1:]):
-        if current.volumeLiters < previous.volumeLiters:
-            raise AppError(
-                code="calibration_table_not_monotonic",
-                message="Le volume ne doit jamais diminuer alors que la hauteur augmente — table de calibration incohérente.",
-                status_code=422,
-            )
-
-    # Remplacement intégral, jamais une fusion partielle (Point 2 §1.4).
-    await db.execute(TankCalibrationPoint.__table__.delete().where(TankCalibrationPoint.tankId == tank_id))
-    new_points = [
-        TankCalibrationPoint(tankId=tank_id, heightMm=point.heightMm, volumeLiters=point.volumeLiters)
-        for point in sorted_points
-    ]
-    db.add_all(new_points)
-    await db.commit()
-    for point in new_points:
-        await db.refresh(point)
-    return new_points
-
-
-async def list_tank_calibration_points(db: AsyncSession, organization_id: uuid.UUID, tank_id: uuid.UUID) -> list[TankCalibrationPoint]:
-    await get_tank(db, organization_id, tank_id)  # lève tank_not_found si hors périmètre
-    result = await db.execute(
-        select(TankCalibrationPoint).where(TankCalibrationPoint.tankId == tank_id).order_by(TankCalibrationPoint.heightMm)
-    )
-    return list(result.scalars().all())
 
 
 async def _get_active_registry_entry(db: AsyncSession, tank_id: uuid.UUID, measurement_type: str) -> HolykellDeviceRegistry | None:
@@ -1417,7 +645,18 @@ def _build_tank_current_state(
             lastMeasurementAt=None,
         )
 
-    sensor_status = "online" if product_level.hkLastStatus == 1 else "offline"
+    # "online" exige à la fois le dernier statut connu ET une valeur reçue
+    # récemment — sans ce second critère, une synchronisation totalement
+    # arrêtée (compte désactivé, panne API) laisse `hkLastStatus` figé à sa
+    # dernière valeur pour toujours, affichant "connectée" indéfiniment
+    # (constat terrain, badge "sonde connectée" sur une cuve muette depuis
+    # 2 jours).
+    is_stale = (
+        product_level.lastValueAt is None
+        or datetime.now(timezone.utc).replace(tzinfo=None) - product_level.lastValueAt
+        > timedelta(minutes=SENSOR_STALE_THRESHOLD_MINUTES)
+    )
+    sensor_status = "online" if product_level.hkLastStatus == 1 and not is_stale else "offline"
     height_mm = float(product_level.lastValue)
 
     volume_brut = interpolate_height_to_volume(calibration_points, height_mm) if calibration_points else None
@@ -1484,6 +723,7 @@ def _build_tank_current_state(
         emptyVolumeLiters=empty_volume,
         lastMeasurementAt=product_level.lastValueAt,
     )
+
 
 
 async def get_tanks_current_state_batch(db: AsyncSession, tanks: list[Tank]) -> dict[uuid.UUID, TankCurrentStateResponse]:
@@ -1874,16 +1114,25 @@ async def get_delivery_in_progress_for_tank(db: AsyncSession, tank_id: uuid.UUID
     return {**candidate, "startVolumeLiters": start_volume, "currentVolumeLiters": current_volume}
 
 
-async def list_deliveries_in_progress(db: AsyncSession, organization_id: uuid.UUID) -> list[DeliveryInProgressResponse]:
-    """Balaie toutes les cuves actives de l'organisation — coût raisonnable
-    à l'échelle d'un réseau de stations (dizaines de cuves), chaque
-    recherche étant bornée à `lookback_minutes` plutôt qu'à tout
+async def list_deliveries_in_progress(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID) -> list[DeliveryInProgressResponse]:
+    """Balaie toutes les cuves actives VISIBLES de l'utilisateur — coût
+    raisonnable à l'échelle d'un réseau de stations (dizaines de cuves),
+    chaque recherche étant bornée à `lookback_minutes` plutôt qu'à tout
     l'historique. Jamais une deuxième source de vérité : une cuve dont la
     hausse vient de se stabiliser disparaîtra d'ici (elle devient une vraie
-    `DeliveryDetected` au prochain cycle de `run_delivery_detection_for_tank`)."""
-    tanks_result = await db.execute(
-        select(Tank).join(Station, Station.id == Tank.stationId).where(Station.organizationId == organization_id, Tank.active)
-    )
+    `DeliveryDetected` au prochain cycle de `run_delivery_detection_for_tank`).
+    Filtrage par portée ajouté le 2026-09-27 (même principe que
+    `list_deliveries`/`list_stations`) — un Gérant scopé à sa station ne
+    voit ici que les cuves de celle-ci, jamais un 403 sur tout l'endpoint
+    ni les cuves des autres stations."""
+    sees_all, visible_station_ids = await list_visible_resource_ids(db, actor_user_id, organization_id, DELIVERY_READ, "station")
+    if not sees_all and not visible_station_ids:
+        raise AppError(code="permission_denied", message=f"Permission manquante : {DELIVERY_READ}.", status_code=403)
+
+    stmt = select(Tank).join(Station, Station.id == Tank.stationId).where(Station.organizationId == organization_id, Tank.active)
+    if not sees_all:
+        stmt = stmt.where(Tank.stationId.in_(visible_station_ids))
+    tanks_result = await db.execute(stmt)
     tanks = list(tanks_result.scalars().all())
 
     results: list[DeliveryInProgressResponse] = []
@@ -1904,6 +1153,7 @@ async def list_deliveries_in_progress(db: AsyncSession, organization_id: uuid.UU
             )
         )
     return results
+
 
 
 def _delivery_to_response(delivery: DeliveryDetected, tank: Tank) -> DeliveryDetectedResponse:
@@ -2973,6 +2223,46 @@ async def get_holykell_account_sync_status(db: AsyncSession, organization_id: uu
     return account
 
 
+async def create_holykell_account(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateHolykellAccountRequest
+) -> HolykellAccount:
+    """Connecte l'organisation à un compte Holykell réel. Les identifiants sont vérifiés en
+    se connectant AVANT tout enregistrement (jamais un compte qui échouerait en silence à chaque
+    cycle de synchro). Le mot de passe n'est écrit que chiffré (T-027, `holykellPasswordChiffre`) ;
+    `tenantId` vient de l'API Holykell au login, jamais de la saisie."""
+    if settings.HOLYKELL_SYNC_BASE_URL is None:
+        raise AppError(
+            code="holykell_sync_not_configured",
+            message="Aucune URL Holykell n'est configurée pour cet environnement (HOLYKELL_SYNC_BASE_URL).",
+            status_code=503,
+        )
+    async with httpx.AsyncClient() as client:
+        try:
+            _, tenant_id = await holykell_client.login(client, settings.HOLYKELL_SYNC_BASE_URL, data.holykellUsername, data.holykellPassword)
+        except HolykellAuthError:
+            raise AppError(code="holykell_login_failed", message="Identifiant ou mot de passe Holykell incorrect.", status_code=422)
+        except HolykellApiError:
+            raise AppError(code="holykell_unreachable", message="Impossible de joindre l'API Holykell — réessayer plus tard.", status_code=502)
+
+    account = HolykellAccount(
+        organizationId=organization_id,
+        holykellUsername=data.holykellUsername,
+        holykellPasswordChiffre=chiffrer(data.holykellPassword),
+        holykellPassword=None,
+        holykellTenantId=tenant_id,
+        syncEnabled=True,
+    )
+    db.add(account)
+    await db.flush()
+    await record_audit_event(
+        db, organization_id=organization_id, actor_user_id=actor_user_id, action="zyloLiquid.holykellAccount.create",
+        entity_type="HolykellAccount", entity_id=account.id, summary=f"Connexion au compte Holykell {data.holykellUsername}",
+    )
+    await db.commit()
+    await db.refresh(account)
+    return account
+
+
 async def list_holykell_accounts(db: AsyncSession, organization_id: uuid.UUID) -> list[HolykellAccount]:
     """Liste des comptes Holykell de l'organisation — permet au frontend de
     retrouver l'état de synchro (lastSyncAt) sans connaître à l'avance l'ID
@@ -3926,12 +3216,6 @@ async def get_network_cash_summary(
 # ================================================================
 
 
-async def _check_declaration_scope(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station: Station, permission_code: str) -> None:
-    allowed = await user_has_permission(db, actor_user_id, organization_id, permission_code, "station", station.id)
-    if not allowed:
-        raise AppError(code="permission_denied", message=f"Permission manquante : {permission_code}.", status_code=403)
-
-
 async def _get_declaration_or_404(db: AsyncSession, model_cls: type[DeclarationMixin], organization_id: uuid.UUID, declaration_id: uuid.UUID):
     instance = await db.get(model_cls, declaration_id)
     if instance is not None:
@@ -4661,7 +3945,6 @@ async def list_trucks(db: AsyncSession, organization_id: uuid.UUID, actor_user_i
 # resolve_truck_stop_reconciliation.
 
 
-
 async def assign_truck_to_purchase_order(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, purchase_order_id: uuid.UUID, data: TruckOrderAssignmentRequest) -> TruckOrderAssignmentResponse:
     purchase_order = await _get_purchase_order_or_404(db, organization_id, purchase_order_id)
     station = await db.get(Station, purchase_order.stationId)
@@ -4887,12 +4170,6 @@ async def _receive_purchase_order_line_if_complete(db: AsyncSession, purchase_or
 # ================================================================
 
 
-async def _check_org_scope(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, permission_code: str) -> None:
-    allowed = await user_has_permission(db, actor_user_id, organization_id, permission_code)
-    if not allowed:
-        raise AppError(code="permission_denied", message=f"Permission manquante : {permission_code}.", status_code=403)
-
-
 async def _get_commercial_account_or_404(db: AsyncSession, organization_id: uuid.UUID, account_id: uuid.UUID) -> CommercialAccount:
     account = await db.get(CommercialAccount, account_id)
     if account is None or account.organizationId != organization_id:
@@ -5014,10 +4291,17 @@ async def create_sale(db: AsyncSession, organization_id: uuid.UUID, actor_user_i
         pump = await db.get(Pump, data.pumpId)
         if pump is None or pump.stationId != station.id:
             raise AppError(code="pump_not_found", message="Pompe introuvable pour cette station.", status_code=404)
+        if not pump.active:
+            raise AppError(
+                code="pump_inactive",
+                message=f"La pompe « {pump.name} » est désactivée : réactivez-la dans la configuration de la station avant d'y déclarer une vente.",
+                status_code=422,
+            )
 
     sale = Sale(
         stationId=station.id,
         authorUserId=actor_user_id,
+        shiftStart=_to_naive_utc(data.shiftStart) if data.shiftStart is not None else None,
         eventAt=_to_naive_utc(data.eventAt),
         fuelProductId=data.fuelProductId,
         quantityLiters=data.quantityLiters,
@@ -5051,6 +4335,7 @@ async def create_sale(db: AsyncSession, organization_id: uuid.UUID, actor_user_i
             logger.exception("Échec du déclenchement de l'alerte stock_declared_discrepancy après create_sale (sale=%s)", sale.id)
 
     return SaleResponse.model_validate(sale)
+
 
 
 async def bulk_import_sales(
@@ -5101,6 +4386,14 @@ async def bulk_import_sales(
             continue
         if pump.stationId != station.id:
             errors.append(BulkImportRowError(rowNumber=row.rowNumber, message="Cette pompe n'appartient pas à la station indiquée."))
+            continue
+        if not pump.active:
+            errors.append(
+                BulkImportRowError(
+                    rowNumber=row.rowNumber,
+                    message=f"La pompe « {pump.name} » est désactivée : réactivez-la dans la configuration de la station avant d'y déclarer une vente. (pump_inactive)",
+                )
+            )
             continue
 
         tank = await db.get(Tank, pump.tankId)
@@ -5178,6 +4471,7 @@ async def bulk_import_sales(
             logger.exception("Échec du déclenchement de l'alerte stock_declared_discrepancy après bulk_import_sales (tank=%s, day=%s)", tank.id, day)
 
     return BulkImportSalesResponse(createdCount=created_count, errors=errors)
+
 
 
 async def list_sales(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, pagination: PaginationParams, station_id: uuid.UUID | None) -> Page:
@@ -5691,6 +4985,13 @@ async def evaluate_manual_gauging_declaration_reconciliation(db: AsyncSession, o
     declaration = await _get_declaration_or_404(db, ManualGaugingDeclaration, organization_id, declaration_id)
     station = await db.get(Station, declaration.stationId)
     await _check_declaration_scope(db, organization_id, actor_user_id, station, RECONCILIATION_READ)
+    return await _evaluate_manual_gauging_declaration_reconciliation_core(db, declaration)
+
+
+async def _evaluate_manual_gauging_declaration_reconciliation_core(db: AsyncSession, declaration: ManualGaugingDeclaration) -> ReconciliationRecordResponse:
+    """Coeur du rapprochement jaugeage manuel <-> télémétrie, SANS contrôle de
+    permission. Extrait pour le jaugeage de fermeture (D2) : celui-ci est protégé
+    par `tankGauging.manage`, pas par `reconciliation.read`. Commit interne."""
     tank = await db.get(Tank, declaration.tankId)
 
     settings = await _get_reconciliation_settings(db, declaration.stationId)
@@ -6684,214 +5985,6 @@ async def update_station_financial(db: AsyncSession, organization_id: uuid.UUID,
     await db.commit()
     await db.refresh(station)
     return _station_financial_response(station)
-
-
-# ================================================================
-# Module Personnel — création de compte + profil de poste pour un membre du
-# personnel d'une station (mockup emalioration/personnel/). Le rôle
-# lui-même reste géré par le RBAC existant (assign_role), jamais dupliqué.
-# ================================================================
-
-
-def _station_staff_response(profile: StationStaffProfile, user: User) -> StationStaffResponse:
-    photo_url = None
-    if user.photoStorageReference:
-        from app.shared.storage import get_storage_backend
-
-        photo_url = get_storage_backend().get_download_url(user.photoStorageReference)
-    return StationStaffResponse(
-        id=profile.id, userId=user.id, organizationId=profile.organizationId,
-        email=user.email, fullName=user.fullName, firstName=user.firstName, lastName=user.lastName,
-        phone=user.phone, photoUrl=photo_url, status=user.status,
-        employeeNumber=profile.employeeNumber, contractType=profile.contractType,
-        assignedStationId=profile.assignedStationId, directManagerUserId=profile.directManagerUserId,
-        assignedAt=profile.assignedAt,
-    )
-
-
-async def create_station_staff_member(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateStationStaffRequest) -> CreateStationStaffResponse:
-    station = await get_station(db, organization_id, data.stationId)
-    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_MANAGE)
-    await check_email_available(db, data.email)
-
-    # Mot de passe temporaire — généré côté serveur, jamais choisi par la
-    # personne (aucune infrastructure d'invitation par email aujourd'hui,
-    # décision validée avec le commanditaire). Affiché UNE SEULE fois dans
-    # cette réponse, jamais stocké en clair, jamais rejoué ailleurs.
-    temporary_password = secrets.token_urlsafe(9)
-    full_name = f"{data.firstName} {data.lastName}".strip()
-    user = build_user(
-        email=data.email, full_name=full_name, hashed_password=hash_password(temporary_password),
-        must_change_password=True, first_name=data.firstName, last_name=data.lastName, phone=data.phone,
-    )
-    if data.photoStorageReference:
-        user.photoStorageReference = data.photoStorageReference
-    db.add(user)
-    await db.flush()
-
-    db.add(OrganizationUser(organizationId=organization_id, userId=user.id))
-    profile = StationStaffProfile(
-        organizationId=organization_id, userId=user.id, employeeNumber=data.employeeNumber,
-        contractType=data.contractType, assignedStationId=data.stationId,
-        directManagerUserId=data.directManagerUserId, assignedAt=date.today(),
-    )
-    db.add(profile)
-    await record_audit_event(
-        db, organization_id, actor_user_id,
-        action="zyloLiquid.stationStaff.create", entity_type="User", entity_id=user.id,
-        summary=f"Création du membre du personnel {full_name} ({data.email})",
-        scope_resource_type="station", scope_resource_id=data.stationId,
-    )
-    await db.commit()
-    await db.refresh(user)
-    await db.refresh(profile)
-
-    if data.roleId is not None:
-        # Étape distincte, déjà auditée par `assign_role` lui-même — jamais
-        # une logique d'assignation dupliquée ici.
-        await assign_role(db, organization_id, actor_user_id, user.id, data.roleId, resource_type="station", resource_id=data.stationId)
-
-    return CreateStationStaffResponse(staff=_station_staff_response(profile, user), temporaryPassword=temporary_password)
-
-
-async def _get_station_staff_or_404(db: AsyncSession, organization_id: uuid.UUID, user_id: uuid.UUID) -> tuple[StationStaffProfile, User]:
-    result = await db.execute(select(StationStaffProfile).where(StationStaffProfile.organizationId == organization_id, StationStaffProfile.userId == user_id))
-    profile = result.scalar_one_or_none()
-    if profile is None:
-        raise AppError(code="station_staff_not_found", message="Membre du personnel introuvable.", status_code=404)
-    user = await db.get(User, user_id)
-    if user is None:
-        raise AppError(code="station_staff_not_found", message="Membre du personnel introuvable.", status_code=404)
-    return profile, user
-
-
-async def update_station_staff_profile(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, user_id: uuid.UUID, data: UpdateStationStaffRequest) -> StationStaffResponse:
-    profile, user = await _get_station_staff_or_404(db, organization_id, user_id)
-    # Portée : la station ACTUELLEMENT affectée (avant modification) — un
-    # gérant ne peut modifier que le personnel de sa propre station, y
-    # compris pour le réaffecter ailleurs.
-    if profile.assignedStationId is not None:
-        station = await get_station(db, organization_id, profile.assignedStationId)
-        await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_MANAGE)
-    else:
-        await _check_org_scope(db, organization_id, actor_user_id, STATION_STAFF_MANAGE)
-
-    updates = data.model_dump(exclude_unset=True)
-    name_changed = "firstName" in updates or "lastName" in updates
-    for field in ("firstName", "lastName", "phone", "photoStorageReference"):
-        if field in updates:
-            setattr(user, field, updates.pop(field))
-    if name_changed:
-        # `fullName` reste le nom affiché ailleurs dans l'app (audit,
-        # sélecteurs) — toujours recalculé depuis prénom/nom à jour.
-        user.fullName = f"{user.firstName or ''} {user.lastName or ''}".strip() or user.fullName
-    for field, value in updates.items():
-        setattr(profile, field, value)
-    await db.commit()
-    await db.refresh(profile)
-    await db.refresh(user)
-    return _station_staff_response(profile, user)
-
-
-async def deactivate_station_staff_access(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, user_id: uuid.UUID) -> StationStaffResponse:
-    profile, user = await _get_station_staff_or_404(db, organization_id, user_id)
-    if profile.assignedStationId is not None:
-        station = await get_station(db, organization_id, profile.assignedStationId)
-        await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_MANAGE)
-    else:
-        await _check_org_scope(db, organization_id, actor_user_id, STATION_STAFF_MANAGE)
-    user.status = "suspended"
-    await record_audit_event(
-        db, organization_id, actor_user_id,
-        action="zyloLiquid.stationStaff.deactivate", entity_type="User", entity_id=user.id,
-        summary=f"Désactivation de l'accès de {user.fullName}",
-        scope_resource_type="station", scope_resource_id=profile.assignedStationId,
-    )
-    await db.commit()
-    await db.refresh(profile)
-    await db.refresh(user)
-    return _station_staff_response(profile, user)
-
-
-async def change_station_staff_role(
-    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, user_id: uuid.UUID, data: ChangeStationStaffRoleRequest
-) -> StationStaffResponse:
-    """Remplace l'attribution de rôle de ce membre du personnel, scopée à sa
-    station d'affectation (mission « fiche Personnel — gestion des droits »,
-    2026-09-16). Contourne volontairement les endpoints RBAC génériques
-    (`POST /rbac/.../user-roles`), qui exigent `ROLE_MANAGE` organisation
-    entière et sont donc inutilisables par un gérant de station — même
-    pattern que `create_station_staff_member` : `assign_role` est appelé
-    directement en tant que fonction de service, après vérification de
-    `STATION_STAFF_MANAGE` scopée à la station. La protection anti-escalade
-    de privilèges d'`assign_role` (`_assert_no_privilege_escalation`)
-    s'applique sans changement : un gérant ne peut jamais attribuer un rôle
-    plus puissant que le sien sur cette même station."""
-    profile, user = await _get_station_staff_or_404(db, organization_id, user_id)
-    if profile.assignedStationId is None:
-        raise AppError(code="station_staff_not_assigned", message="Ce membre du personnel n'est rattaché à aucune station.", status_code=422)
-    station = await get_station(db, organization_id, profile.assignedStationId)
-    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_MANAGE)
-
-    result = await db.execute(
-        select(UserRole).where(
-            UserRole.organizationId == organization_id,
-            UserRole.userId == user_id,
-            UserRole.resourceType == "station",
-            UserRole.resourceId == profile.assignedStationId,
-        )
-    )
-    for existing_assignment in result.scalars().all():
-        await unassign_role(db, organization_id, actor_user_id, existing_assignment.id)
-
-    await assign_role(db, organization_id, actor_user_id, user_id, data.roleId, resource_type="station", resource_id=profile.assignedStationId)
-    await db.refresh(profile)
-    await db.refresh(user)
-    return _station_staff_response(profile, user)
-
-
-async def reset_station_staff_password(
-    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, user_id: uuid.UUID
-) -> str:
-    """Réinitialisation d'un mot de passe PAR UN TIERS (fiche Personnel) —
-    distinct de `change_password` (libre-service, exige l'ancien mot de
-    passe). Même mécanisme que la création d'un membre du personnel
-    (`create_station_staff_member`) : mot de passe temporaire généré côté
-    serveur, jamais choisi par la personne, retourné en clair une seule fois
-    dans cette réponse, jamais stocké ni rejouable ensuite — force un
-    changement via `POST /auth/change-password` à la prochaine connexion."""
-    profile, user = await _get_station_staff_or_404(db, organization_id, user_id)
-    if profile.assignedStationId is not None:
-        station = await get_station(db, organization_id, profile.assignedStationId)
-        await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_MANAGE)
-    else:
-        await _check_org_scope(db, organization_id, actor_user_id, STATION_STAFF_MANAGE)
-
-    temporary_password = secrets.token_urlsafe(9)
-    user.hashedPassword = hash_password(temporary_password)
-    user.mustChangePassword = True
-    await record_audit_event(
-        db, organization_id, actor_user_id,
-        action="zyloLiquid.stationStaff.passwordReset", entity_type="User", entity_id=user.id,
-        summary=f"Réinitialisation du mot de passe de {user.fullName}",
-        scope_resource_type="station", scope_resource_id=profile.assignedStationId,
-    )
-    await db.commit()
-    return temporary_password
-
-
-async def list_station_staff_profiles(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, station_id: uuid.UUID) -> list[StationStaffResponse]:
-    station = await get_station(db, organization_id, station_id)
-    await _check_declaration_scope(db, organization_id, actor_user_id, station, STATION_STAFF_READ)
-    result = await db.execute(
-        select(StationStaffProfile, User)
-        .join(User, User.id == StationStaffProfile.userId)
-        .where(StationStaffProfile.organizationId == organization_id, StationStaffProfile.assignedStationId == station_id)
-        .order_by(User.fullName)
-    )
-    return [_station_staff_response(profile, user) for profile, user in result.all()]
-
-
 async def create_intervention(db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, data: CreateInterventionRequest) -> InterventionResponse:
     equipment = await db.get(Equipment, data.equipmentId)
     if equipment is None or equipment.stationId != data.stationId:

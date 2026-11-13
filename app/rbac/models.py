@@ -1,7 +1,23 @@
+"""Modèle RBAC du socle : rôles, permissions, grants et affectations.
+
+Tables (camelCase, migrations dans `alembic/versions/`) :
+- `role` : gabarit de droits, scopé à une organisation (`Role`) ;
+- `permission` : code global `domaine.entite.action`, déclaré par un module
+  (`Permission`) ;
+- `rolePermission` : contenu d'un rôle (`RolePermission`) ;
+- `userRole` : attribution d'un rôle à un membre, éventuellement scopée à une
+  ressource (`UserRole`) ;
+- `userPermissionGrant` : grant ou refus individuel (`UserPermissionGrant`).
+
+Ce module ne contient que la structure. La décision d'autorisation n'est jamais
+prise ici : elle est rendue par `rbac/service.py::user_has_permission`, qui lit
+ces tables. Un rôle n'est qu'un gabarit ; ce qui compte, c'est la résolution.
+"""
+
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, ForeignKeyConstraint, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -10,9 +26,19 @@ from app.shared.models import TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class Role(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Rôle métier d'une organisation (ex. `owner`, `zylo_liquid_station_admin`).
+
+    Un rôle est un ensemble de permissions (`RolePermission`). Son contenu ne
+    dépend jamais de la ressource : la portée se règle sur l'attribution
+    (`UserRole.resourceType/resourceId`). `code` est unique par organisation.
+    Un rôle sans `moduleCode` est transverse au socle ; un rôle avec
+    `moduleCode` est un rôle de module (voir plus bas)."""
+
     __tablename__ = "role"
     __table_args__ = (
         UniqueConstraint("organizationId", "code", name="uq_role_org_code"),
+        # BE-182 : cible de la clé composite de userRole (le tenant suit la référence).
+        UniqueConstraint("organizationId", "id", name="uq_role_org_id"),
         {"comment": "Rôle métier scopé à une organisation (ex: Admin, Comptable)."},
     )
 
@@ -22,8 +48,23 @@ class Role(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     code: Mapped[str] = mapped_column(String(100), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
 
+    # T-018 : rattachement du rôle à UN module. null = rôle transverse du socle
+    # (ex. `owner`, rôles personnalisés existants). Non null = rôle de module :
+    # il ne peut contenir que les permissions de son module ou du socle partagé
+    # (voir rbac/module_policy.py). Un seul mécanisme : aucune portée module
+    # n'est ajoutée sur userRole. Le rattachement des rôles déjà existants se
+    # fait par backfill explicite (rbac/module_backfill.py), jamais au démarrage.
+    moduleCode: Mapped[str | None] = mapped_column(
+        String(100), ForeignKey("module.code"), nullable=True, index=True
+    )
+
 
 class Permission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Permission globale, unique par `code` (convention `domaine.entite.action`).
+
+    `moduleCode` indique le module qui la déclare. Une permission n'a pas de
+    portée propre : la portée vient de l'attribution ou du grant qui la porte."""
+
     __tablename__ = "permission"
     __table_args__ = {"comment": "Permission globale au système, déclarée par un module (convention: module.resource.action)."}
 
@@ -33,6 +74,10 @@ class Permission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class RolePermission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Association many-to-many rôle <-> permission. Unicité du couple imposée
+    par `uq_rolePermission_role_perm` (une permission ne figure qu'une fois
+    dans un rôle)."""
+
     __tablename__ = "rolePermission"
     __table_args__ = (
         UniqueConstraint("roleId", "permissionId", name="uq_rolePermission_role_perm"),
@@ -61,6 +106,12 @@ class UserRole(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint(
             "userId", "organizationId", "roleId", "resourceType", "resourceId", name="uq_userRole_user_org_role_scope"
+        ),
+        # BE-182 (CA-2) : le rôle attribué appartient au même tenant que l'attribution.
+        ForeignKeyConstraint(
+            ["organizationId", "roleId"],
+            ["role.organizationId", "role.id"],
+            name="fk_userRole_org_role_tenant",
         ),
         {"comment": "Attribution d'un rôle à un utilisateur, scopée à une organisation et éventuellement à une ressource précise (station...)."},
     )

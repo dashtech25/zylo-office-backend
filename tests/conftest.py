@@ -2,14 +2,32 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-os.environ["DATABASE_URL"] = os.environ.get(
-    "TEST_DATABASE_URL", "postgresql+asyncpg://zylo_office:zylo_office_dev@localhost:5432/zylo_office_test"
-)
+# Intention (T-002) : les tests déclarent leur environnement. `test` applique
+# les règles strictes de app/core/config.py : aucun secret de repli n'est
+# accepté, donc les secrets ci-dessous sont explicites, propres aux tests et
+# assez longs. Ils écrasent volontairement le .env du worktree (variables
+# d'environnement prioritaires), sans jamais reprendre de valeur réelle.
+os.environ["ENVIRONMENT"] = "test"
+# Les tests historiques utilisent /auth/register pour créer leurs acteurs.
+# Le comportement fail-closed est vérifié séparément avec le réglage désactivé.
+os.environ["AUTH_PUBLIC_REGISTRATION_ENABLED"] = "true"
+# T-027 : clé de chiffrement de test, propre au dépôt de test, jamais une valeur réelle.
+os.environ["APP_FIELD_ENCRYPTION_KEY"] = "test-only-field-encryption-key-" + "0123456789abcdef" * 2
+os.environ["JWT_SECRET"] = "test-only-jwt-secret-" + "0123456789abcdef" * 2
+os.environ["STORAGE_SIGNED_URL_SECRET"] = "test-only-storage-secret-" + "fedcba9876543210" * 2
+# T-037a : transition ouverte pour les tests existants (en-tête Authorization et jetons
+# dans le JSON encore acceptés). Les tests de fin de transition la ferment par monkeypatch,
+# pour que la suite ne dépende pas de l'horloge réelle.
+os.environ["AUTH_HEADER_ACCEPTED_UNTIL"] = "2099-01-01T00:00:00+00:00"
+
 # Le throttle de `run_truck_stop_detection` (2026-09-14) suppose des
 # positions réelles espacées dans le temps — en test, des dizaines
 # d'ingestions synthétiques partent en quelques millisecondes réelles,
 # donc désactivé ici pour que chaque appel recalcule bien comme avant.
 os.environ["TRUCK_STOP_DETECTION_THROTTLE_SECONDS"] = "0"
+
+import re
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from alembic import command
@@ -18,13 +36,68 @@ from httpx import ASGITransport, AsyncClient
 
 BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Garde de base de test (T-005, durcie par BE-221). Intention : pytest vide la
+# base à chaque session (TRUNCATE de toutes les tables). Il ne doit donc JAMAIS
+# pointer vers une base de développement, de recette ou partagée. Règles :
+#  - TEST_DATABASE_URL doit être définie et non vide, sans valeur de repli ;
+#  - le nom de base doit suivre EXACTEMENT le motif zylo_t<NNN>_test (NNN sur
+#    trois chiffres), créé par scripts/dev/env_tache.sh (une base par tâche) ;
+#  - aucune exception : zylo_office_test (ancien repli) est refusée, même si
+#    l'ancien opt-in ZYLO_TEST_TOLERER_ZYLO_OFFICE_TEST=1 est posé.
+# Les noms zylo, zylo_office, zylo_dev, zylo_liquid, zylo_recette ne passent
+# jamais, quel que soit le port ou l'hôte.
+MOTIF_BASE_DE_TEST = re.compile(r"^zylo_t[0-9]{3}_test$")
+COMMANDE_ENV_TACHE = "scripts/dev/env_tache.sh creer <NNN> back"
+
+
+def _noms_de_base(url: str) -> list[str]:
+    """Nom de base de l'URL, et ceux donnés par ?dbname= ou ?database= (asyncpg)."""
+    parties = urlsplit(url)
+    noms = [parties.path.lstrip("/")]
+    requete = parse_qs(parties.query)
+    for cle in ("dbname", "database"):
+        noms.extend(requete.get(cle, []))
+    return noms
+
+
+def verifie_base_de_test(url: str | None) -> None:
+    """Lève pytest.exit (message en français) si la base n'est pas une base de test."""
+    if not url:
+        pytest.exit(
+            "TEST_DATABASE_URL est absente : pytest refuse de démarrer, car il vide la base "
+            "de test. Dans un worktree déjà créé : export TEST_DATABASE_URL=\"$(sed -n "
+            "'s/^TEST_DATABASE_URL=//p' .env)\". Sinon, créez l'environnement de la tâche : "
+            f"{COMMANDE_ENV_TACHE}.",
+            returncode=3,
+        )
+    for nom in _noms_de_base(url):
+        if not MOTIF_BASE_DE_TEST.match(nom):
+            pytest.exit(
+                f"Base refusée : « {nom} » n'est pas une base de test (motif attendu : "
+                f"zylo_t<NNN>_test). pytest vide cette base à chaque session. "
+                f"Créez la base de la tâche avec {COMMANDE_ENV_TACHE} et exportez son "
+                "TEST_DATABASE_URL. zylo_office_test n'est plus admise.",
+                returncode=3,
+            )
+
+
+verifie_base_de_test(os.environ.get("TEST_DATABASE_URL"))
+os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
+
 
 @pytest.fixture(scope="session", autouse=True)
 def apply_migrations():
     """Base de test dédiée (jamais la base de dev) — migrations appliquées une
     seule fois pour toute la session de test."""
     alembic_cfg = Config(os.path.join(BACKEND_ROOT, "alembic.ini"))
-    command.upgrade(alembic_cfg, "head")
+    try:
+        command.upgrade(alembic_cfg, "head")
+    except Exception as e:
+        # Fallback pour le cas de multiple heads
+        if "Multiple head revisions" in str(e):
+            command.upgrade(alembic_cfg, "heads")
+        else:
+            raise
     _reset_test_database()
     yield
 
@@ -113,7 +186,33 @@ async def registered_user(client: AsyncClient):
 async def organization(client: AsyncClient, registered_user: dict):
     headers = {"Authorization": f"Bearer {registered_user['accessToken']}"}
     res = await client.post("/api/v1/organizations", json={"name": "Test Org", "slug": f"test-org-{uuid.uuid4().hex[:8]}"}, headers=headers)
-    return res.json()
+    organisation = res.json()
+    # BE-102 (QE-POR-04) : POST /organizations ne donne aucun rôle au créateur. Les tests qui
+    # supposent un propriétaire reçoivent donc le rôle owner ici, explicitement.
+    await _affecte_role_owner(organisation["id"], registered_user["email"])
+    return organisation
+
+
+async def _affecte_role_owner(organization_id: str, email: str) -> None:
+    """Crée le rôle `owner` de l'organisation avec OWNER_DEFAULT_PERMISSIONS et l'affecte à l'utilisateur."""
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.identity.models import User
+    from app.identity.service import OWNER_DEFAULT_PERMISSIONS
+    from app.rbac.models import Role, RolePermission, UserRole
+    from app.rbac.service import get_or_create_permission
+
+    async with AsyncSessionLocal() as db:
+        utilisateur = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        role = Role(organizationId=uuid.UUID(organization_id), code="owner", name="Propriétaire")
+        db.add(role)
+        await db.flush()
+        for code, module_code, description in OWNER_DEFAULT_PERMISSIONS:
+            permission = await get_or_create_permission(db, code, module_code, description)
+            db.add(RolePermission(roleId=role.id, permissionId=permission.id))
+        db.add(UserRole(userId=utilisateur.id, organizationId=role.organizationId, roleId=role.id))
+        await db.commit()
 
 
 @pytest.fixture
@@ -174,13 +273,14 @@ async def register_holykell_sensor(organization_id: str, serial_number: str, mea
     import random
 
     from app.core.database import AsyncSessionLocal
+    from app.core.field_crypto import chiffrer
     from app.modules.zylo_liquid.models import HolykellAccount, HolykellDeviceRegistry
 
     async with AsyncSessionLocal() as db:
         account = HolykellAccount(
             organizationId=uuid.UUID(organization_id),
             holykellUsername=f"user-{uuid.uuid4().hex[:8]}",
-            holykellPassword="secret",
+            holykellPasswordChiffre=chiffrer("secret"),
         )
         db.add(account)
         await db.flush()

@@ -1,0 +1,11 @@
+{
+  "scenario": "BE258-CA3",
+  "version": 1,
+  "fichier_test": "test_be258_ca3_panne_dependance.py",
+  "resultat": "vert",
+  "date": "2026-11-05",
+  "tests": [
+    "test_be258_ca3_panne_de_dependance_renvoie_erreur_contractuelle",
+    "test_be258_ca3_panne_de_dependance_trace_la_tentative_sans_fuite"
+  ]
+}

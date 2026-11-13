@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
@@ -83,7 +83,7 @@ async def test_current_state_with_measurement_computes_volume(client: AsyncClien
             await db.execute(
                 update(HolykellDeviceRegistry)
                 .where(HolykellDeviceRegistry.hkSensorId == sensor_id)
-                .values(lastValue=1073, lastValueAt=datetime(2026, 8, 1, 10, 0, 0), hkLastStatus=1)
+                .values(lastValue=1073, lastValueAt=datetime.utcnow(), hkLastStatus=1)
             )
             await db.commit()
 
@@ -96,6 +96,43 @@ async def test_current_state_with_measurement_computes_volume(client: AsyncClien
     assert body["heightMm"] == 1073
     assert body["volumeLiters"] == pytest.approx(21460, abs=1)  # calibration linéaire h*20 -> 1073*20
     assert body["lastMeasurementAt"] is not None
+
+
+async def test_current_state_reports_offline_when_last_value_is_stale(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
+    """`hkLastStatus` reste figé à 1 si la synchro s'arrête totalement (compte
+    désactivé, panne API) — sans le seuil de fraîcheur (`SENSOR_STALE_THRESHOLD_MINUTES`),
+    une cuve muette depuis longtemps s'afficherait "connectée" indéfiniment."""
+    headers = _headers(registered_user, zylo_liquid_organization)
+    _, tank_id, _ = await _create_station_and_tank(client, headers, "CS-STALE")
+
+    serial = f"XM_STALE_{uuid.uuid4().hex[:6]}"
+    sensor_id = await register_holykell_sensor(zylo_liquid_organization["id"], serial, "product_level")
+    map_res = await client.post(
+        "/api/v1/zylo-liquid/tank-sensor-mappings",
+        json={"tankId": tank_id, "hkSerialNumber": serial, "measurementType": "product_level"},
+        headers=headers,
+    )
+    assert map_res.status_code == 201
+
+    from app.core.database import AsyncSessionLocal
+    from app.modules.zylo_liquid.models import HolykellDeviceRegistry
+    from sqlalchemy import update
+
+    async def set_stale_last_value():
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                update(HolykellDeviceRegistry)
+                .where(HolykellDeviceRegistry.hkSensorId == sensor_id)
+                .values(lastValue=1073, lastValueAt=datetime.utcnow() - timedelta(hours=2), hkLastStatus=1)
+            )
+            await db.commit()
+
+    await set_stale_last_value()
+
+    res = await client.get(f"/api/v1/zylo-liquid/tanks/{tank_id}/current-state", headers=headers)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["sensorStatus"] == "offline"
 
 
 async def test_current_state_with_water_and_thermal_correction(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):

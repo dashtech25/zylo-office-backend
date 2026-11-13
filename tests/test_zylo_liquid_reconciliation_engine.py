@@ -12,6 +12,7 @@ from httpx import AsyncClient
 
 from app.alerts.models import Alert
 from app.core.database import AsyncSessionLocal
+from app.core.field_crypto import chiffrer
 from app.modules.zylo_liquid.models import DeliveryDetected, HolykellDeviceRegistry, Tank, TankMeasurement, TankSensorMapping
 
 
@@ -42,7 +43,7 @@ async def test_delivery_reconciliation_matched_within_tolerance(client: AsyncCli
 
     declaration_res = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
-        json={"stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": "2026-02-01T08:00:00", "declaredVolumeLiters": 5000},
+        json={"stationId": station_id, "eventAt": "2026-02-01T08:00:00", "lines": [{"tankId": tank_id, "volumeLiters": 5000}]},
         headers=headers,
     )
     declaration_id = declaration_res.json()["id"]
@@ -56,7 +57,9 @@ async def test_delivery_reconciliation_matched_within_tolerance(client: AsyncCli
 
     res = await client.post(f"/api/v1/zylo-liquid/delivery-declarations/{declaration_id}/reconcile", headers=headers)
     assert res.status_code == 200, res.text
-    body = res.json()
+    records = res.json()
+    assert len(records) == 1, records
+    body = records[0]
     assert body["status"] == "matched"
     assert body["counterpartType"] == "DeliveryDetected"
     assert body["discrepancyValue"] == 30
@@ -64,8 +67,8 @@ async def test_delivery_reconciliation_matched_within_tolerance(client: AsyncCli
     # Le pointeur de la déclaration doit référencer ce résultat.
     list_res = await client.get(f"/api/v1/zylo-liquid/delivery-declarations?stationId={station_id}", headers=headers)
     declaration_row = next(r for r in list_res.json()["data"] if r["id"] == declaration_id)
-    assert declaration_row["reconciledWithId"] == body["id"]
-    assert declaration_row["reconciledWithType"] == "ReconciliationRecord"
+    assert declaration_row["lines"][0]["reconciledWithId"] == body["id"]
+    assert declaration_row["lines"][0]["reconciledWithType"] == "ReconciliationRecord"
 
 
 async def test_delivery_reconciliation_discrepancy_beyond_tolerance(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
@@ -75,7 +78,7 @@ async def test_delivery_reconciliation_discrepancy_beyond_tolerance(client: Asyn
 
     declaration_res = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
-        json={"stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": "2026-02-01T08:00:00", "declaredVolumeLiters": 5000},
+        json={"stationId": station_id, "eventAt": "2026-02-01T08:00:00", "lines": [{"tankId": tank_id, "volumeLiters": 5000}]},
         headers=headers,
     )
     declaration_id = declaration_res.json()["id"]
@@ -89,26 +92,26 @@ async def test_delivery_reconciliation_discrepancy_beyond_tolerance(client: Asyn
 
     res = await client.post(f"/api/v1/zylo-liquid/delivery-declarations/{declaration_id}/reconcile", headers=headers)
     assert res.status_code == 200, res.text
-    assert res.json()["status"] == "discrepancy"
-    assert res.json()["discrepancyValue"] == 500
+    assert res.json()[0]["status"] == "discrepancy"
+    assert res.json()[0]["discrepancyValue"] == 500
 
 
 async def test_delivery_reconciliation_pending_when_no_counterpart(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
     headers = _headers(registered_user, zylo_liquid_organization)
     suffix = uuid.uuid4().hex[:8]
-    station_id, fuel_product_id, _tank_id = await _setup_station_product_tank(client, headers, suffix)
+    station_id, fuel_product_id, tank_id = await _setup_station_product_tank(client, headers, suffix)
 
     declaration_res = await client.post(
         "/api/v1/zylo-liquid/delivery-declarations",
-        json={"stationId": station_id, "fuelProductId": fuel_product_id, "eventAt": "2026-02-01T08:00:00", "declaredVolumeLiters": 5000},
+        json={"stationId": station_id, "eventAt": "2026-02-01T08:00:00", "lines": [{"tankId": tank_id, "volumeLiters": 5000}]},
         headers=headers,
     )
     declaration_id = declaration_res.json()["id"]
 
     res = await client.post(f"/api/v1/zylo-liquid/delivery-declarations/{declaration_id}/reconcile", headers=headers)
     assert res.status_code == 200, res.text
-    assert res.json()["status"] == "pending"
-    assert res.json()["counterpartType"] is None
+    assert res.json()[0]["status"] == "pending"
+    assert res.json()[0]["counterpartType"] is None
 
 
 async def test_manual_gauging_reconciliation_matched(client: AsyncClient, registered_user: dict, zylo_liquid_organization: dict):
@@ -126,7 +129,7 @@ async def test_manual_gauging_reconciliation_matched(client: AsyncClient, regist
     async with AsyncSessionLocal() as db:
         from app.modules.zylo_liquid.models import HolykellAccount
 
-        holykell_account = HolykellAccount(organizationId=uuid.UUID(zylo_liquid_organization["id"]), holykellUsername="u", holykellPassword="p")
+        holykell_account = HolykellAccount(organizationId=uuid.UUID(zylo_liquid_organization["id"]), holykellUsername="u", holykellPasswordChiffre=chiffrer("p"))
         db.add(holykell_account)
         await db.flush()
         registry = HolykellDeviceRegistry(

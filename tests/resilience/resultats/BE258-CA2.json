@@ -1,0 +1,11 @@
+{
+  "scenario": "BE258-CA2",
+  "version": 1,
+  "fichier_test": "test_be258_ca2_replay_sans_doublon.py",
+  "resultat": "vert",
+  "date": "2026-11-05",
+  "tests": [
+    "test_be258_ca2_replay_unique_ne_produit_pas_de_second_effet",
+    "test_be258_ca2_replay_apres_consommation_normale_ne_rappelle_pas_le_handler"
+  ]
+}

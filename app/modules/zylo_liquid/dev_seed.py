@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.field_crypto import chiffrer
 from app.modules.zylo_liquid import service
 from app.modules.zylo_liquid.models import (
     HolykellAccount,
@@ -127,7 +128,7 @@ async def seed_demo_network(
     holykell_account = HolykellAccount(
         organizationId=organization_id,
         holykellUsername="demo-account",
-        holykellPassword="demo-password-not-real",
+        holykellPasswordChiffre=chiffrer("demo-password-not-real"),  # T-027 : jamais en clair
         syncEnabled=True,
         lastSyncAt=_now(),
         lastSyncStatus="success",
@@ -265,8 +266,11 @@ def _seed_measurement_history(db: AsyncSession, tanks: dict[tuple[str, int], dic
                 ))
 
         if key == LEAK_TANK_KEY:
-            leak_start = (now - timedelta(hours=6)).replace(minute=0, second=0, microsecond=0)
-            leak_end = now.replace(minute=0, second=0, microsecond=0)
+            # Bornes à :30 : la grille d'historique est à :00 (2h, 8h, 14h, 20h). Des bornes
+            # à l'heure pleine tombaient sur la grille selon l'heure d'exécution (ex. 08 UTC),
+            # produisant deux mesures à la même date et un MultipleResultsFound au test de fuite.
+            leak_end = now.replace(minute=30, second=0, microsecond=0) - timedelta(hours=1)
+            leak_start = leak_end - timedelta(hours=6)
             db.add(TankMeasurement(
                 hkSensorId=entry["sensorId"], hkDeviceSerial=f"DEMO-{entry['sensorId']}",
                 measuredAt=leak_start, receivedAt=leak_start, rawValue=current_height + 15.0, insertedAt=leak_start,

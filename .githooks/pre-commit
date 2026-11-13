@@ -1,0 +1,15 @@
+#!/bin/sh
+# Garde-fou de commit (T-004, délégué à T-001) : refuse les fichiers qui ne doivent
+# jamais entrer dans l'historique git, même par erreur (dumps de base, .env, clés).
+#
+# Intention : une fuite de dump SQL ou de secret dans git est irréversible sans
+# réécriture d'historique. Les règles sont dans un seul endroit :
+# scripts/dev/controle_fichiers_sensibles.sh (mode --staged : fichiers à committer).
+#
+# Activation (une fois par clone) : git config core.hooksPath .githooks
+# Contournement volontaire interdit : ne pas utiliser --no-verify.
+
+set -eu
+
+racine="$(git rev-parse --show-toplevel)"
+exec "$racine/scripts/dev/controle_fichiers_sensibles.sh" --staged

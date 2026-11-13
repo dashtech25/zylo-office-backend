@@ -1,98 +1,62 @@
-# Zylo Office — Backend
+# Zylo Office : backend
 
-Socle backend de Zylo Office, une plateforme ERP/CRM modulaire inspirée
-d'Odoo/Dolibarr : le **socle** (identité, organisations, rôles,
-permissions, registre de modules, abonnements) est complété par un premier
-**module métier complet, `zylo_liquid`**, qui sert de patron pour les
-futurs modules (CRM, Stock, Comptabilité, RH, POS). Voir `grande_phases.md`
-(racine du projet, hors ce dépôt) pour l'architecture complète et le détail
-des phases.
+Socle backend de Zylo Office : une plateforme modulaire (ERP/CRM). Le socle
+(identité, organisations, rôles, permissions, registre de modules,
+abonnements) accueille les modules métier. `zylo_liquid` est le premier module
+complet et sert de patron ; `zylo_tanker` est un module en cours.
 
-> **⚠️ Avant toute modification de ce dépôt, lire `/CLAUDE.md`** (directive
-> d'architecture — core/shared jamais dépendants d'un module, convention
-> stricte de dossier pour tout module métier). C'est la règle qui prime.
+## Où lire
+
+| Besoin | Document |
+|---|---|
+| Règles à respecter au quotidien | [`CLAUDE.md`](CLAUDE.md) |
+| Index de la documentation | [`docs/README.md`](docs/README.md) |
+| Architecture (monolithe modulaire) | [`docs/architecture/`](docs/architecture/README.md) |
+| Ports (checkout, worktrees, interdits) | [`docs/process/ports.md`](docs/process/ports.md) |
+| Démarrage local, environnement | [`docs/process/local-setup.md`](docs/process/local-setup.md) |
+| Git, lots, worktrees | [`docs/process/git-workflow.md`](docs/process/git-workflow.md) |
+| Workflow de bout en bout | [`docs/workflows/`](docs/workflows/README.md) |
+| Décisions d'architecture | [`docs/architecture/decisions/`](docs/architecture/decisions/README.md) |
+| Console support opérateur (lecture seule) | [`docs/modules/operator.md`](docs/modules/operator.md) |
+| Contrat facturation | [`docs/modules/facturation.md`](docs/modules/facturation.md) |
 
 ## Stack
 
-- **FastAPI** (Python 3.12), API REST versionnée sous `/api/v1`
-- **PostgreSQL** + **SQLAlchemy 2.0 (async)** + **Alembic** pour les migrations
-- **JWT** (access + refresh, rotation) pour l'authentification
-- Noms de tables en **camelCase, en anglais, commentés** (convention imposée)
+- FastAPI (Python 3.12), API REST versionnée sous `/api/v1`
+- PostgreSQL, SQLAlchemy 2.0 (async), Alembic pour les migrations
+- Authentification JWT (access + refresh, rotation), bibliothèque PyJWT
+- Tables en camelCase, en anglais, commentées
 
-## Démarrage local
-
-Prérequis : Python 3.12+, PostgreSQL accessible en local.
+## Démarrage local (résumé)
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-
-cp .env.example .env   # puis renseigner DATABASE_URL et JWT_SECRET réels
-
+cp .env.example .env          # renseigner DATABASE_URL et les secrets
 .venv/bin/alembic upgrade head
-
 .venv/bin/uvicorn app.main:app --reload --port 3002
 ```
 
-Le serveur écoute sur `http://localhost:3002`. Documentation interactive :
-`http://localhost:3002/docs`.
+Port et procédure complète : [`docs/process/ports.md`](docs/process/ports.md) et
+[`docs/process/local-setup.md`](docs/process/local-setup.md).
 
-### Base de données locale
-
-```bash
-createdb zylo_office
-psql -d zylo_office -c "CREATE ROLE zylo_office WITH LOGIN PASSWORD 'changeme';"
-psql -d zylo_office -c "GRANT ALL ON SCHEMA public TO zylo_office;"
-```
+La console support reste fermée par défaut. Pour un processus backend de support,
+configurer `OPERATOR_READ_USER_IDS` avec une liste séparée par des virgules
+d'UUID de comptes opérateur dédiés et redémarrer le processus. Une variable
+absente, vide ou mal formée n'accorde aucun accès.
 
 ## Tests
 
 ```bash
-createdb zylo_office_test
-psql -d zylo_office_test -c "GRANT ALL ON SCHEMA public TO zylo_office;"
 .venv/bin/pytest
 ```
-
-## Architecture
-
-Chaque dossier structurant a son propre `CLAUDE.md` avec la règle précise à
-respecter en y travaillant — cette section n'en est qu'un résumé.
-
-```text
-app/
-├── core/                    # config, DB engine, sécurité (JWT), logging, erreurs — jamais spécifique à un module
-├── shared/                  # pagination, schémas génériques, devises, géo — réutilisable par tous les modules
-├── auth/                    # login/register/refresh/logout
-├── identity/                # Organization, User, OrganizationUser
-├── rbac/                    # Role, Permission, require_permission()
-├── modules_registry/        # registre de modules + activation par organisation
-├── billing/                 # plan/subscription/invoice (pas de paiement réel)
-├── modules/
-│   └── zylo_liquid/         # premier module métier complet — patron pour les futurs modules
-│       ├── models.py, schemas.py, service.py, router.py, permissions.py
-│       └── algorithms.py, seed.py, dev_seed.py
-└── api/v1/                  # agrégation des routers, versionnage REST
-```
-
-Chaque domaine (socle ou module métier) suit la même convention interne :
-`models.py`, `schemas.py`, `service.py`, `router.py`, `permissions.py`. Un
-futur module métier (CRM, Stock...) reprend cette structure à l'identique
-sous `app/modules/<domaine>/` — voir `app/modules/CLAUDE.md`.
-`core/`/`shared/` ne dépendent jamais d'un module métier (sens unique :
-modules → shared/core, jamais l'inverse).
 
 ## Sauvegarde
 
 ```bash
-./scripts/backup.sh                              # dump local + rotation 7 jours
-./scripts/restore.sh backups/xxx.sql.gz <db_cible>
+./scripts/backup.sh                              # dump local, rotation 7 jours
+./scripts/restore.sh backups/<fichier> <base_cible>
 ```
 
-Voir `docs/phase12-offline-readiness-audit.md` pour l'audit de conformité
-offline/synchronisation du socle actuel.
-
-## Git
-
-Stratégie : `main` → `develop` → `remy`. Chaque tâche = une issue + une
-branche dédiée, fusionnée dans `remy` après vérification réelle (jamais un
-merge automatique sans issue associée).
+Les dumps ne sont jamais versionnés (`backups/` est ignoré par git).
+Audit de conformité offline : [`docs/core/phase-12-offline-readiness-audit.md`](docs/core/phase-12-offline-readiness-audit.md).

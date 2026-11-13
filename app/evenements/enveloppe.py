@@ -1,0 +1,239 @@
+"""Enveloppe d'événement commune et sa validation (BE-150).
+
+Rôle : décrire, sous forme d'un modèle unique, les champs que doit porter tout événement de
+domaine, et refuser avant distribution tout événement mal formé, de mauvais tenant ou contenant une
+valeur secrète.
+
+Champs (CA-1) : `eventId`, `eventType`, `schemaVersion`, `occurredAt` (ramené en UTC), `tenantId`,
+`scope`, `actor`, `subject`, `dataClassification`, `correlationId`, `causationId`, `payload`.
+Les champs nullables (`causationId`, par exemple) doivent être présents dans l'entrée, même à
+`null` : leur absence est une erreur de schéma, pas une valeur par défaut silencieuse.
+
+Codes d'erreur (catalogue complet : BE-151) :
+- `SCHEMA_INVALID` (400) : champ obligatoire absent, type invalide, date sans fuseau, clé secrète
+  dans le payload (CA-2, CA-5) ;
+- `TENANT_MISMATCH` (403) : `tenantId` de l'enveloppe, ou `tenantId` / `organizationId` cité dans
+  le payload, différent du tenant de l'identité authentifiée (CA-4). Le code HTTP 403 est une
+  recommandation : NON DÉFINI dans la définition, à confirmer avec BE-151.
+
+Invariant de sécurité : aucun message d'erreur ni aucune trace ne contient la valeur d'un champ
+d'entrée. Les erreurs de validation Pydantic sont donc réduites à un message fixe, car elles
+recopient la valeur fautive.
+"""
+
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Mapping
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from app.core.errors import AppError
+
+# Marqueurs de clés considérées comme secrètes (CA-5). La comparaison ignore la casse, les
+# underscores et les tirets : `api_token`, `apiToken` et `API-TOKEN` sont tous refusés.
+# Recommandation appliquée : liste fermée, à élargir par revue plutôt que par configuration.
+MARQUEURS_CLE_SECRETE = ("password", "passwd", "secret", "token", "apikey", "motdepasse", "credential", "privatekey")
+
+# Clés du payload qui désignent un tenant. Leur présence avec une autre valeur que le tenant de
+# l'identité est un TENANT_MISMATCH (CA-4), pas une correction silencieuse.
+CLES_TENANT_PAYLOAD = ("tenantId", "organizationId")
+
+# Espace de noms réservé aux événements plateforme (BE-234, CA-3). Un événement de tenant ne peut pas
+# l'utiliser : `valider_enveloppe` le refuse faute de `tenantId`, et `valider_enveloppe_plateforme`
+# exige ce préfixe pour tout événement sans tenant.
+PREFIXE_TYPE_PLATEFORME = "Plateforme."
+
+
+class EnveloppeEvenement(BaseModel):
+    """Enveloppe validée d'un événement de domaine.
+
+    Instance immuable. Toute construction passe par `valider_enveloppe`, qui garantit les
+    invariants ci-dessus ; instancier ce modèle directement contourne la vérification de tenant
+    et du secret et ne doit pas se faire hors de ce module.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    eventId: uuid.UUID = Field(description="Identifiant unique de l'événement ; clé de déduplication (CA-3).")
+    eventType: str = Field(min_length=1, description="Nom de l'événement ; sert de clé d'abonnement dans app.shared.events.")
+    schemaVersion: int = Field(ge=1, description="Version du schéma du payload, incrémentée à chaque changement incompatible.")
+    occurredAt: datetime = Field(description="Instant de l'événement, toujours en UTC après validation.")
+    tenantId: uuid.UUID = Field(description="Tenant (organisation) auquel appartient l'événement ; égal au tenant de l'identité.")
+    scope: dict[str, Any] = Field(description="Portée de l'événement (type et identifiant de la ressource de portée).")
+    actor: dict[str, Any] = Field(description="Acteur à l'origine de l'événement ; vide ou système pour un traitement automatique.")
+    subject: dict[str, Any] = Field(description="Sujet métier concerné (type et identifiant).")
+    dataClassification: str = Field(min_length=1, description="Classification de la donnée (ex. internal) ; guide la minimisation (BE-174).")
+    correlationId: str | None = Field(description="Identifiant de corrélation d'une chaîne d'événements ; null si la chaîne commence ici.")
+    causationId: str | None = Field(description="Identifiant de l'événement qui a causé celui-ci ; null pour une cause initiale.")
+    payload: dict[str, Any] = Field(description="Données métier de l'événement, sans secret (CA-5).")
+
+    @field_validator("occurredAt")
+    @classmethod
+    def _exiger_fuseau_et_ramener_en_utc(cls, valeur: datetime) -> datetime:
+        """Refuse une date sans fuseau (ambiguë) et ramène toute date aware en UTC.
+
+        Une date naïve serait interprétée selon le fuseau du serveur, ce qui change l'ordre des
+        événements d'une machine à l'autre : elle est donc refusée plutôt que supposée UTC.
+        """
+        if valeur.tzinfo is None or valeur.utcoffset() is None:
+            raise ValueError("occurredAt doit porter un fuseau horaire")
+        return valeur.astimezone(timezone.utc)
+
+
+class EnveloppeEvenementPlateforme(EnveloppeEvenement):
+    """Enveloppe d'un événement plateforme (BE-234, CA-3) : aucun tenant, type dans l'espace `Plateforme.`.
+
+    Hérite de toutes les règles de `EnveloppeEvenement`, sauf `tenantId` qui doit être présent
+    et nul : un événement plateforme ne se rattache à aucune organisation. Son type commence par
+    `PREFIXE_TYPE_PLATEFORME`, ce qui le sépare de tout événement de tenant. Construire ce modèle
+    hors de `valider_enveloppe_plateforme` contourne ces vérifications.
+    """
+
+    tenantId: None = Field(description="Toujours nul : un événement plateforme n'appartient à aucun tenant (CA-3).")
+
+
+def _cle_est_secrete(cle: str) -> bool:
+    """Vrai si le nom de clé contient un marqueur secret, après normalisation."""
+    normalisee = cle.lower().replace("_", "").replace("-", "")
+    return any(marqueur in normalisee for marqueur in MARQUEURS_CLE_SECRETE)
+
+
+def _contient_cle_secrete(valeur: Any) -> bool:
+    """Parcourt récursivement dicts et listes à la recherche d'une clé secrète.
+
+    La recherche porte sur les noms de clés uniquement : la valeur d'une clé secrète n'est jamais
+    lue, ni renvoyée, ni journalisée.
+    """
+    if isinstance(valeur, Mapping):
+        for cle, sous_valeur in valeur.items():
+            if isinstance(cle, str) and _cle_est_secrete(cle):
+                return True
+            if _contient_cle_secrete(sous_valeur):
+                return True
+    elif isinstance(valeur, (list, tuple)):
+        return any(_contient_cle_secrete(element) for element in valeur)
+    return False
+
+
+class EnveloppeProducteur(EnveloppeEvenement):
+    """Enveloppe produite par un module métier (BE-192, CA-2).
+
+    Ajoute aux champs de BE-150 ce qu'un consommateur doit savoir de l'agrégat à l'origine de
+    l'événement : son type, son identifiant, sa version après la mutation, et le producteur qui
+    l'a émis. `recordedAt` est fixé par l'écriture (UTC) ; `publishedAt` reste nul tant que
+    l'événement n'a pas été distribué.
+
+    Ces champs ne vont pas dans `payload` : ils sont stockés dans leurs propres colonnes, et le
+    payload garde la forme BE-150 que relisent les consommateurs existants.
+    """
+
+    aggregateType: str = Field(min_length=1, description="Type de l'agrégat à l'origine de l'événement (ex. Subscription).")
+    aggregateId: str = Field(min_length=1, description="Identifiant de l'agrégat ; texte opaque, sans sémantique imposée.")
+    aggregateVersion: int = Field(ge=0, description="Version de l'agrégat après la mutation ; permet de détecter les hors-ordre.")
+    producer: str = Field(min_length=1, description="Module producteur de l'événement (ex. billing).")
+    recordedAt: datetime | None = Field(default=None, description="Instant d'écriture dans l'outbox, UTC ; fixé par l'écriture.")
+    publishedAt: datetime | None = Field(default=None, description="Instant de distribution ; nul tant que non distribué.")
+
+
+def valider_enveloppe_producteur(
+    donnees: Mapping[str, Any],
+    *,
+    tenant_identite: uuid.UUID,
+    tenant_agregat: uuid.UUID,
+) -> EnveloppeProducteur:
+    """Valide une enveloppe de producteur (BE-192) et renvoie sa forme canonique.
+
+    Mêmes contrôles que `valider_enveloppe` (schéma, secret, tenant de l'identité), puis le
+    `tenantId` de la ligne doit égaler le tenant de l'agrégat (CA-5) : un événement ne peut pas
+    être rattaché à une organisation qui ne possède pas l'agrégat, même si l'émetteur y a accès.
+    Ne persiste ni ne distribue rien.
+    """
+    try:
+        enveloppe = EnveloppeProducteur.model_validate(dict(donnees))
+    except ValidationError:
+        raise AppError(code="SCHEMA_INVALID", message="Enveloppe d'événement producteur invalide.", status_code=400)
+
+    _verifier_secret_et_tenant(enveloppe, tenant_identite)
+
+    if enveloppe.tenantId != tenant_agregat:
+        raise AppError(
+            code="TENANT_MISMATCH",
+            message="Le tenant de la ligne ne correspond pas au tenant de l'agrégat.",
+            status_code=403,
+        )
+    return enveloppe
+
+
+def _verifier_secret_et_tenant(enveloppe: EnveloppeEvenement, tenant_identite: uuid.UUID) -> None:
+    """Contrôles communs après le schéma : secret dans le payload, puis tenant (BE-150 CA-4, CA-5).
+
+    Factorisé pour que l'enveloppe de producteur ne puisse pas s'écarter des règles de BE-150.
+    Lève `AppError` au premier échec ; ne renvoie rien en cas de succès.
+    """
+    if _contient_cle_secrete(enveloppe.payload):
+        raise AppError(
+            code="SCHEMA_INVALID",
+            message="Le payload contient une donnée secrète : événement refusé.",
+            status_code=400,
+        )
+
+    if enveloppe.tenantId != tenant_identite:
+        raise AppError(code="TENANT_MISMATCH", message="Le tenant de l'événement ne correspond pas à l'identité.", status_code=403)
+
+    for cle in CLES_TENANT_PAYLOAD:
+        if cle in enveloppe.payload and str(enveloppe.payload[cle]) != str(tenant_identite):
+            raise AppError(code="TENANT_MISMATCH", message="Le payload cite un autre tenant que l'identité.", status_code=403)
+
+
+def valider_enveloppe(donnees: Mapping[str, Any], *, tenant_identite: uuid.UUID) -> EnveloppeEvenement:
+    """Valide une enveloppe brute et renvoie sa forme canonique.
+
+    Ordre des contrôles (le premier échec gagne) :
+    1. schéma : champs obligatoires, types, date avec fuseau -> `SCHEMA_INVALID` ;
+    2. secret : clé marquée secrète dans le payload -> `SCHEMA_INVALID` ;
+    3. tenant : `tenantId` de l'enveloppe ou tenant cité dans le payload différent de
+       `tenant_identite` -> `TENANT_MISMATCH`.
+
+    Le tenant n'est jamais repris depuis l'entrée à la place de l'identité : l'entrée est seulement
+    comparée. La fonction ne persiste rien et ne distribue rien.
+    """
+    try:
+        enveloppe = EnveloppeEvenement.model_validate(dict(donnees))
+    except ValidationError:
+        # Pas de détail : les erreurs Pydantic recopient la valeur fautive (voir l'en-tête).
+        raise AppError(code="SCHEMA_INVALID", message="Enveloppe d'événement invalide.", status_code=400)
+
+    _verifier_secret_et_tenant(enveloppe, tenant_identite)
+    return enveloppe
+
+
+def valider_enveloppe_plateforme(donnees: Mapping[str, Any]) -> EnveloppeEvenementPlateforme:
+    """Valide une enveloppe d'événement plateforme (BE-234, CA-3) et renvoie sa forme canonique.
+
+    Ordre des contrôles (le premier échec gagne) :
+    1. schéma : `EnveloppeEvenementPlateforme`, donc `tenantId` présent et nul -> `SCHEMA_INVALID` ;
+    2. espace de noms : type sans `PREFIXE_TYPE_PLATEFORME` -> `SCHEMA_INVALID` ;
+    3. secret : clé secrète dans le payload -> `SCHEMA_INVALID`.
+
+    L'appelant doit avoir vérifié qu'un émetteur plateforme interne agit (`PERMISSION_DENIED`
+    se contrôle dans `app.evenements.outbox`). Ne persiste ni ne distribue rien.
+    """
+    try:
+        enveloppe = EnveloppeEvenementPlateforme.model_validate(dict(donnees))
+    except ValidationError:
+        raise AppError(code="SCHEMA_INVALID", message="Enveloppe d'événement plateforme invalide.", status_code=400)
+
+    if not enveloppe.eventType.startswith(PREFIXE_TYPE_PLATEFORME):
+        raise AppError(
+            code="SCHEMA_INVALID",
+            message="Un événement sans tenant doit porter un type de l'espace plateforme.",
+            status_code=400,
+        )
+
+    if _contient_cle_secrete(enveloppe.payload):
+        raise AppError(
+            code="SCHEMA_INVALID",
+            message="Le payload contient une donnée secrète : événement refusé.",
+            status_code=400,
+        )
+    return enveloppe

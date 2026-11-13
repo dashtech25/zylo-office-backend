@@ -1,4 +1,17 @@
+"""Middlewares ASGI transverses (BE-001).
+
+- `RequestIdMiddleware` : un request ID par requête, repris du client s'il
+  respecte le motif, sinon généré ; posé dans `scope["state"]`, dans la
+  contextvar `request_id_ctx` (journaux) et dans les en-têtes
+  `X-Request-Id` et `X-Correlation-Id` de la réponse.
+- `TimingMiddleware` : journalise les requêtes lentes et leur coût SQL.
+
+Les deux sont en ASGI pur, pour ne pas bufferiser les réponses en flux.
+Le format des erreurs est dans app/core/errors.py.
+"""
+
 import logging
+import re
 import time
 import uuid
 from contextvars import ContextVar
@@ -9,7 +22,63 @@ from sqlalchemy.engine import Engine
 from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.core.logging import request_id_ctx
+from app.core.logging import correlation_id_ctx, operation_id_ctx, request_id_ctx
+
+_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+# Même contrat que BE-232 (app/core/idempotency.py) : clé choisie par le client,
+# 16 à 120 caractères.
+_IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{16,120}$")
+_METHODES_MUTANTES = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+# Espace de noms fixe : un même (méthode, chemin, clé) donne toujours le même UUID v5.
+_NAMESPACE_OPERATION = uuid.uuid5(uuid.NAMESPACE_URL, "zylo-office:operation")
+
+
+def _operation_id(method: str, path: str, headers) -> str | None:
+    """Retourne l'operationId d'une requête, ou None pour une lecture.
+
+    BE-181 (CA-3) : chaque mutation reçoit un operationId. Quand le client
+    envoie un Idempotency-Key valide, l'identifiant est un UUID v5 dérivé de
+    la méthode, du chemin et de la clé : un rejeu (même clé, même route)
+    obtient le même operationId, sans état partagé. Sans clé valide, un UUID
+    v4 neuf est généré : il n'est alors stable pour aucun rejeu (cas à traiter
+    côté client, voir la documentation de la tâche).
+
+    L'operationId sert à corréler les journaux et l'audit, jamais à décider
+    d'une autorisation : deux tenants envoyant la même clé sur la même route
+    partagent donc le même identifiant, ce qui est acceptable pour une trace."""
+    if method not in _METHODES_MUTANTES:
+        return None
+    cle = headers.get("idempotency-key")
+    if cle is not None and _IDEMPOTENCY_KEY_PATTERN.fullmatch(cle):
+        return str(uuid.uuid5(_NAMESPACE_OPERATION, f"{method} {path}\n{cle}"))
+    return str(uuid.uuid4())
+
+
+def _request_id(headers) -> str:
+    """Retient le premier identifiant client valide parmi X-Request-Id puis
+    X-Correlation-Id ; sinon génère un UUID.
+
+    Chaque en-tête est jugé séparément : un X-Request-Id invalide ne doit pas
+    écarter un X-Correlation-Id valide (CA-6 de BE-001). Le motif borne la
+    longueur et le jeu de caractères, car la valeur est reprise dans les
+    journaux et dans les en-têtes de réponse."""
+    for nom in ("x-request-id", "x-correlation-id"):
+        candidate = headers.get(nom)
+        if candidate is not None and _REQUEST_ID_PATTERN.fullmatch(candidate):
+            return candidate
+    return str(uuid.uuid4())
+
+
+def _correlation_id(headers, request_id: str) -> str:
+    """Retient le X-Correlation-Id client s'il respecte le motif, sinon reprend
+    le request_id (contrat BE-001 : une requête sans correlation garde un seul
+    identifiant visible). Un X-Correlation-Id distinct du X-Request-Id donne
+    donc un correlationId distinct, propagé à travers les tâches et intégrations
+    de la requête (BE-224, CA-1)."""
+    candidate = headers.get("x-correlation-id")
+    if candidate is not None and _REQUEST_ID_PATTERN.fullmatch(candidate):
+        return candidate
+    return request_id
 
 
 class RequestIdMiddleware:
@@ -33,19 +102,41 @@ class RequestIdMiddleware:
             await self.app(scope, receive, send)
             return
         request = Request(scope)
-        request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
+        request_id = _request_id(request.headers)
+        # Starlette ServerErrorMiddleware (qui produit les 500 non gérées)
+        # est extérieur aux middlewares applicatifs. Le garder dans le scope
+        # permet au gestionnaire d'erreur externe de le récupérer même après
+        # la sortie de cette contextvar.
+        correlation_id = _correlation_id(request.headers, request_id)
+        scope.setdefault("state", {})["request_id"] = request_id
+        scope["state"]["correlation_id"] = correlation_id
+        operation_id = _operation_id(scope.get("method", "GET"), scope.get("path", ""), request.headers)
+        scope["state"]["operation_id"] = operation_id
         token = request_id_ctx.set(request_id)
+        # Copiée par les tâches asynchrones créées pendant la requête et lue
+        # par les appels d'intégration : même correlationId de bout en bout.
+        correlation_token = correlation_id_ctx.set(correlation_id)
+        operation_token = operation_id_ctx.set(operation_id)
 
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
-                headers = list(message.get("headers", []))
+                # Remplace les éventuels headers posés par une route pour que
+                # la réponse et l'enveloppe d'erreur gardent un ID unique.
+                headers = [
+                    (name, value)
+                    for name, value in message.get("headers", [])
+                    if name.lower() not in (b"x-request-id", b"x-correlation-id")
+                ]
                 headers.append((b"x-request-id", request_id.encode()))
+                headers.append((b"x-correlation-id", correlation_id.encode()))
                 message = {**message, "headers": headers}
             await send(message)
 
         try:
             await self.app(scope, receive, send_wrapper)
         finally:
+            operation_id_ctx.reset(operation_token)
+            correlation_id_ctx.reset(correlation_token)
             request_id_ctx.reset(token)
 
 

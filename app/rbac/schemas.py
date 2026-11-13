@@ -18,6 +18,8 @@ class RoleResponse(BaseModel):
     organizationId: uuid.UUID
     code: str
     name: str
+    # T-018 : null = rôle transverse du socle, sinon le module de rattachement.
+    moduleCode: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -34,6 +36,12 @@ class CreateRoleRequest(BaseModel):
 
 class UpdateRolePermissionsRequest(BaseModel):
     permissionCodes: list[str]
+
+
+class ReplaceMemberRolesRequest(BaseModel):
+    """Ensemble cible des rôles transverses d'un membre (BE-015). Voir `app/rbac/affectation_membres.py`."""
+
+    roleIds: list[uuid.UUID]
 
 
 class AssignRoleRequest(BaseModel):
@@ -70,6 +78,19 @@ class UserRoleAssignmentResponse(RoleResponse):
 
 class CreateGrantRequest(BaseModel):
     userId: uuid.UUID
+    permissionCode: str
+    effect: str = Field(pattern="^(allow|deny)$")
+    resourceType: str | None = None
+    resourceId: uuid.UUID | None = None
+    validUntil: datetime | None = None
+    auditNote: str | None = None
+    delegatedFromGrantId: uuid.UUID | None = None
+
+
+class CreateMemberGrantRequest(BaseModel):
+    """Corps de `POST /organizations/current/members/{userId}/grants` (BE-017). Le membre
+    cible vient du chemin, pas du corps : il ne peut pas être changé par le client."""
+
     permissionCode: str
     effect: str = Field(pattern="^(allow|deny)$")
     resourceType: str | None = None

@@ -107,6 +107,9 @@ def downgrade() -> None:
     op.add_column('zyloLiquidDeliveryDeclaration', sa.Column('reconciledWithType', sa.String(40), nullable=True))
     op.add_column('zyloLiquidDeliveryDeclaration', sa.Column('reconciledWithId', postgresql.UUID(as_uuid=True), nullable=True))
     op.add_column('zyloLiquidDeliveryDeclaration', sa.Column('purchaseOrderId', postgresql.UUID(as_uuid=True), sa.ForeignKey('zyloLiquidPurchaseOrder.id', ondelete='RESTRICT'), nullable=True))
+    # L'index créé par f7a8b9c0d1e2 disparaît avec la colonne au upgrade (DROP COLUMN) :
+    # il est recréé ici, sinon le downgrade de f7a8b9c0d1e2 échoue sur un index absent.
+    op.create_index('ix_zlDeliveryDeclaration_purchaseOrderId', 'zyloLiquidDeliveryDeclaration', ['purchaseOrderId'])
     op.add_column('zyloLiquidDeliveryDeclaration', sa.Column('declaredVolumeLiters', sa.Numeric(12, 4), nullable=True))
     op.add_column('zyloLiquidDeliveryDeclaration', sa.Column('fuelProductId', postgresql.UUID(as_uuid=True), sa.ForeignKey('zyloLiquidFuelProduct.id', ondelete='RESTRICT'), nullable=True))
 

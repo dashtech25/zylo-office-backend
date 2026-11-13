@@ -15,15 +15,32 @@ from app.core.database import Base
 # appel de code n'est nécessaire, l'enregistrement se fait via Base.metadata.
 from app.alerts import models as alerts_models  # noqa: F401
 from app.audit import models as audit_models  # noqa: F401
+from app.evenements import models as evenements_models  # noqa: F401
+from app.exports import models as exports_models  # noqa: F401
+from app.jobs import models as jobs_models  # noqa: F401  (BE-213)
+from app.portail.exports import models as portail_exports_models  # noqa: F401  (BE-117)
+from app.securite import models as securite_models  # noqa: F401
 from app.auth import models as auth_models  # noqa: F401
 from app.billing import models as billing_models  # noqa: F401
 from app.files import models as files_models  # noqa: F401
+from app.core import idempotency as idempotency_models  # noqa: F401
+from app.core import flags as flags_models  # noqa: F401
+from app.core import ratelimit as ratelimit_models  # noqa: F401
+from app.operator import capacite_models  # noqa: F401  (BE-255)
 from app.identity import models as identity_models  # noqa: F401
+from app.integrations import models as integrations_models  # noqa: F401
 from app.location import models as location_models  # noqa: F401
 from app.modules.zylo_liquid import models as zylo_liquid_models  # noqa: F401
 from app.modules.zylo_tanker import models as zylo_tanker_models  # noqa: F401
 from app.modules_registry import models as modules_registry_models  # noqa: F401
+from app.notifications import models as notifications_models  # noqa: F401
+from app.operator import alertes_models as operator_alertes_models  # noqa: F401
+from app.operator import incidents_models as operator_incidents_models  # noqa: F401
+from app.operator import secrets_models as operator_secrets_models  # noqa: F401
+from app.parametres import models as parametres_models  # noqa: F401
+from app.portail.verification import models as portail_verification_models  # noqa: F401  (BE-103)
 from app.rbac import models as rbac_models  # noqa: F401
+from app.release import models as release_models  # noqa: F401
 from app.shared import geo as shared_geo_models  # noqa: F401
 from app.shared import currency as shared_currency_models  # noqa: F401
 
@@ -45,8 +62,12 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
+# Intention (T-012) : disable_existing_loggers=False. Par défaut, fileConfig met
+# `disabled=True` sur tous les loggers déjà créés, dont zylo_office.security
+# (journal de sécurité de l'authentification) : une migration lancée dans le même
+# processus (tests, démarrage) le ferait taire silencieusement.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # URL de connexion pilotée par la config applicative (.env), jamais codée en
 # dur dans alembic.ini — la même variable DATABASE_URL sert en local et une

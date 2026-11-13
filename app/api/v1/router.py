@@ -1,33 +1,281 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.alerts.router import router as alerts_router
 from app.api.v1.endpoints import health
 from app.auth.router import router as auth_router
+from app.billing.router import current_organization_router as billing_current_organization_router
+from app.billing.lecture_router import router as billing_lecture_router
+from app.billing.payment_methods.router import router as billing_payment_methods_router
+from app.billing.checkout_sessions.router import router as billing_checkout_sessions_router
+from app.billing.invoices_router import router as billing_invoices_router
+from app.billing.invoices_be204_router import router as invoices_be204_router
+from app.billing.allocation_router import router as billing_allocation_router
+from app.billing.consent_router import router as billing_consent_router
+from app.billing.exports.router import router as billing_exports_router
+from app.billing.history.router import router as billing_history_router
 from app.billing.router import router as billing_router
+from app.billing.subscriptions.router import router as billing_subscriptions_router
+from app.billing.subscriptions.lifecycle_router import router as billing_subscriptions_lifecycle_router
+from app.billing.cancellation.router import router as billing_cancellation_router
+from app.billing.reactivation.router import router as billing_reactivation_router
+from app.billing.close.router import router as billing_close_router
+from app.billing.cases.router import router as billing_cases_router
+from app.billing.trials.router import router as billing_trials_router
+from app.billing.plan_changes.router import router as billing_plan_changes_router
+
+from app.billing.commerce.router import router as billing_commerce_router
+from app.billing.quotes.router import router as billing_quotes_router
+from app.billing.checkouts.router import router as billing_checkouts_router
+from app.billing.payment_attempts.router import router as billing_payment_attempts_router
+from app.billing.refunds.router import router as billing_refunds_router
+from app.billing.disputes.router import router as billing_disputes_router
+from app.billing.reconciliation.router import router as billing_reconciliation_router
 from app.files.router import router as files_router
 from app.identity.router import router as organizations_router
+from app.integrations.router import router as connecteurs_router
+from app.integrations.configuration_router import router as configuration_integrations_router
+from app.integrations.webhooks_sortants_router import router as webhooks_sortants_router
+from app.tenants.router import router as tenants_router
+from app.identity.router import account_router
 from app.identity.router import users_router
+from app.identity.membership_router import contexts_router, memberships_router
+from app.identity.invitations_portail_router import router as portail_invitations_router
+from app.identity.membres_portail_router import router as portail_membres_router
+from app.portail.resume_router import router as portail_resume_router
+from app.portail.exports.router import router as portail_exports_router
+from app.portail.verification.router import router as portail_verification_router
 from app.location.router import router as location_router
 from app.modules.zylo_liquid.router import router as zylo_liquid_router
 from app.modules.zylo_tanker.router import router as zylo_tanker_router
+from app.modules_registry.audit_router import router as module_audit_router
+from app.modules_registry.router import organizations_modules_router
+from app.modules_registry.admin_router import router as modules_admin_router
+from app.modules_registry.manifeste_router import router as manifeste_publication_router
+from app.evenements.admin_router import router as evenements_admin_router
+from app.contrats.router import router as contrats_router
+from app.modules_registry.reconciliation_router import router as reconciliation_admin_router
+from app.modules_registry.catalog_router import router as catalog_router
 from app.modules_registry.router import router as modules_router
+from app.modules_registry.lecture_modules import router as lecture_modules_router
+from app.billing.plans_api import admin_router as plans_admin_router, router as plans_router
+from app.integrations.router import lettres_mortes_router
+from app.retention.router import router as retention_router
+from app.integrations.liens_router import router as liens_router
+from app.integrations.webhooks import router as webhooks_entrants_router
+from app.rbac.grants_membres import router as grants_membres_router
+from app.rbac.acces_effectif_router import router as acces_effectif_router
+from app.rbac.module_router import router as rbac_module_router
+from app.notifications.router import router as notifications_router
+from app.notifications.router_preferences import router as notification_preferences_router
 from app.rbac.router import router as rbac_router
+from app.rbac.roles_api import router as roles_api_router
+from app.rbac.roles_lecture import router as roles_lecture_router
+from app.audit.router import organization_audit_router
+from app.support.router import router as support_router
+from app.support.demandes.router import router as support_demandes_router
 from app.audit.router import router as audit_router
+from app.exports.router import router as exports_router
+from app.jobs.router import router as jobs_router
+from app.sortie_tenant.router import router as sortie_tenant_router
 from app.shared.currency_router import currency_router, exchange_rate_router
 from app.shared.export_router import export_router
 from app.shared.geo_router import country_router, geo_router
 from app.shared.import_router import import_router
 from app.shared.storage_router import storage_router
+from app.operator.router import router as operator_router
+from app.operator.health import admin_router as operator_admin_router
+from app.operator.health import internal_router as internal_health_router
+from app.evenements.dlq_router import router as dead_letters_router
+from app.release.flags_router import router as flags_router
+from app.billing.entitlement_events_router import router as billing_entitlement_events_router
+from app.billing.entitlements_router import router as billing_entitlements_router
+from app.operator.admin_audit_router import router as admin_audit_router
+from app.operator.search_router import router as search_router
+from app.operator.summary_router import router as summary_router
+from app.operator.scope import require_admin_scope
+from app.operator.incidents_router import router as incidents_router
+from app.operator.support_lists_router import router as support_lists_router
+from app.operator.exceptional_access import router as exceptional_access_router
+from app.operator.access import router as operator_access_router
+from app.operator.cases_router import router as cases_router
+from app.operator.escalation_router import router as escalation_router
+from app.operator.commands_router import router as commands_router
+from app.operator.notifications_router import router as notifications_admin_router
+from app.operator.finance_commands_router import router as finance_commands_router
+from app.operator.entitlement_commands_router import router as entitlement_commands_router
+from app.operator.membership_commands_router import router as membership_commands_router
+from app.operator.tenant_status_router import router as tenant_status_router
+from app.operator.config_security_router import router as config_security_router
+from app.operator.event_replay_router import router as event_replay_router
+from app.operator.payment_diagnostic_router import router as payment_diagnostic_router
+from app.operator.ops_metrics import router as ops_metrics_router
+from app.operator.subscription_diagnostic_router import router as subscription_diagnostic_router
+from app.rbac.role_assignments_router import router as role_assignments_router
+from app.parametres.routes import router as parametres_router
+from app.parametres.approbation_routes import router as approbations_router
+from app.operations.router import router as operations_router
+from app.migrations_module.router import router as migrations_router
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
+# BE-158 : paramètres résolus et modifications, sous /api/v1/parametres.
+api_router.include_router(parametres_router, prefix="/parametres", tags=["parametres"])
+api_router.include_router(approbations_router, prefix="/approbations", tags=["approbations"])
 api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 api_router.include_router(organizations_router, prefix="/organizations", tags=["organizations"])
+# BE-262 : accès support en lecture seule par défaut, sous /organizations/{organization_id}/acces-support.
+api_router.include_router(support_router, prefix="/organizations", tags=["support"])
+api_router.include_router(support_demandes_router, prefix="/organizations", tags=["support"])
+api_router.include_router(billing_current_organization_router, prefix="/organizations", tags=["billing"])
+# BE-105 : invitations du portail, sous /organizations/{organization_id}/invitations.
+api_router.include_router(portail_invitations_router, prefix="/organizations", tags=["organizations"])
+api_router.include_router(portail_membres_router, prefix="/organizations", tags=["organizations"])
+# BE-109 : résumé du portail filtré par permission, sous /organizations/{organization_id}/portal-summary.
+api_router.include_router(portail_resume_router, prefix="/organizations", tags=["organizations"])
+# BE-117 : exports de données asynchrones, sous /organizations/{organization_id}/exports.
+api_router.include_router(portail_exports_router, prefix="/organizations", tags=["organizations"])
+# BE-103 : vérification de l'organisation, sous /organizations/{organization_id}/verification.
+api_router.include_router(portail_verification_router, prefix="/organizations", tags=["organizations"])
 api_router.include_router(users_router, prefix="/users", tags=["users"])
+# BE-189 : contextes et memberships, sous /api/v1/contexts et /api/v1/memberships.
+api_router.include_router(contexts_router, prefix="/contexts", tags=["contexts"])
+api_router.include_router(memberships_router, prefix="/memberships", tags=["memberships"])
+api_router.include_router(account_router, prefix="/account", tags=["account"])
+api_router.include_router(organizations_modules_router, prefix="/organizations", tags=["modules"])
 api_router.include_router(modules_router, prefix="/modules", tags=["modules"])
+# BE-194 : fiche et version d'un module par code (lecture publique, sans droit).
+api_router.include_router(lecture_modules_router, prefix="/modules", tags=["modules"])
+api_router.include_router(modules_admin_router, prefix="/admin", tags=["admin-modules"], dependencies=[Depends(require_admin_scope)])
+# BE-195 : publication du manifeste d'un module par code (POST /admin/modules/by-code/{code}/versions).
+api_router.include_router(manifeste_publication_router, prefix="/admin", tags=["admin-modules"], dependencies=[Depends(require_admin_scope)])
+api_router.include_router(evenements_admin_router, prefix="/admin", tags=["admin-evenements"], dependencies=[Depends(require_admin_scope)])
+api_router.include_router(reconciliation_admin_router, prefix="/admin", tags=["admin-reconciliation"], dependencies=[Depends(require_admin_scope)])
+# BE-214 : rétention, sauvegarde et purge (POST /admin/retention/purges).
+api_router.include_router(retention_router, tags=["retention"])
+# BE-198 : migrations de module (dry-run, run, resume, rollback).
+# Pas de require_admin_scope : l'authentification seule (JWT valide) est requise, et le droit
+# platform.maintenance.run est vérifié par allowlist dans le service.
+api_router.include_router(migrations_router, prefix="/admin", tags=["migrations"])
+# BE-043 : catalogue public (publié + visible), sans authentification.
+api_router.include_router(catalog_router, prefix="/catalog", tags=["catalog"])
+# BE-200 : plans et versions de plan (GET /plans, POST /admin/plans/{plan_code}/versions).
+api_router.include_router(plans_router, tags=["plans"])
+api_router.include_router(contrats_router, tags=["contracts"])
+api_router.include_router(plans_admin_router, prefix="/admin", tags=["admin-plans"], dependencies=[Depends(require_admin_scope)])
+api_router.include_router(module_audit_router, prefix="/organizations", tags=["modules"])
+# BE-236 : opérations asynchrones consultables, `GET /operations/{operation_id}`.
+api_router.include_router(operations_router, prefix="/operations", tags=["operations"])
 api_router.include_router(rbac_router, prefix="/rbac", tags=["rbac"])
+# BE-162 : routes des connecteurs d'intégration (registre BE-160).
+api_router.include_router(connecteurs_router, tags=["integrations"])
+api_router.include_router(tenants_router)
+api_router.include_router(liens_router, tags=["integrations"])
+# BE-016 : lecture des rôles de l organisation courante (lecture seule).
+api_router.include_router(roles_lecture_router, prefix="/organizations", tags=["rbac"])
+api_router.include_router(roles_api_router, prefix="/roles", tags=["rbac"])
+api_router.include_router(billing_payment_methods_router, prefix="/organizations", tags=["billing"])
+api_router.include_router(billing_checkout_sessions_router, prefix="/organizations", tags=["billing"])
+api_router.include_router(grants_membres_router, prefix="/organizations", tags=["rbac"])
+api_router.include_router(rbac_module_router, prefix="/rbac", tags=["rbac"])
+api_router.include_router(acces_effectif_router, tags=["rbac"])
 api_router.include_router(audit_router, prefix="/audit", tags=["audit"])
+api_router.include_router(exports_router, prefix="/exports", tags=["exports"])
+# BE-213 : jobs d'import et d'export (POST /api/v1/jobs, GET, cancel, download).
+api_router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
+# BE-246 : sortie de tenant (POST /organizations/{id}/exit, GET .../exit/attestation).
+api_router.include_router(sortie_tenant_router, prefix="/organizations", tags=["sortie-tenant"])
+api_router.include_router(organization_audit_router, prefix="/organizations", tags=["audit"])
+api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
+api_router.include_router(notification_preferences_router, prefix="/notification-preferences", tags=["notifications"])
 api_router.include_router(billing_router, prefix="/billing", tags=["billing"])
+# BE-099 : historique commercial du tenant courant (GET /api/v1/billing/history).
+api_router.include_router(billing_history_router, prefix="/billing", tags=["billing"])
+api_router.include_router(billing_invoices_router, prefix="/billing", tags=["billing"])
+# BE-079 : agrégat abonnement (GET /billing/subscriptions/{subscriptionId}).
+api_router.include_router(billing_subscriptions_router, prefix="/billing", tags=["billing"])
+# BE-090 : résiliation d'abonnement (POST /billing/subscriptions/{subscriptionId}/cancel).
+api_router.include_router(billing_cancellation_router, prefix="/billing", tags=["billing"])
+# BE-092 : réactivation d'abonnement (POST /billing/subscriptions/{subscriptionId}/reactivate).
+api_router.include_router(billing_reactivation_router, prefix="/billing", tags=["billing"])
+api_router.include_router(billing_close_router, prefix="/billing", tags=["billing"])
+# BE-096 : cas de facturation et d'assistance (POST /billing/cases, POST /billing/cases/{case_id}/resolve).
+api_router.include_router(billing_cases_router, prefix="/billing", tags=["billing"])
+# BE-080 : démarrage d'essai (POST /billing/subscriptions/trials).
+api_router.include_router(billing_trials_router, prefix="/billing", tags=["billing"])
+# BE-088 : aperçu et application d'un changement de plan (POST /billing/subscriptions/{subscriptionId}/plan-change[/preview]).
+api_router.include_router(billing_plan_changes_router, prefix="/billing", tags=["billing"])
+
+# BE-077 : devis (POST /billing/quotes, GET /billing/quotes/{quoteId}, POST .../accept).
+api_router.include_router(billing_quotes_router, prefix="/billing", tags=["billing"])
+api_router.include_router(billing_checkouts_router, prefix="/billing", tags=["billing"])
+# BE-201 : entitlements et décision d'accès (POST /api/v1/entitlements, /entitlements/{entitlementId}/revoke, GET /api/v1/access/decisions).
+api_router.include_router(billing_entitlements_router, tags=["billing"])
+# BE-202 : devis, checkout et consentement à la racine (POST /api/v1/quotes, /checkouts, /consents).
+api_router.include_router(billing_commerce_router, tags=["billing"])
+# BE-204 : factures API (GET/POST /api/v1/invoices/{id}, finalize, void).
+api_router.include_router(invoices_be204_router, prefix="/invoices", tags=["invoices"])
+# BE-203 : cycle de vie Subscription à la racine (POST /api/v1/subscriptions/{id}/confirm, cancel, etc).
+api_router.include_router(billing_subscriptions_lifecycle_router, tags=["billing"])
+api_router.include_router(billing_payment_attempts_router, prefix="/billing", tags=["billing"])
+# BE-093 : remboursement avec approbation (POST /billing/payments/{paymentId}/refunds).
+api_router.include_router(billing_refunds_router, prefix="/billing", tags=["billing"])
+# BE-094 : litiges fournisseur, lecture seule (GET /billing/disputes/{disputeId}).
+api_router.include_router(billing_disputes_router, prefix="/billing", tags=["billing"])
+# BE-095 : réconciliation des paiements et résultats incertains (POST /billing/reconciliations).
+api_router.include_router(billing_reconciliation_router, prefix="/billing", tags=["billing"])
+api_router.include_router(billing_lecture_router, prefix="/organizations", tags=["billing"])
+# BE-046 : attribution et révocation des sièges d'entitlement (sous /organizations/{id}/entitlements).
+api_router.include_router(billing_allocation_router, prefix="/organizations", tags=["billing"])
+# BE-076 : consentements versionnés (POST /billing/consents).
+api_router.include_router(billing_consent_router, prefix="/billing", tags=["billing"])
+# BE-098 : export des données de facturation (POST /billing/data-exports).
+api_router.include_router(billing_exports_router, prefix="/billing", tags=["billing"])
+api_router.include_router(operator_router, prefix="/admin", tags=["operator"], dependencies=[Depends(require_admin_scope)])
+api_router.include_router(operator_admin_router, prefix="/admin", tags=["operator"], dependencies=[Depends(require_admin_scope)])
+# BE-122 : journal d'audit administratif, lecture seule (GET /admin/audit-events).
+api_router.include_router(admin_audit_router, prefix="/admin", tags=["admin-audit"], dependencies=[Depends(require_admin_scope)])
+# BE-129 : recherche d'organisation pour la console de support (GET /admin/search), lecture seule.
+api_router.include_router(search_router, prefix="/admin", tags=["admin-search"], dependencies=[Depends(require_admin_scope)])
+# BE-130 : synthèse des états d'un compte client (GET /admin/organizations/{id}/summary), lecture seule.
+api_router.include_router(summary_router, prefix="/admin", tags=["admin-summary"], dependencies=[Depends(require_admin_scope)])
+# BE-247 : file et détail des incidents d'exploitation (GET /admin/incidents).
+api_router.include_router(incidents_router, prefix="/admin", tags=["admin-incidents"], dependencies=[Depends(require_admin_scope)])
+# BE-131 : listes filtrées des objets de support par organisation (GET /admin/organizations/{id}/<liste>), lecture seule.
+api_router.include_router(support_lists_router, prefix="/admin", tags=["admin-support-lists"], dependencies=[Depends(require_admin_scope)])
+# BE-138 : accès exceptionnel au contenu client, refusé par défaut (POST /admin/organizations/{id}/exceptional-access).
+api_router.include_router(exceptional_access_router, prefix="/admin", tags=["admin-exceptional-access"], dependencies=[Depends(require_admin_scope)])
+# BE-229 : accès opérateur nominatif, JIT et approbation (POST/DELETE /admin/access-requests).
+api_router.include_router(operator_access_router, prefix="/admin", tags=["admin-operator-access"], dependencies=[Depends(require_admin_scope)])
+# BE-121 : affectations de rôle globales et temporaires (POST/GET /admin/role-assignments).
+api_router.include_router(role_assignments_router, prefix="/admin", tags=["admin-role-assignments"], dependencies=[Depends(require_admin_scope)])
+# BE-123 : cas d'intervention de support (POST/GET /admin/cases, assign, close).
+api_router.include_router(cases_router, prefix="/admin", tags=["admin-cases"], dependencies=[Depends(require_admin_scope)])
+api_router.include_router(escalation_router, prefix="/admin", tags=["admin-escalations"], dependencies=[Depends(require_admin_scope)])
+# BE-124 : intentions de commande opérateur idempotentes (POST/GET /admin/commands).
+api_router.include_router(commands_router, prefix="/admin", tags=["admin-commands"], dependencies=[Depends(require_admin_scope)])
+# BE-144 : notifications d'une commande opérateur (GET /admin/commands/{id}/notifications).
+api_router.include_router(notifications_admin_router, prefix="/admin", tags=["admin-notifications"], dependencies=[Depends(require_admin_scope)])
+api_router.include_router(finance_commands_router, prefix="/admin", tags=["admin-finance"], dependencies=[Depends(require_admin_scope)])
+api_router.include_router(entitlement_commands_router, prefix="/admin", tags=["operator"], dependencies=[Depends(require_admin_scope)])
+# BE-140 : changement de rôle ou d'adhésion d'un membre (POST /admin/organizations/{id}/memberships/{user_id}/role-changes).
+api_router.include_router(membership_commands_router, prefix="/admin", tags=["operator"], dependencies=[Depends(require_admin_scope)])
+# BE-134 : suspension et rétablissement d'un tenant (POST /admin/organizations/{id}/suspension|reinstatement).
+api_router.include_router(tenant_status_router, prefix="/admin", tags=["operator"], dependencies=[Depends(require_admin_scope)])
+api_router.include_router(config_security_router, prefix="/admin", tags=["operator"], dependencies=[Depends(require_admin_scope)])
+# BE-139 : demande de rejeu d'événement à effet métier (POST /admin/events/{id}/replay-commands).
+api_router.include_router(event_replay_router, prefix="/admin", tags=["admin-event-replay"], dependencies=[Depends(require_admin_scope)])
+api_router.include_router(payment_diagnostic_router, prefix="/admin", tags=["admin-payment-diagnostics"], dependencies=[Depends(require_admin_scope)])
+# BE-145 : compteurs d'exploitation de la console (GET /admin/ops/metrics), opérateur seul.
+api_router.include_router(ops_metrics_router, prefix="/admin", tags=["admin-ops"], dependencies=[Depends(require_admin_scope)])
+# BE-133 : diagnostic abonnement guidé (POST/GET /admin/cases/{id}/subscription-diagnostics).
+api_router.include_router(subscription_diagnostic_router, prefix="/admin", tags=["admin-subscription-diagnostics"], dependencies=[Depends(require_admin_scope)])
+api_router.include_router(internal_health_router, tags=["health"])
+# BE-058 : événements de service de facturation (POST /internal/billing/entitlement-events).
+api_router.include_router(billing_entitlement_events_router, prefix="/internal", tags=["billing"])
+# BE-235 : lettres mortes de consommation (GET /internal/dead-letters, POST .../{id}/replay), portée admin.
+api_router.include_router(dead_letters_router, prefix="/internal", tags=["evenements-dlq"])
+# BE-251 : feature flags serveur (GET/PUT /api/v1/internal/flags), réservés à l'exploitation.
+api_router.include_router(flags_router, prefix="/internal", tags=["release"])
 api_router.include_router(zylo_liquid_router, prefix="/zylo-liquid", tags=["zylo-liquid"])
 api_router.include_router(files_router, prefix="/zylo-liquid", tags=["files"])
 api_router.include_router(location_router, prefix="/zylo-liquid", tags=["location"])
@@ -57,3 +305,12 @@ api_router.include_router(country_router, prefix="/countries", tags=["geo"])
 api_router.include_router(export_router, prefix="/export", tags=["export"])
 api_router.include_router(import_router, prefix="/import", tags=["import"])
 api_router.include_router(storage_router, prefix="/storage", tags=["storage"])
+api_router.include_router(lettres_mortes_router, prefix="/integrations", tags=["integrations"])
+# BE-163 : webhook entrant d'un connecteur, sans authentification utilisateur (signature).
+api_router.include_router(webhooks_entrants_router, prefix="/integrations", tags=["integrations"])
+# BE-210 : configuration d'intégration et rotation/révocation de credential. Monté après les
+# lettres mortes : `/{integration_id}` ne doit pas capturer `/integrations/lettres-mortes`.
+api_router.include_router(configuration_integrations_router, prefix="/integrations", tags=["integrations"])
+# BE-211 : webhook sortant (endpoints, rotation de secret, statut de livraison). Chemins complets dans le
+# routeur, sans préfixe, car `/webhook-endpoints` et `/webhook-deliveries` ne sont pas sous `/integrations`.
+api_router.include_router(webhooks_sortants_router, tags=["integrations"])

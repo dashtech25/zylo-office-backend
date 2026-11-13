@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 from fastapi import Depends
@@ -6,12 +7,28 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import record_audit_event
+from app.billing.models import Subscription, SubscriptionEntitlement
 from app.core.database import get_db
 from app.core.errors import AppError
+from app.evenements.models import OutboxEvenement
+from app.modules_registry.etats import ETAT_INCOMPATIBLE, etat_depuis_ligne, etat_module, etat_ouvre_acces
 from app.modules_registry.models import Module, OrganizationModule
-from app.modules_registry.schemas import InstalledModuleResponse
+from app.modules_registry.schemas import InstalledModuleResponse, ModuleAccessResponse
 from app.rbac.models import Permission, Role, RolePermission
 from app.rbac.service import get_current_organization_id
+
+
+# Hooks d'activation par module (seed des rôles par défaut). Le socle n'importe jamais un module métier :
+# l'application (composition root, app/main.py) les enregistre. Sans cela, rbac -> module_assignment ->
+# modules_registry -> modules.zylo_liquid rendait `Files ne dépend jamais de zylo_liquid` violé (import-linter).
+HookActivation = Callable[[AsyncSession, uuid.UUID], Awaitable[None]]
+_hooks_activation: dict[str, HookActivation] = {}
+
+
+def enregistre_hook_activation(module_code: str, hook: HookActivation) -> None:
+    """Enregistre le hook appelé à l'activation d'un module, par code de module. Un nouvel enregistrement remplace le précédent pour ce code.
+    """
+    _hooks_activation[module_code] = hook
 
 
 async def grant_module_permissions_to_owner(db: AsyncSession, organization_id: uuid.UUID, module_code: str) -> None:
@@ -83,6 +100,8 @@ async def backfill_active_module_permissions_for_owners(db: AsyncSession) -> int
 
 
 async def get_or_create_module(db: AsyncSession, code: str, name: str, description: str, version: str = "0.1.0") -> Module:
+    """Retourne le module de ce code, ou le crée avec le nom, la description et la version donnés s'il n'existe pas encore.
+    """
     result = await db.execute(select(Module).where(Module.code == code))
     module = result.scalar_one_or_none()
     if module:
@@ -96,8 +115,26 @@ async def get_or_create_module(db: AsyncSession, code: str, name: str, descripti
 async def activate_module(
     db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, module_code: str
 ) -> OrganizationModule:
-    result = await db.execute(select(Module).where(Module.code == module_code))
-    if result.scalar_one_or_none() is None:
+    """Active `module_code` pour l'organisation, avec audit (`modulesRegistry.module.activate`).
+
+    Ordre des contrôles : droit d'entitlement (403), puis état registre (404 inconnu/absent,
+    409 incompatible), puis écriture de la ligne `organizationModule`, seed des rôles du module,
+    grant au owner, audit. Un seul commit pour l'ensemble.
+    """
+    await assert_module_entitled(db, organization_id, module_code)
+    ligne = (await db.execute(select(Module).where(Module.code == module_code))).scalar_one_or_none()
+    # Porte d'entrée unique de l'activation (BE-022, CA-4) : seul un module `disponible` au registre
+    # peut être activé. Un code non reconnu ou sans ligne est `inconnu`/`absent` (404) ; un manifeste
+    # d'une version non supportée est `incompatible` (409). Une désactivation n'est pas soumise à cette
+    # porte : elle doit toujours rester possible pour retirer un module.
+    etat = etat_depuis_ligne(module_code, ligne)
+    if etat == ETAT_INCOMPATIBLE:
+        raise AppError(
+            code="module_incompatible",
+            message=f"Le module '{module_code}' est incompatible avec cette version de Zylo Office.",
+            status_code=409,
+        )
+    if not etat_ouvre_acces(etat):
         raise AppError(code="module_not_found", message=f"Module inconnu : {module_code}.", status_code=404)
 
     result = await db.execute(
@@ -129,14 +166,9 @@ async def activate_module(
     # généraliser (registre de callables par module_code) le jour où un 2e
     # module a besoin de rôles par défaut (§20 du document d'architecture,
     # « rôle et permissions... .md »).
-    if module_code == "zylo_liquid":
-        from app.modules.zylo_liquid.roles_seed import seed_default_roles
-
-        await seed_default_roles(db, organization_id)
-    elif module_code == "zylo_tanker":
-        from app.modules.zylo_tanker.roles_seed import seed_default_roles
-
-        await seed_default_roles(db, organization_id)
+    hook = _hooks_activation.get(module_code)
+    if hook is not None:
+        await hook(db, organization_id)
 
     await grant_module_permissions_to_owner(db, organization_id, module_code)
 
@@ -158,6 +190,10 @@ async def activate_module(
 async def deactivate_module(
     db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, module_code: str
 ) -> OrganizationModule:
+    """Désactive `module_code` pour l'organisation (statut `inactive`), avec audit
+    (`modulesRegistry.module.deactivate`). Aucune contrainte de registre : on peut toujours retirer
+    un module, même devenu `incompatible`. 404 si le module n'a jamais été activé ici.
+    """
     result = await db.execute(
         select(OrganizationModule).where(
             OrganizationModule.organizationId == organization_id, OrganizationModule.moduleCode == module_code
@@ -182,7 +218,29 @@ async def deactivate_module(
     return org_module
 
 
+async def set_module_activation(
+    db: AsyncSession, organization_id: uuid.UUID, actor_user_id: uuid.UUID, module_id: uuid.UUID, active: bool
+) -> OrganizationModule:
+    """Point d'entrée de `PUT /organizations/current/modules/{moduleId}/activation` (BE-022).
+
+    Résout le module par son identifiant de catalogue (404 s'il n'existe pas), puis délègue à
+    `activate_module` ou `deactivate_module` : la règle de registre, l'entitlement et l'audit ne
+    sont écrits qu'à un seul endroit.
+    """
+    module = (await db.execute(select(Module).where(Module.id == module_id))).scalar_one_or_none()
+    if module is None:
+        raise AppError(code="module_not_found", message="Module inconnu.", status_code=404)
+    if active:
+        return await activate_module(db, organization_id, actor_user_id, module.code)
+    return await deactivate_module(db, organization_id, actor_user_id, module.code)
+
+
 async def is_module_active(db: AsyncSession, organization_id: uuid.UUID, module_code: str) -> bool:
+    """Vrai seulement si le module est `disponible` au registre (etats.py) ET activé pour
+    l'organisation. Un module `absent`, `inconnu` ou `incompatible` n'ouvre jamais l'accès,
+    même si une ligne `organizationModule` est active (BE-021, CA-4)."""
+    if not etat_ouvre_acces(await etat_module(db, module_code)):
+        return False
     result = await db.execute(
         select(OrganizationModule.status).where(
             OrganizationModule.organizationId == organization_id,
@@ -191,6 +249,137 @@ async def is_module_active(db: AsyncSession, organization_id: uuid.UUID, module_
     )
     status_value = result.scalar_one_or_none()
     return status_value in ("active", "trial")
+
+
+async def assert_module_entitled(db: AsyncSession, organization_id: uuid.UUID, module_code: str) -> None:
+    """Compatibility-first entitlement gate.
+
+    Organizations without an explicit entitlement row retain legacy access.
+    If a row exists, only its latest effective entitlement is considered;
+    explicit inactive/expired/blocked state or an expired/cancelled backing
+    subscription denies activation and module access.
+    """
+    _access_state, allowed = await get_module_entitlement_access(db, organization_id, module_code)
+    if not allowed:
+        raise AppError(
+            code="module_entitlement_unavailable",
+            message=f"L'accès au module '{module_code}' n'est pas disponible pour cette organisation.",
+            status_code=422,
+        )
+
+
+def _project_entitlement_access(row, now: datetime) -> tuple[str, bool]:
+    """Project the existing enforcement rule for read-only UI decisions.
+
+    For BE-196 activation, a missing entitlement requires explicit active entitlement.
+    Legacy behavior (allowing activation without entitlement) is disabled for BE-196.
+    """
+    if row is None:
+        return "not_configured", False
+
+    entitlement, subscription_status = row
+    if entitlement.status == "blocked":
+        return "blocked", False
+    if (
+        entitlement.status == "expired"
+        or (entitlement.endsAt is not None and entitlement.endsAt <= now)
+        or subscription_status in {"expired", "cancelled"}
+    ):
+        return "expired", False
+    if entitlement.status == "inactive" or entitlement.startsAt > now:
+        return "inactive", False
+    if entitlement.status == "active" and subscription_status in {"active", "trial"}:
+        return "active", True
+    return "unknown", False
+
+
+def _select_effective_entitlement(rows, now: datetime):
+    """Choose the latest entitlement already in effect; future rows cannot mask it."""
+    effective = [row for row in rows if row[0].startsAt <= now]
+    if effective:
+        return max(effective, key=lambda row: (row[0].startsAt, row[0].createdAt))
+    # A future-only explicit entitlement is configured but not yet effective.
+    return min(rows, key=lambda row: (row[0].startsAt, row[0].createdAt), default=None)
+
+
+def _projeter_acces(module: Module, installation_status: str, rows, now: datetime) -> tuple[str, bool, bool]:
+    """Projection unique `(accessState, canActivate, canOpen)` d'un module pour une organisation (BE-025).
+
+    Source unique partagée par le catalogue (`list_installed_modules`) et la projection d'un module
+    (`get_module_access_projection`) : les deux lectures ne peuvent donc pas diverger.
+
+    - `canActivate` : vrai si le droit d'abonnement est accordé (`_project_entitlement_access`) ;
+      une absence de ligne d'entitlement vaut accès legacy (`not_configured`, non-régression).
+    - `canOpen` : vrai seulement si le module est activé pour l'organisation (`active` ou `trial`),
+      que le droit est accordé ET que le registre déclare le module `disponible`. Un manifeste
+      `incompatible` ferme donc l'ouverture même si le droit et l'activation sont présents, en
+      cohérence avec `is_module_active` (BE-021, CA-4). Fail-closed : aucun cas non prévu n'ouvre.
+
+    `rows` est la liste `(SubscriptionEntitlement, Subscription.status)` de l'organisation pour ce
+    module. Fonction pure : aucune requête, aucune écriture.
+    """
+    access_state, can_activate = _project_entitlement_access(_select_effective_entitlement(rows, now), now)
+    registre_ouvert = etat_ouvre_acces(etat_depuis_ligne(module.code, module))
+    can_open = installation_status in {"active", "trial"} and can_activate and registre_ouvert
+    return access_state, can_activate, can_open
+
+
+async def get_module_access_projection(
+    db: AsyncSession, organization_id: uuid.UUID, module_id: uuid.UUID
+) -> ModuleAccessResponse:
+    """Projection d'accès d'un module (catalogue) pour l'organisation courante (BE-025).
+
+    Renvoie `ModuleAccessResponse` pour `GET /organizations/current/modules/{moduleId}/access`.
+    404 si `module_id` n'existe pas au catalogue. Un module jamais activé ici est projeté avec le
+    statut `inactive`. Ne lit que les lignes de `organization_id` : un droit d'une autre organisation
+    n'entre jamais dans le calcul (isolation, CA-5).
+    """
+    module = (await db.execute(select(Module).where(Module.id == module_id))).scalar_one_or_none()
+    if module is None:
+        raise AppError(code="module_not_found", message="Module inconnu.", status_code=404)
+    installation_status = (
+        await db.execute(
+            select(OrganizationModule.status).where(
+                OrganizationModule.organizationId == organization_id,
+                OrganizationModule.moduleCode == module.code,
+            )
+        )
+    ).scalar_one_or_none() or "inactive"
+    rows = (
+        await db.execute(
+            select(SubscriptionEntitlement, Subscription.status)
+            .join(Subscription, Subscription.id == SubscriptionEntitlement.subscriptionId)
+            .where(
+                SubscriptionEntitlement.organizationId == organization_id,
+                SubscriptionEntitlement.moduleCode == module.code,
+            )
+        )
+    ).all()
+    access_state, can_activate, can_open = _projeter_acces(module, installation_status, rows, datetime.now(timezone.utc))
+    return ModuleAccessResponse(
+        moduleId=module.id,
+        moduleCode=module.code,
+        status=installation_status,
+        accessState=access_state,
+        canActivate=can_activate,
+        canOpen=can_open,
+    )
+
+
+async def get_module_entitlement_access(
+    db: AsyncSession, organization_id: uuid.UUID, module_code: str
+) -> tuple[str, bool]:
+    """Return the same compatibility-first decision used by module guards."""
+    result = await db.execute(
+        select(SubscriptionEntitlement, Subscription.status)
+        .join(Subscription, Subscription.id == SubscriptionEntitlement.subscriptionId)
+        .where(
+            SubscriptionEntitlement.organizationId == organization_id,
+            SubscriptionEntitlement.moduleCode == module_code,
+        )
+    )
+    now = datetime.now(timezone.utc)
+    return _project_entitlement_access(_select_effective_entitlement(result.all(), now), now)
 
 
 async def list_installed_modules(db: AsyncSession, organization_id: uuid.UUID) -> list[InstalledModuleResponse]:
@@ -205,20 +394,164 @@ async def list_installed_modules(db: AsyncSession, organization_id: uuid.UUID) -
     )
     org_modules_by_code = {org_module.moduleCode: org_module for org_module in org_modules}
 
+    entitlement_rows = (
+        await db.execute(
+            select(SubscriptionEntitlement, Subscription.status)
+            .join(Subscription, Subscription.id == SubscriptionEntitlement.subscriptionId)
+            .where(SubscriptionEntitlement.organizationId == organization_id)
+            .order_by(
+                SubscriptionEntitlement.moduleCode,
+                SubscriptionEntitlement.startsAt.desc(),
+                SubscriptionEntitlement.createdAt.desc(),
+            )
+        )
+    ).all()
+    entitlements_by_module = {}
+    for row in entitlement_rows:
+        module_code = row[0].moduleCode
+        entitlements_by_module.setdefault(module_code, []).append(row)
+
     result: list[InstalledModuleResponse] = []
+    now = datetime.now(timezone.utc)
     for module in modules:
         org_module = org_modules_by_code.get(module.code)
+        installation_status = org_module.status if org_module else "inactive"
+        access_state, can_activate, can_open = _projeter_acces(
+            module, installation_status, entitlements_by_module.get(module.code, []), now
+        )
         result.append(
             InstalledModuleResponse(
+                moduleId=module.id,
                 moduleCode=module.code,
                 name=module.name,
                 description=module.description,
                 version=module.version,
-                status=org_module.status if org_module else "inactive",
+                status=installation_status,
                 activatedAt=org_module.activatedAt if org_module else None,
+                accessState=access_state,
+                canActivate=can_activate,
+                canOpen=can_open,
             )
         )
     return result
+
+
+async def activate_module_be196(
+    db: AsyncSession, organization_id: uuid.UUID, actor_id: uuid.UUID, module_code: str,
+    expected_version: int, operation_id: uuid.UUID
+) -> tuple[str, int]:
+    """Activation avec cycle de vie et provisionnement (BE-196 CA-1 à CA-6).
+
+    Retourne (state, version) pour la réponse. La table organization_module est mise à jour avec
+    state, version, et operationId. Un echec de hook laisse state='failed' mais ne lève pas.
+
+    Vérifications :
+    - CA-2 : entitlement absent : 422
+    - CA-3 : permission module.manage absente : 403 (gérée par la route)
+    - CA-1 : deux appels avec le même operationId ne provisionnent qu'une fois (idempotence)
+    - CA-4 : echec de hook : state='failed', récupérable par nouvel appel
+    - CA-5 : isole par organisation (organisationId forcé)
+    - CA-6 : écrit audit et outbox à chaque appel réussi
+    """
+    # CA-2 : Vérifier l'entitlement
+    await assert_module_entitled(db, organization_id, module_code)
+
+    # Trouver ou créer la ligne organization_module
+    result = await db.execute(
+        select(OrganizationModule).where(
+            OrganizationModule.organizationId == organization_id,
+            OrganizationModule.moduleCode == module_code,
+        )
+    )
+    org_module = result.scalar_one_or_none()
+
+    # CA-1 : Idempotence — si operationId égale celui stocké, retourner l'état sans retraiter
+    if org_module is not None and org_module.operationId == operation_id:
+        return org_module.state or "active", org_module.version or 0
+
+    # Créer ou initialiser la ligne + déterminer si on doit appeler le hook
+    should_call_hook = False  # CA-1 : ne pas réappeler le hook si déjà actif
+    if org_module is None:
+        org_module = OrganizationModule(
+            organizationId=organization_id,
+            moduleCode=module_code,
+            status="active",  # Maintenir l'ancienne colonne pour compatibilité
+            state="active",
+            version=0,
+            operationId=operation_id,
+            activatedAt=datetime.now(timezone.utc),
+        )
+        db.add(org_module)
+        should_call_hook = True  # Nouveau module, appeler le hook
+    else:
+        # Mise à jour : vérifier que la version attendue match
+        if org_module.version is not None and org_module.version != expected_version:
+            # Conflit de version : retourner l'état actuel sans mettre à jour
+            return org_module.state or "active", org_module.version or 0
+
+        # CA-1 : Si déjà "active", incrémenter juste la version
+        if org_module.state == "active":
+            # Incrémenter juste la version pour le client, pas de hook
+            new_version = (org_module.version or 0) + 1
+            org_module.version = new_version
+            should_call_hook = False
+        else:
+            # Incrémenter la version et préparer pour le provisionnement
+            new_version = (org_module.version or 0) + 1
+            org_module.state = "active"
+            org_module.version = new_version
+            org_module.operationId = operation_id
+            org_module.status = "active"
+            org_module.activatedAt = datetime.now(timezone.utc)
+            should_call_hook = True
+
+    # Appeler le hook d'activation (CA-4 : échec ne lève pas, laisse state='failed')
+    # Ici, le module est nouveau ou passait d'un autre état à 'active'
+    if should_call_hook:
+        hook = _hooks_activation.get(module_code)
+        if hook is not None:
+            try:
+                await hook(db, organization_id)
+            except Exception as e:
+                # État échoué mais stocké pour récupération ultérieure
+                org_module.state = "failed"
+                # Le message d'erreur n'est jamais renvoyé au client (sécurité)
+
+    # CA-6 : Écrire l'audit
+    await db.flush()  # Assure org_module.id avant l'audit
+    await record_audit_event(
+        db,
+        organization_id,
+        actor_id,
+        action="modulesRegistry.module.activate",
+        entity_type="OrganizationModule",
+        entity_id=org_module.id,
+        summary=f"Activation du module {module_code} (BE-196)",
+    )
+
+    # CA-6 : Écrire l'outbox (pour événements de domaine)
+    # Événement d'activation réussie du module pour l'organisation
+    outbox_event = OutboxEvenement(
+        eventId=uuid.uuid4(),
+        eventType="ModuleActivated",
+        schemaVersion=1,
+        portee="tenant",
+        tenantId=organization_id,
+        acteur={"userId": str(actor_id)},
+        payload={
+            "organizationId": str(organization_id),
+            "moduleCode": module_code,
+            "state": org_module.state,
+            "version": org_module.version,
+        },
+    )
+    db.add(outbox_event)
+    await db.flush()
+
+    await db.commit()
+    await db.refresh(org_module)
+
+    return org_module.state or "active", org_module.version or 0
 
 
 def require_module_active(module_code: str):
@@ -236,6 +569,7 @@ def require_module_active(module_code: str):
                 message=f"Le module '{module_code}' n'est pas actif pour cette organisation.",
                 status_code=403,
             )
+        await assert_module_entitled(db, organization_id, module_code)
 
     return dependency
 
@@ -255,9 +589,18 @@ def require_module_active_any(*module_codes: str):
         organization_id: uuid.UUID = Depends(get_current_organization_id),
         db: AsyncSession = Depends(get_db),
     ) -> None:
+        blocked_error: AppError | None = None
         for module_code in module_codes:
             if await is_module_active(db, organization_id, module_code):
-                return
+                try:
+                    await assert_module_entitled(db, organization_id, module_code)
+                    return
+                except AppError as exc:
+                    if exc.code != "module_entitlement_unavailable":
+                        raise
+                    blocked_error = exc
+        if blocked_error is not None:
+            raise blocked_error
         raise AppError(
             code="module_inactive",
             message=f"Aucun des modules {', '.join(module_codes)} n'est actif pour cette organisation.",

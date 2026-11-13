@@ -1,0 +1,20 @@
+# Configuration de la sécurité des dépendances (BE-249). Toute valeur vit ici, jamais dans
+# supply_chain.py : une section ou une clé absente fait échouer le contrôle.
+#
+# sources : bases de vulnérabilités retenues. NON DÉFINI (QE-EXP-19) : liste vide. Le contrôle
+#   lit la sortie pip-audit fournie ; cette clé est informative tant que les sources ne sont pas
+#   décidées.
+# criticite_bloquante : seuil de criticité. NON DÉFINI (QE-EXP-19) : chaîne vide. Tant que vide,
+#   toute vulnérabilité non couverte par une exception valide bloque. Une valeur non vide est
+#   refusée (pip-audit ne fournit pas la criticité).
+# duree_maximale_exception_jours : durée maximale entre l'ajout et l'expiration d'une exception.
+#   NON DÉFINI (QE-EXP-19) : 0 signifie non borné ; la date d'expiration fait foi.
+
+[sources]
+bases = []
+
+[criticite]
+criticite_bloquante = ""
+
+[delais]
+duree_maximale_exception_jours = 0

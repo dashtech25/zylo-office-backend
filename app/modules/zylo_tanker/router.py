@@ -24,6 +24,10 @@ from app.rbac.service import get_current_organization_id
 from app.shared.pagination import PaginationParams
 from app.shared.schemas import Page
 
+# T-019 : gardes de permission des routes
+from app.modules.zylo_tanker.permissions import VESSEL_MANAGE, VESSEL_READ
+from app.rbac.service import require_permission
+
 router = APIRouter(dependencies=[Depends(require_module_active("zylo_tanker"))])
 
 
@@ -39,7 +43,7 @@ async def ping(
     return {"module": "zylo_tanker", "status": "ok", "organizationId": str(organization_id)}
 
 
-@router.post("/vessels", response_model=VesselResponse, status_code=201, summary="Créer un navire")
+@router.post("/vessels", response_model=VesselResponse, status_code=201, summary="Créer un navire", dependencies=[Depends(require_permission(VESSEL_MANAGE))])
 async def create_vessel(
     data: CreateVesselRequest,
     current_user: User = Depends(get_current_user),
@@ -49,7 +53,7 @@ async def create_vessel(
     return await service.create_vessel(db, organization_id, current_user.id, data)
 
 
-@router.get("/vessels", response_model=Page[VesselResponse], summary="Lister les navires de l'organisation")
+@router.get("/vessels", response_model=Page[VesselResponse], summary="Lister les navires de l'organisation", dependencies=[Depends(require_permission(VESSEL_READ))])
 async def list_vessels(
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_user),
@@ -59,7 +63,7 @@ async def list_vessels(
     return await service.list_vessels(db, organization_id, current_user.id, pagination)
 
 
-@router.get("/vessels/{vessel_id}", response_model=VesselResponse, summary="Détail d'un navire")
+@router.get("/vessels/{vessel_id}", response_model=VesselResponse, summary="Détail d'un navire", dependencies=[Depends(require_permission(VESSEL_READ))])
 async def get_vessel(
     vessel_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -69,7 +73,7 @@ async def get_vessel(
     return await service.get_vessel(db, organization_id, current_user.id, vessel_id)
 
 
-@router.put("/vessels/{vessel_id}/destination", response_model=VesselResponse, summary="Fixer (ou remplacer) la destination d'un navire")
+@router.put("/vessels/{vessel_id}/destination", response_model=VesselResponse, summary="Fixer (ou remplacer) la destination d'un navire", dependencies=[Depends(require_permission(VESSEL_MANAGE))])
 async def set_vessel_destination(
     vessel_id: uuid.UUID,
     data: SetVesselDestinationRequest,
@@ -80,7 +84,7 @@ async def set_vessel_destination(
     return await service.set_vessel_destination(db, organization_id, current_user.id, vessel_id, data.latitude, data.longitude, data.label)
 
 
-@router.delete("/vessels/{vessel_id}/destination", response_model=VesselResponse, summary="Effacer la destination d'un navire")
+@router.delete("/vessels/{vessel_id}/destination", response_model=VesselResponse, summary="Effacer la destination d'un navire", dependencies=[Depends(require_permission(VESSEL_MANAGE))])
 async def clear_vessel_destination(
     vessel_id: uuid.UUID,
     current_user: User = Depends(get_current_user),

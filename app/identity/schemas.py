@@ -1,6 +1,10 @@
 import uuid
+from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, EmailStr, Field, field_validator
+
+from app.auth.politique_mot_de_passe import verifie_mot_de_passe
 
 
 class UpdateUserProfileRequest(BaseModel):
@@ -24,7 +28,29 @@ class CreateOrganizationRequest(BaseModel):
 
 
 class UpdateOrganizationRequest(BaseModel):
+    """PATCH /organizations/{id}. `expectedVersion` (BE-186, nom de la définition)
+    est la version relue précédemment : absente, la mutation n'est pas
+    conditionnée ; obsolète, 409. `version` (BE-233) reste accepté en alias."""
+
     name: str = Field(min_length=1, max_length=255)
+    expectedVersion: int | None = Field(
+        default=None, ge=1, validation_alias=AliasChoices("expectedVersion", "version")
+    )
+
+
+class OrganizationDetailResponse(BaseModel):
+    """GET /organizations/{id} (BE-186). Les champs légaux ne figurent dans la
+    réponse que si le droit `organization.legal.read` est détenu : la route
+    applique `response_model_exclude_unset`, donc un champ absent n'apparaît pas."""
+
+    id: uuid.UUID
+    name: str
+    slug: str
+    status: str
+    version: int
+    tenantId: uuid.UUID | None = None
+    legalRegistrationNumber: str | None = None
+    legalTaxNumber: str | None = None
 
 
 class OrganizationResponse(BaseModel):
@@ -32,5 +58,125 @@ class OrganizationResponse(BaseModel):
     name: str
     slug: str
     status: str
+    version: int
 
     model_config = {"from_attributes": True}
+
+
+class CreateUserRequest(BaseModel):
+    """POST /organizations/{id}/users — aucun mot de passe : le titulaire le choisit
+    lui-même à l'activation (T-049). Le créateur ne fournit que l'identité."""
+
+    email: EmailStr = Field(max_length=320)
+    fullName: str = Field(min_length=1, max_length=255)
+
+    @field_validator("fullName")
+    @classmethod
+    def _nom_non_vide(cls, valeur: str) -> str:
+        nettoye = valeur.strip()
+        if not nettoye:
+            raise ValueError("Le nom complet ne peut pas être vide.")
+        return nettoye
+
+
+class CreatedUserResponse(BaseModel):
+    """Réponse de création : identifiant, statut, échéance de l'invitation.
+    Jamais de secret (mot de passe, hachage, jeton d'activation)."""
+
+    id: uuid.UUID
+    email: str
+    fullName: str
+    status: str
+    organizationId: uuid.UUID
+    invitationExpiresAt: datetime
+
+
+class UpdateUserStatusRequest(BaseModel):
+    status: Literal["active", "suspended"]
+
+
+class UserStatusResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    fullName: str
+    status: str
+
+
+class ReissuedInvitationResponse(BaseModel):
+    userId: uuid.UUID
+    invitationExpiresAt: datetime
+
+
+class ActivateAccountRequest(BaseModel):
+    """POST /auth/activate. Deux usages du même jeton endpoint :
+    - compte créé par une organisation (T-049, `userInvitation`) : `password` requis ;
+    - invitation à rejoindre une organisation (BE-013, `organizationInvitation`) :
+      `password` et `fullName` requis seulement si la personne n'a pas encore de
+      compte ; une personne déjà inscrite rejoint l'organisation sans nouveau mot de passe.
+    La présence de ces champs est contrôlée au service, après résolution du jeton."""
+
+    token: str = Field(min_length=20, max_length=200)
+    # Règle commune (app/auth/politique_mot_de_passe.py), vérifiée seulement si fournie.
+    password: str | None = Field(default=None, max_length=255)
+    fullName: str | None = Field(default=None, min_length=1, max_length=255)
+
+    @field_validator("password")
+    @classmethod
+    def _politique_mot_de_passe(cls, valeur: str | None) -> str | None:
+        if valeur is not None:
+            verifie_mot_de_passe(valeur)
+        return valeur
+
+
+class AccountActivatedResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    status: str
+
+
+class CreateOrganizationInvitationRequest(BaseModel):
+    """POST /organizations/current/invitations. `roleId` est facultatif : le rôle
+    proposé doit appartenir à l'organisation courante, sinon 404."""
+
+    email: EmailStr = Field(max_length=320)
+    roleId: uuid.UUID | None = None
+
+
+class OrganizationInvitationResponse(BaseModel):
+    """Invitation telle qu'exposée par l'API. Le jeton n'y figure jamais."""
+
+    id: uuid.UUID
+    email: str
+    roleId: uuid.UUID | None
+    status: str
+    expiresAt: datetime
+
+
+class ChangeMemberRolesRequest(BaseModel):
+    """POST /organizations/{organization_id}/role-changes (BE-106). `membershipId` désigne le
+    membership de l'organisation du chemin (`organization_user.id`) ; `roleIds` est l'ensemble
+    cible des rôles transverses du membre (voir `rbac.affectation_membres.replace_member_roles`)."""
+
+    membershipId: uuid.UUID
+    roleIds: list[uuid.UUID]
+
+
+class CreatePortalInvitationRequest(BaseModel):
+    """POST /organizations/{organization_id}/invitations (BE-105). `recipientUserId` désigne
+    l'identité invitée, seule habilitée à accepter (QE-POR-24). `roleId` est facultatif et ne
+    peut pas être le rôle Owner (QE-POR-04)."""
+
+    recipientUserId: uuid.UUID
+    roleId: uuid.UUID | None = None
+
+
+class PortalInvitationResponse(BaseModel):
+    """Invitation du portail d'organisation (BE-105), telle qu'exposée par l'API."""
+
+    id: uuid.UUID
+    organizationId: uuid.UUID
+    recipientUserId: uuid.UUID
+    roleId: uuid.UUID | None
+    status: str
+    expiresAt: datetime
+    createdByUserId: uuid.UUID

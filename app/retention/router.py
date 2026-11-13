@@ -18,7 +18,7 @@ from app.identity.models import User
 from app.retention import service
 from app.core.errors import AppError
 
-router = APIRouter(prefix="/api/v1/admin/retention", tags=["retention"])
+router = APIRouter(prefix="/admin/retention", tags=["retention"])
 
 
 class PurgeRequest(BaseModel):
@@ -52,13 +52,27 @@ async def request_purge(
 
     Lève 422 si legal_hold actif ou durée non définie.
     """
+    from sqlalchemy import select
+    from app.identity.models import OrganizationUser
+
     # TODO: Implémenter contrôle de permission platform.retention.manage
     # if not await user_has_permission(db, user.id, None, "platform.retention.manage"):
     #     raise AppError(code="FORBIDDEN", message="Permission requise.", status_code=403)
 
     # TODO: Obtenir organization_id depuis le contexte (admin, pas isolé à une org)
-    # Pour l'instant, utiliser user.defaultOrganizationId ou un param global
-    organization_id = user.defaultOrganizationId  # À adapter
+    # Pour l'instant, récupérer la première organisation de l'utilisateur
+    org_user = (await db.execute(
+        select(OrganizationUser).where(OrganizationUser.userId == user.id).limit(1)
+    )).scalar_one_or_none()
+
+    if not org_user:
+        raise AppError(
+            code="no_organization",
+            message="L'utilisateur n'appartient à aucune organisation.",
+            status_code=403,
+        )
+
+    organization_id = org_user.organizationId
 
     result = await service.request_purge(
         db=db,

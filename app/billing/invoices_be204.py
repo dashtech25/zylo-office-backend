@@ -145,15 +145,18 @@ async def finalize_invoice(
     invoice.version += 1
 
     # Écrire l'audit (CA-6)
-    await write_audit_event(
+    from app.audit.service import record_audit_event
+
+    await record_audit_event(
         db=db,
-        principal_id=user_id,
-        principal_kind="user",
+        actor_user_id=user_id,
         action="billing.invoice.finalize",
+        entity_type="invoice",
+        entity_id=str(invoice_id),
+        scope_resource_type="tenant",
         organization_id=organization_id,
-        resource_id=str(invoice_id),
-        resource_kind="invoice",
-        details={"reason": reason, "previous_state": "draft"},
+        reason=reason,
+        changes={"before": {"state": "draft"}, "after": {"state": "finalized"}},
     )
 
     db.add(invoice)

@@ -193,6 +193,63 @@ def _interdire_modification_version_publiee(mapper, connection, cible: PlanVersi
             )
 
 
+class BillingInvoice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Facture BE-204 : documents financiers génériques.
+
+    Modèle de document financier pour tous les émetteurs (facturation interne,
+    prestataires externes). Trois rôles distincts :
+    - `tenantId` : propriétaire pour l'isolation (CA-3) et l'audit ;
+    - `payerId` : entité facturée (peut différer du tenant) ;
+    - `issuer` : nom/identifiant de l'émetteur.
+
+    États : `draft` → `finalized` → `void`. Une fois émise (`finalized` ou `void`),
+    une facture est append-only (CA-1) : aucune modification.
+
+    `snapshot` capture les données figées à la finalisation (prix, devise, taxe).
+    `version` porte le verrou optimiste (BE-072) : incrémenté à chaque mutation.
+    """
+    __tablename__ = "billing_invoice"
+    __table_args__ = (
+        UniqueConstraint("issuer", "number", name="uq_billing_invoice_issuer_number"),
+        Index("ix_billing_invoice_tenant_id", "tenantId"),
+        Index("ix_billing_invoice_payer_id", "payerId"),
+        {"comment": "Facture émise pour un tenant (BE-204), documents financiers."},
+    )
+
+    tenantId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, index=True,
+        comment="Tenant propriétaire (isolation, CA-3)."
+    )
+    payerId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False,
+        comment="Entité à facturer (peut être différente du tenant)."
+    )
+    issuer: Mapped[str] = mapped_column(
+        String(255), nullable=False,
+        comment="Nom/identifiant de l'émetteur."
+    )
+    number: Mapped[str | None] = mapped_column(
+        String(50), nullable=True,
+        comment="Numéro de facture, NULL avant finalisation."
+    )
+    state: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="draft",
+        comment="État : draft | finalized | void (immuable après émission, CA-1)."
+    )
+    snapshot: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=True,
+        comment="Données figées à la finalisation."
+    )
+    issuedAt: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        comment="Date d'émission de la facture."
+    )
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="1",
+        comment="Verrou optimiste (BE-072)."
+    )
+
+
 class Capability(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Registre de capacités rattaché au registre de modules (BE-021).
 

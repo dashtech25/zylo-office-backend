@@ -26,7 +26,7 @@ from app.rbac.guards import get_current_organization_id
 from app.rbac.service import user_has_permission
 from app.core.errors import AppError
 
-router = APIRouter(prefix="/invoices", tags=["invoices"])
+router = APIRouter(tags=["invoices"])
 
 
 class FinalizeInvoiceRequest(BaseModel):

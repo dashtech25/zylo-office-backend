@@ -198,7 +198,7 @@ api_router.include_router(billing_checkouts_router, prefix="/billing", tags=["bi
 # BE-202 : devis, checkout et consentement à la racine (POST /api/v1/quotes, /checkouts, /consents).
 api_router.include_router(billing_commerce_router, tags=["billing"])
 # BE-204 : factures API (GET/POST /api/v1/invoices/{id}, finalize, void).
-api_router.include_router(invoices_be204_router, tags=["invoices"])
+api_router.include_router(invoices_be204_router, prefix="/invoices", tags=["invoices"])
 api_router.include_router(billing_payment_attempts_router, prefix="/billing", tags=["billing"])
 # BE-093 : remboursement avec approbation (POST /billing/payments/{paymentId}/refunds).
 api_router.include_router(billing_refunds_router, prefix="/billing", tags=["billing"])

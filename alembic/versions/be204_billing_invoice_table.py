@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = 'be204001'
-down_revision: Union[str, None] = None  # À définir par l'orchestrateur
+down_revision: Union[str, None] = 'fe272c02192d'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

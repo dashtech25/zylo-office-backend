@@ -83,3 +83,9 @@ BILLING_OPERATE = "billing.operate"
 # Écart : la fiche écrit `billing:purchase` ; le format `domaine.entite.action` est retenu. Accordée
 # au propriétaire via OWNER_DEFAULT_PERMISSIONS (app/identity/service.py). Sans elle : 403.
 BILLING_CHECKOUT_PURCHASE = "billing.checkout.purchase"
+
+# BE-204 : lire les documents financiers (factures, avoirs, etc.) par API (GET /api/v1/invoices*).
+# Permission de lecture des factures au niveau API BE-204 (distinct de BE-027 qui utilise
+# /organizations/current/invoices). Accordée au propriétaire via OWNER_DEFAULT_PERMISSIONS.
+# Sans elle : 403.
+BILLING_DOCUMENTS_READ = "billing.documents.read"

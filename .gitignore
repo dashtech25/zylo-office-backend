@@ -50,3 +50,5 @@ id_ed25519
 # Seul le modèle .env.example est suivi.
 .env.*
 !.env.example
+
+/worktrees/
